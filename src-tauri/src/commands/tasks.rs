@@ -1,6 +1,6 @@
 use tauri::State;
 use sqlx::SqlitePool;
-use crate::core::task::{CreateTask, Task};
+use crate::core::task::{CreateTask, Task, TaskRow};
 
 #[tauri::command]
 pub async fn create_task(
@@ -28,4 +28,16 @@ pub async fn create_task(
   .map_err(|e| e.to_string())?;
 
   Ok(new_task)
+}
+
+#[tauri::command]
+pub async fn get_tasks(
+    pool: State<'_, SqlitePool>,
+) -> Result<Vec<Task>, String> {
+    let rows = sqlx::query_as::<_, TaskRow>("SELECT * FROM tasks")
+        .fetch_all(pool.inner())
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(rows.into_iter().map(|r| r.into_task()).collect())
 }

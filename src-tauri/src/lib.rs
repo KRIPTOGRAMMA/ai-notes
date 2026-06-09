@@ -15,7 +15,12 @@ pub fn run() {
         .block_on(async {
             let app = tauri::Builder::default()
                 .plugin(tauri_plugin_opener::init())
-                .invoke_handler(tauri::generate_handler![commands::tasks::create_task])
+                .invoke_handler(
+                    tauri::generate_handler![
+                        commands::tasks::create_task,
+                        commands::tasks::get_tasks
+                    ]
+                )
                 .build(tauri::generate_context!())
                 .expect("error while building tauri application");
 
@@ -27,7 +32,6 @@ pub fn run() {
                 .expect("Failed to create app data dir");
 
             let db_url = format!("sqlite:{}?mode=rwc", db_path.join("data.db").display());
-            println!("DB path: {}", db_url);  // добавь эту строку
             let pool = init_db(&db_url).await.expect("Failed to init DB");
             
             app.manage(pool);

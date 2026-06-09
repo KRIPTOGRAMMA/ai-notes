@@ -27,7 +27,7 @@ pub enum Category {
   Other,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Task {
   pub id: String,
   pub title: String,
@@ -39,6 +39,20 @@ pub struct Task {
   pub tags: Vec<String>,
   pub created_at: DateTime<Utc>,
   pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+pub struct TaskRow {
+    pub id: String,
+    pub title: String,
+    pub description: Option<String>,
+    pub status: String,
+    pub priority: String,
+    pub category: String,
+    pub deadline: Option<String>,
+    pub tags: String,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -67,4 +81,37 @@ impl CreateTask {
      updated_at: Utc::now(),
    }
  }
+}
+
+impl TaskRow {
+    pub fn into_task(self) -> Task {
+        Task {
+            id: self.id,
+            title: self.title,
+            description: self.description,
+            status: match self.status.as_str() {
+                "InProgress" => TaskStatus::InProgress,
+                "Done" => TaskStatus::Done,
+                "Archived" => TaskStatus::Archived,
+                _ => TaskStatus::Todo,
+            },
+            priority: match self.priority.as_str() {
+                "Low" => Priority::Low,
+                "High" => Priority::High,
+                "Critical" => Priority::Critical,
+                _ => Priority::Medium,
+            },
+            category: match self.category.as_str() {
+                "Work" => Category::Work,
+                "Study" => Category::Study,
+                "Home" => Category::Home,
+                "Health" => Category::Health,
+                _ => Category::Other,
+            },
+            deadline: self.deadline.and_then(|d| d.parse().ok()),
+            tags: serde_json::from_str(&self.tags).unwrap_or_default(),
+            created_at: self.created_at.parse().unwrap(),
+            updated_at: self.updated_at.parse().unwrap(),
+        }
+    }
 }
