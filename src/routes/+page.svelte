@@ -1,5 +1,6 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
+  import "../app.css";
 
   let tasks = $state([]);
   let editingId: string | null = $state(null);
@@ -82,6 +83,29 @@ let newTitle = $state("");
   // Активные и история — просто фильтры
   let activeTasks = $derived(tasks.filter(t => !t.hidden));
   let historyTasks = $derived(tasks.filter(t => t.hidden));
+
+  let searchQuery = $state("");
+  let searchResults = $state([]);
+  let isSearching = $state(false);
+
+  async function search() {
+    if (!searchQuery.trim()) {
+      searchResults = [];
+      return;
+    }
+    isSearching = true;
+    searchResults = await invoke("search_tasks", { query: searchQuery });
+    isSearching = false;
+  }
+
+  let isDark = $state(
+    window.matchMedia("(prefers-color-scheme: dark)").matches
+  );
+
+  function toggleTheme() {
+    isDark = !isDark;
+    document.documentElement.classList.toggle("dark", isDark);
+  }
 </script>
 
 <button onclick={() => showForm = !showForm}>+ Новая задача</button>
@@ -89,6 +113,37 @@ let newTitle = $state("");
 <button onclick={() => showHistory = !showHistory}>
   {showHistory ? "Скрыть историю" : "История"}
 </button>
+<button onclick={toggleTheme}>
+  {isDark ? "Светлая" : "Тёмная"}
+</button>
+
+<input
+  bind:value={searchQuery}
+  oninput={search}
+  placeholder="Поиск задач..."
+/>
+
+{#if searchQuery.trim()}
+  <h2>Результаты поиска</h2>
+  {#if isSearching}
+    <p>Поиск...</p>
+  {:else if searchResults.length === 0}
+    <p>Ничего не найдено</p>
+  {:else}
+    <ul>
+      {#each searchResults as task}
+        <li>
+          <strong>{task.title}</strong> — {task.status}
+          {#if task.deadline}
+            <span>⏰ {new Date(task.deadline).toLocaleString()}</span>
+          {/if}
+          <button onclick={() => completeTask(task.id)}>✓ Выполнить</button>
+          <button onclick={() => deleteTask(task.id)}>Удалить</button>
+        </li>
+      {/each}
+    </ul>
+  {/if}
+{/if}
 
 <h2>Активные задачи</h2>
 {#if activeTasks.length === 0}

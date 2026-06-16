@@ -155,6 +155,30 @@ pub async fn complete_task(
   Ok(task)
 }
 
+#[tauri::command]
+pub async fn search_tasks(
+  pool: State<'_, SqlitePool>,
+  query: String,
+) -> Result<Vec<Task>, String> {
+  if query.trim().is_empty() {
+    return Ok(vec![]);
+  }
+
+  let rows = sqlx::query_as::<_, TaskRow>(
+    "SELECT t.* FROM tasks t
+     INNER JOIN tasks_fts ON tasks_fts.id = t.id
+     WHERE tasks_fts MATCH ?
+       AND t.hidden = 0
+     ORDER BY rank"
+  )
+  .bind(format!("{}*", query.trim()))
+  .fetch_all(pool.inner())
+  .await
+  .map_err(|e| e.to_string())?;
+
+  Ok(rows.into_iter().map(|r| r.into_task()).collect())
+}
+
 
 
 

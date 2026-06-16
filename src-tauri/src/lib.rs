@@ -23,7 +23,8 @@ pub fn run() {
                         commands::tasks::get_tasks,
                         commands::tasks::delete_task,
                         commands::tasks::update_task,
-                        commands::tasks::complete_task
+                        commands::tasks::complete_task,
+                        commands::tasks::search_tasks
                     ]
                 )
                 .build(tauri::generate_context!())
