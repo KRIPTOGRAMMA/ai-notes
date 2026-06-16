@@ -18,7 +18,10 @@ pub fn run() {
                 .invoke_handler(
                     tauri::generate_handler![
                         commands::tasks::create_task,
-                        commands::tasks::get_tasks
+                        commands::tasks::get_tasks,
+                        commands::tasks::delete_task,
+                        commands::tasks::update_task,
+                        commands::tasks::complete_task
                     ]
                 )
                 .build(tauri::generate_context!())
