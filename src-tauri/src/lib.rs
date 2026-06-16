@@ -2,6 +2,7 @@
 mod core;
 mod db;
 mod commands;
+mod notifier;
 
 use tauri::Manager;
 use crate::db::init_db;
@@ -15,6 +16,7 @@ pub fn run() {
         .block_on(async {
             let app = tauri::Builder::default()
                 .plugin(tauri_plugin_opener::init())
+                .plugin(tauri_plugin_notification::init())
                 .invoke_handler(
                     tauri::generate_handler![
                         commands::tasks::create_task,
@@ -37,7 +39,8 @@ pub fn run() {
             let db_url = format!("sqlite:{}?mode=rwc", db_path.join("data.db").display());
             let pool = init_db(&db_url).await.expect("Failed to init DB");
             
-            app.manage(pool);
+            app.manage(pool.clone());
+            notifier::scheduler::start_scheduler(app.app_handle().clone(), pool);
             app.run(|_, _| {});
         });
 }
