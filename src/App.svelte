@@ -1,5 +1,7 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
+  import { listen } from "@tauri-apps/api/event";
+  import { onMount } from "svelte";
   import "./app.css";
 
   let tasks = $state([]);
@@ -97,7 +99,25 @@
 
   let activeTasks = $derived(tasks.filter(t => !t.hidden));
   let historyTasks = $derived(tasks.filter(t => t.hidden));
+
+  loadTasks();
+
+  onMount(() => {
+    const unlisten = listen("task-created", () => {
+      loadTasks();
+    });
+    return () => {
+      unlisten.then(fn => fn());
+    };
+  });
 </script>
+
+<svelte:window onkeydown={(e) => {
+  if ((e.ctrlKey && e.code === 'KeyK') || (e.ctrlKey && e.shiftKey && e.code === 'KeyN')) {
+    e.preventDefault();
+    invoke("open_quick_task");
+  }
+}} />
 
 <button onclick={toggleTheme}>{isDark ? "Светлая" : "Тёмная"}</button>
 <button onclick={loadTasks}>Обновить</button>
@@ -122,11 +142,42 @@
     <ul>
       {#each searchResults as task}
         <li>
-          <strong>{task.title}</strong> — {task.status}
-          {#if task.deadline}
-            <span>{new Date(task.deadline).toLocaleString()}</span>
+          <strong>{task.title}</strong>
+          {#if task.priority}
+            <span style="font-size: 11px; padding: 2px 6px; border-radius: 4px; margin-left: 6px; font-weight: 500;
+              background-color: {
+                task.priority === 'Low' ? '#e5e7eb' : 
+                task.priority === 'Medium' ? '#dbeafe' : 
+                task.priority === 'High' ? '#ffedd5' : 
+                task.priority === 'Critical' ? '#fee2e2' : '#f3f4f6'
+              };
+              color: {
+                task.priority === 'Low' ? '#4b5563' : 
+                task.priority === 'Medium' ? '#2563eb' : 
+                task.priority === 'High' ? '#ea580c' : 
+                task.priority === 'Critical' ? '#dc2626' : '#1f2937'
+              };">
+              {task.priority === 'Low' ? 'Низкий' : 
+               task.priority === 'Medium' ? 'Средний' : 
+               task.priority === 'High' ? 'Высокий' : 
+               task.priority === 'Critical' ? 'Критический' : task.priority}
+            </span>
           {/if}
-          <button onclick={() => completeTask(task.id)}>✓ Выполнить</button>
+          {#if task.deadline}
+            <span style="color: var(--text-secondary); margin-left: 6px;">
+              Дедлайн: {new Date(task.deadline).toLocaleString()}
+            </span>
+          {/if}
+          {#if task.recurrence && task.recurrence !== 'None'}
+            <span style="color: var(--accent); margin-left: 6px; font-size: 12px; font-weight: 500;">
+              [Повтор: {task.recurrence === 'Hourly' ? 'Каждый час' : 
+                        task.recurrence === 'Daily' ? 'Каждый день' : 
+                        task.recurrence === 'Weekly' ? 'Каждую неделю' : 
+                        typeof task.recurrence === 'object' && 'Custom' in task.recurrence ? `раз в ${task.recurrence.Custom[0]} ${task.recurrence.Custom[1] === 'Minutes' ? 'мин.' : task.recurrence.Custom[1] === 'Hours' ? 'ч.' : task.recurrence.Custom[1] === 'Days' ? 'дн.' : 'нед.'}` : 
+                        JSON.stringify(task.recurrence)}]
+            </span>
+          {/if}
+          <button onclick={() => completeTask(task.id)}>Выполнить</button>
           <button onclick={() => deleteTask(task.id)}>Удалить</button>
         </li>
       {/each}
@@ -147,10 +198,40 @@
           <button onclick={() => editingId = null}>Отмена</button>
         {:else}
           <strong>{task.title}</strong>
-          {#if task.deadline}
-            <span>{new Date(task.deadline).toLocaleString()}</span>
+          {#if task.priority}
+            <span style="font-size: 11px; padding: 2px 6px; border-radius: 4px; margin-left: 6px; font-weight: 500;
+              background-color: {
+                task.priority === 'Low' ? '#e5e7eb' : 
+                task.priority === 'Medium' ? '#dbeafe' : 
+                task.priority === 'High' ? '#ffedd5' : 
+                task.priority === 'Critical' ? '#fee2e2' : '#f3f4f6'
+              };
+              color: {
+                task.priority === 'Low' ? '#4b5563' : 
+                task.priority === 'Medium' ? '#2563eb' : 
+                task.priority === 'High' ? '#ea580c' : 
+                task.priority === 'Critical' ? '#dc2626' : '#1f2937'
+              };">
+              {task.priority === 'Low' ? 'Низкий' : 
+               task.priority === 'Medium' ? 'Средний' : 
+               task.priority === 'High' ? 'Высокий' : 
+               task.priority === 'Critical' ? 'Критический' : task.priority}
+            </span>
           {/if}
-          <span>{JSON.stringify(task.recurrence)}</span>
+          {#if task.deadline}
+            <span style="color: var(--text-secondary); margin-left: 6px;">
+              Дедлайн: {new Date(task.deadline).toLocaleString()}
+            </span>
+          {/if}
+          {#if task.recurrence && task.recurrence !== 'None'}
+            <span style="color: var(--accent); margin-left: 6px; font-size: 12px; font-weight: 500;">
+              [Повтор: {task.recurrence === 'Hourly' ? 'Каждый час' : 
+                        task.recurrence === 'Daily' ? 'Каждый день' : 
+                        task.recurrence === 'Weekly' ? 'Каждую неделю' : 
+                        typeof task.recurrence === 'object' && 'Custom' in task.recurrence ? `раз в ${task.recurrence.Custom[0]} ${task.recurrence.Custom[1] === 'Minutes' ? 'мин.' : task.recurrence.Custom[1] === 'Hours' ? 'ч.' : task.recurrence.Custom[1] === 'Days' ? 'дн.' : 'нед.'}` : 
+                        JSON.stringify(task.recurrence)}]
+            </span>
+          {/if}
           <button onclick={() => startEdit(task)}>Изменить</button>
           <button onclick={() => completeTask(task.id)}>Выполнить</button>
           <button onclick={() => deleteTask(task.id)}>Удалить</button>

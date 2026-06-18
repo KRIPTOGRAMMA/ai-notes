@@ -1,0 +1,7 @@
+CREATE TABLE IF NOT EXISTS activity_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp DATETIME NOT NULL,
+    state TEXT NOT NULL,
+    app_focused INTEGER NOT NULL DEFAULT 1,
+    input_events INTEGER NOT NULL DEFAULT 0
+);

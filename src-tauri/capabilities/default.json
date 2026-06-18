@@ -2,14 +2,17 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capability for the main window",
-  "windows": ["main"],
+  "windows": ["*"],
   "permissions": [
     "core:default",
     "opener:default",
     "notification:default",
     "notification:allow-is-permission-granted",
     "notification:allow-request-permission",
+    "notification:allow-show",
     "notification:allow-notify",
-    "notification:allow-show"
+    "global-shortcut:default",
+    "core:window:allow-hide",
+    "core:window:allow-show"
   ]
 }

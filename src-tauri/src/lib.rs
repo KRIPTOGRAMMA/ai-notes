@@ -2,11 +2,22 @@ mod core;
 mod db;
 mod commands;
 mod notifier;
+mod monitor;
 
+use std::sync::Arc;
 use tauri::Manager;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
 use crate::db::init_db;
+
+#[tauri::command]
+fn open_quick_task(app: tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("quick-task") {
+        let _ = w.show();
+        let _ = w.set_focus();
+    }
+}
+
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -30,7 +41,11 @@ pub fn run() {
                         commands::tasks::delete_task,
                         commands::tasks::update_task,
                         commands::tasks::complete_task,
-                        commands::tasks::search_tasks
+                        commands::tasks::search_tasks,
+                        open_quick_task,
+                        commands::monitor::record_input,
+                        commands::monitor::get_session_stats,
+                        commands::monitor::get_activity_state
                     ]
                 )
                 .setup(|app| {
@@ -75,6 +90,29 @@ pub fn run() {
                         });
                     }
 
+                    // Скрывать окно быстрой задачи вместо закрытия (чтобы хоткеи работали)
+                    if let Some(quick_win) = app.get_webview_window("quick-task") {
+                        let win = quick_win.clone();
+                        quick_win.on_window_event(move |event| {
+                            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                                api.prevent_close();
+                                let _ = win.hide();
+                            }
+                        });
+                    }
+
+                    // Парсинг аргументов CLI для поддержки системных хоткеев на Wayland
+                    let args: Vec<String> = std::env::args().collect();
+                    if args.iter().any(|arg| arg == "--quick-task" || arg == "-q") {
+                        if let Some(main_win) = app.get_webview_window("main") {
+                            let _ = main_win.hide();
+                        }
+                        if let Some(quick_win) = app.get_webview_window("quick-task") {
+                            let _ = quick_win.show();
+                            let _ = quick_win.set_focus();
+                        }
+                    }
+
                     // Глобальные хоткеи
                     use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
                     let new_task_shortcut = "Ctrl+Shift+N".parse::<Shortcut>().unwrap();
@@ -105,6 +143,11 @@ pub fn run() {
             let pool: sqlx::SqlitePool = init_db(&db_url).await.expect("Failed to init DB");
 
             app.manage(pool.clone());
+
+            let tracker = Arc::new(monitor::activity::ActivityTracker::new());
+            app.manage(tracker.clone());
+            monitor::activity::start_activity_loop(tracker, pool.clone(), 300);
+
             notifier::scheduler::start_scheduler(app.app_handle().clone(), pool);
             app.run(|_, _| {});
         });
