@@ -1,24 +1,30 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
-  import "../app.css";
+  import "./app.css";
 
   let tasks = $state([]);
   let editingId: string | null = $state(null);
   let editTitle = $state("");
   let showHistory = $state(false);
+  let newTitle = $state("");
+  let newRecurrence = $state("None");
+  let newDeadline = $state("");
+  let showForm = $state(false);
+  let customN = $state(1);
+  let customUnit = $state("Hours");
+  let searchQuery = $state("");
+  let searchResults = $state([]);
+  let isSearching = $state(false);
+  let isDark = $state(
+    window.matchMedia("(prefers-color-scheme: dark)").matches
+  );
 
   async function loadTasks() {
     tasks = await invoke("get_tasks");
   }
-let newTitle = $state("");
-  let newRecurrence = $state("None");
-  let newDeadline = $state("");
-  let showForm = $state(false);
 
   async function createTask() {
-    // Собираем recurrence в нужный формат
     let recurrence = buildRecurrence();
-
     await invoke("create_task", {
       task: {
         title: newTitle,
@@ -33,18 +39,12 @@ let newTitle = $state("");
         recurrence,
       }
     });
-
-    // Сброс формы
     newTitle = "";
     newRecurrence = "None";
     newDeadline = "";
     showForm = false;
     await loadTasks();
   }
-
-  // Для Custom(n, unit)
-  let customN = $state(1);
-  let customUnit = $state("Hours");
 
   function buildRecurrence() {
     switch (newRecurrence) {
@@ -80,14 +80,6 @@ let newTitle = $state("");
     await loadTasks();
   }
 
-  // Активные и история — просто фильтры
-  let activeTasks = $derived(tasks.filter(t => !t.hidden));
-  let historyTasks = $derived(tasks.filter(t => t.hidden));
-
-  let searchQuery = $state("");
-  let searchResults = $state([]);
-  let isSearching = $state(false);
-
   async function search() {
     if (!searchQuery.trim()) {
       searchResults = [];
@@ -98,24 +90,21 @@ let newTitle = $state("");
     isSearching = false;
   }
 
-  let isDark = $state(
-    window.matchMedia("(prefers-color-scheme: dark)").matches
-  );
-
   function toggleTheme() {
     isDark = !isDark;
     document.documentElement.classList.toggle("dark", isDark);
   }
+
+  let activeTasks = $derived(tasks.filter(t => !t.hidden));
+  let historyTasks = $derived(tasks.filter(t => t.hidden));
 </script>
 
-<button onclick={() => showForm = !showForm}>+ Новая задача</button>
+<button onclick={toggleTheme}>{isDark ? "Светлая" : "Тёмная"}</button>
 <button onclick={loadTasks}>Обновить</button>
 <button onclick={() => showHistory = !showHistory}>
   {showHistory ? "Скрыть историю" : "История"}
 </button>
-<button onclick={toggleTheme}>
-  {isDark ? "Светлая" : "Тёмная"}
-</button>
+<button onclick={() => showForm = !showForm}>+ Новая задача</button>
 
 <input
   bind:value={searchQuery}
@@ -135,7 +124,7 @@ let newTitle = $state("");
         <li>
           <strong>{task.title}</strong> — {task.status}
           {#if task.deadline}
-            <span>⏰ {new Date(task.deadline).toLocaleString()}</span>
+            <span>{new Date(task.deadline).toLocaleString()}</span>
           {/if}
           <button onclick={() => completeTask(task.id)}>✓ Выполнить</button>
           <button onclick={() => deleteTask(task.id)}>Удалить</button>
@@ -147,7 +136,7 @@ let newTitle = $state("");
 
 <h2>Активные задачи</h2>
 {#if activeTasks.length === 0}
-  <p>Задач нет</p>
+  <p>Нет активных задач</p>
 {:else}
   <ul>
     {#each activeTasks as task}
@@ -157,12 +146,13 @@ let newTitle = $state("");
           <button onclick={saveEdit}>Сохранить</button>
           <button onclick={() => editingId = null}>Отмена</button>
         {:else}
-          <strong>{task.title}</strong> — {task.status}
+          <strong>{task.title}</strong>
           {#if task.deadline}
-            <span>⏰ {new Date(task.deadline).toLocaleString()}</span>
+            <span>{new Date(task.deadline).toLocaleString()}</span>
           {/if}
-          <button onclick={() => completeTask(task.id)}>✓ Выполнить</button>
+          <span>{JSON.stringify(task.recurrence)}</span>
           <button onclick={() => startEdit(task)}>Изменить</button>
+          <button onclick={() => completeTask(task.id)}>Выполнить</button>
           <button onclick={() => deleteTask(task.id)}>Удалить</button>
         {/if}
       </li>
@@ -170,61 +160,43 @@ let newTitle = $state("");
   </ul>
 {/if}
 
+{#if showForm}
+  <div>
+    <input bind:value={newTitle} placeholder="Название задачи" />
+    <select bind:value={newRecurrence}>
+      <option value="None">Без повтора</option>
+      <option value="Hourly">Каждый час</option>
+      <option value="Daily">Каждый день</option>
+      <option value="Weekly">Каждую неделю</option>
+      <option value="Custom">Свой интервал</option>
+    </select>
+    {#if newRecurrence === "Custom"}
+      <input type="number" bind:value={customN} min="1" />
+      <select bind:value={customUnit}>
+        <option value="Hours">Часов</option>
+        <option value="Days">Дней</option>
+        <option value="Weeks">Недель</option>
+      </select>
+    {/if}
+    {#if newRecurrence === "None"}
+      <input type="datetime-local" bind:value={newDeadline} />
+    {/if}
+    <button onclick={createTask} disabled={!newTitle.trim()}>Создать</button>
+  </div>
+{/if}
+
 {#if showHistory}
   <h2>История</h2>
   {#if historyTasks.length === 0}
-    <p>Нет выполненных задач</p>
+    <p>История пуста</p>
   {:else}
     <ul>
       {#each historyTasks as task}
         <li>
-          <strong>{task.title}</strong>
-          {#if task.completed_at}
-            <span>✓ {new Date(task.completed_at).toLocaleString()}</span>
-          {/if}
+          <strong>{task.title}</strong> — {task.status}
           <button onclick={() => deleteTask(task.id)}>Удалить</button>
         </li>
       {/each}
     </ul>
   {/if}
-{/if}
-
-{#if showForm}
-  <div>
-    <input bind:value={newTitle} placeholder="Название задачи" />
-
-    {#if newRecurrence === "None"}
-      <label>
-        Дедлайн:
-        <input type="datetime-local" bind:value={newDeadline} />
-      </label>
-    {/if}
-
-    <label>
-      Повторяемость:
-      <select bind:value={newRecurrence}>
-        <option value="None">Без повторения</option>
-        <option value="Hourly">Каждый час</option>
-        <option value="Daily">Каждый день</option>
-        <option value="Weekly">Каждую неделю</option>
-        <option value="Custom">Свой интервал</option>
-      </select>
-    </label>
-
-    {#if newRecurrence === "Custom"}
-      <label>
-        Каждые:
-        <input type="number" min="1" bind:value={customN} style="width: 60px" />
-        <select bind:value={customUnit}>
-          <option value="Minutes">минут</option>
-          <option value="Hours">часов</option>
-          <option value="Days">дней</option>
-          <option value="Weeks">недель</option>
-        </select>
-      </label>
-    {/if}
-
-    <button onclick={createTask} disabled={!newTitle}>Создать</button>
-    <button onclick={() => showForm = false}>Отмена</button>
-  </div>
 {/if}

@@ -7,7 +7,7 @@
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "npm run build",
-    "frontendDist": "../build"
+    "frontendDist": "../dist"
   },
   "app": {
     "windows": [
@@ -15,6 +15,17 @@
         "title": "ai-notes",
         "width": 800,
         "height": 600
+      },
+      {
+        "title": "Быстрая задача",
+        "width": 400,
+        "height": 220,
+        "label": "quick-task",
+        "visible": false,
+        "resizable": false,
+        "alwaysOnTop": true,
+        "decorations": false,
+        "center": true
       }
     ],
     "security": {
