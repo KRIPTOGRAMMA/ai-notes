@@ -20,8 +20,8 @@
       },
       {
         "title": "Быстрая задача",
-        "width": 400,
-        "height": 220,
+        "width": 420,
+        "height": 260,
         "label": "quick-task",
         "url": "quick-task.html",
         "visible": false,
@@ -35,9 +35,18 @@
       "csp": null
     }
   },
+  "plugins": {
+    "shell": {
+      "open": false
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",
+    "externalBin": [
+      "binaries/llamafile",
+      "binaries/llamafile-wrapper"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

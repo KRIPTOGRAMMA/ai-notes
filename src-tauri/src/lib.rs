@@ -3,12 +3,14 @@ mod db;
 mod commands;
 mod notifier;
 mod monitor;
+mod ai;
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tauri::Manager;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
 use crate::db::init_db;
+use crate::ai::sidecar::{SharedSidecar, SidecarState};
 
 #[tauri::command]
 fn open_quick_task(app: tauri::AppHandle) {
@@ -34,6 +36,7 @@ pub fn run() {
                     None,
                 ))
                 .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+                .plugin(tauri_plugin_shell::init())
                 .invoke_handler(
                     tauri::generate_handler![
                         commands::tasks::create_task,
@@ -45,7 +48,10 @@ pub fn run() {
                         open_quick_task,
                         commands::monitor::record_input,
                         commands::monitor::get_session_stats,
-                        commands::monitor::get_activity_state
+                        commands::monitor::get_activity_state,
+                        commands::ai::ai_rewrite,
+                        commands::ai::ai_subtasks,
+                        commands::ai::ai_classify
                     ]
                 )
                 .setup(|app| {
@@ -143,6 +149,7 @@ pub fn run() {
             let pool: sqlx::SqlitePool = init_db(&db_url).await.expect("Failed to init DB");
 
             app.manage(pool.clone());
+            app.manage(Mutex::new(SidecarState::new()) as SharedSidecar);
 
             let tracker = Arc::new(monitor::activity::ActivityTracker::new());
             app.manage(tracker.clone());

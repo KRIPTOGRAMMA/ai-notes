@@ -10,4 +10,7 @@ export const api = {
   searchTasks: (query: string) => invoke<Task[]>("search_tasks", { query }),
   recordInput: () => invoke<void>("record_input"),
   openQuickTask: () => invoke<void>("open_quick_task"),
+  aiRewrite: (taskId: string, title: string) => invoke<void>("ai_rewrite", { taskId, title }),
+  aiSubtasks: (taskId: string, title: string) => invoke<void>("ai_subtasks", { taskId, title }),
+  aiClassify: (taskId: string, title: string) => invoke<void>("ai_classify", { taskId, title }),
 };

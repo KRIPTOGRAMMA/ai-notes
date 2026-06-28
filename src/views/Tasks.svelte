@@ -1,62 +1,32 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { listen } from "@tauri-apps/api/event";
-  import { taskStore } from "../lib/stores/tasks";
-  import type { Recurrence, RecurrenceUnit } from "../lib/types";
+  import { taskStore } from "../lib/stores/tasks.svelte";
+  import { api } from "../lib/api/tauri";
+  import TaskModal from "../lib/components/TaskModal.svelte";
+  import type { Task, Category, CreateTaskPayload, UpdateTaskPayload } from "../lib/types";
+
+  type AiResult = { task_id: string; type: string; result?: string; error?: string };
 
   let showHistory = $state(false);
-  let showForm = $state(false);
-  let editingId: string | null = $state(null);
-  let editTitle = $state("");
-
-  let newTitle = $state("");
-  let newRecurrence = $state("None");
-  let newDeadline = $state("");
-  let customN = $state(1);
-  let customUnit = $state("Hours");
+  let showCreateModal = $state(false);
+  let editingTask: Task | null = $state(null);
 
   let searchQuery = $state("");
-  let searchResults = $state<Awaited<ReturnType<typeof taskStore.search>>>([]);
+  let searchResults = $state<Task[]>([]);
   let isSearching = $state(false);
 
-  function buildRecurrence(): Recurrence {
-    switch (newRecurrence) {
-      case "Hourly": return "Hourly";
-      case "Daily":  return "Daily";
-      case "Weekly": return "Weekly";
-      case "Custom": return { Custom: [customN, customUnit as RecurrenceUnit] };
-      default:       return "None";
-    }
+  let aiLoadingId: string | null = $state(null);
+  let aiError: string | null = $state(null);
+  let subtasksPreview: { taskId: string; items: string[] } | null = $state(null);
+
+  async function handleCreate(data: CreateTaskPayload | UpdateTaskPayload) {
+    await taskStore.create(data as CreateTaskPayload);
   }
 
-  async function createTask() {
-    await taskStore.create({
-      title: newTitle,
-      description: null,
-      status: "Todo",
-      priority: "Medium",
-      category: "Work",
-      deadline: newRecurrence === "None" && newDeadline
-        ? new Date(newDeadline).toISOString()
-        : null,
-      tags: [],
-      recurrence: buildRecurrence(),
-    });
-    newTitle = "";
-    newRecurrence = "None";
-    newDeadline = "";
-    showForm = false;
-  }
-
-  function startEdit(id: string, title: string) {
-    editingId = id;
-    editTitle = title;
-  }
-
-  async function saveEdit() {
-    if (!editingId) return;
-    await taskStore.update(editingId, { title: editTitle });
-    editingId = null;
+  async function handleEdit(data: CreateTaskPayload | UpdateTaskPayload) {
+    if (!editingTask) return;
+    await taskStore.update(editingTask.id, data as UpdateTaskPayload);
   }
 
   async function handleSearch() {
@@ -64,6 +34,38 @@
     isSearching = true;
     searchResults = await taskStore.search(searchQuery);
     isSearching = false;
+  }
+
+  async function rewriteTask(id: string, title: string) {
+    aiLoadingId = id;
+    aiError = null;
+    await api.aiRewrite(id, title);
+  }
+
+  async function generateSubtasks(id: string, title: string) {
+    aiLoadingId = id;
+    aiError = null;
+    subtasksPreview = null;
+    await api.aiSubtasks(id, title);
+  }
+
+  async function acceptSubtask(title: string) {
+    await taskStore.create({
+      title,
+      description: null,
+      status: "Todo",
+      priority: "Medium",
+      category: "Work",
+      deadline: null,
+      tags: [],
+      recurrence: "None",
+    });
+  }
+
+  async function classifyTask(id: string, title: string) {
+    aiLoadingId = id;
+    aiError = null;
+    await api.aiClassify(id, title);
   }
 
   function priorityLabel(p: string) {
@@ -97,49 +99,108 @@
         unit === "Days"    ? "дн." : "нед.";
       return `раз в ${n} ${unitLabel}`;
     }
-    return JSON.stringify(r);
+    return null;
   }
 
   taskStore.load();
 
   onMount(() => {
-    const unlisten = listen("task-created", () => taskStore.load());
-    return () => { unlisten.then(fn => fn()); };
+    const unlistenTask = listen("task-created", () => taskStore.load());
+
+    const unlistenAi = listen<AiResult>("ai-result", async ({ payload }) => {
+      if (payload.error) {
+        aiLoadingId = null;
+        aiError = payload.error;
+        return;
+      }
+      if (!payload.result) { aiLoadingId = null; return; }
+
+      if (payload.type === "rewrite") {
+        await taskStore.update(payload.task_id, { title: payload.result });
+        aiLoadingId = null;
+      } else if (payload.type === "subtasks") {
+        const items = payload.result.split("|||").filter(Boolean);
+        subtasksPreview = { taskId: payload.task_id, items };
+        aiLoadingId = null;
+      } else if (payload.type === "classify") {
+        const valid = ["Work","Study","Home","Health","Other"];
+        if (valid.includes(payload.result)) {
+          await taskStore.update(payload.task_id, { category: payload.result as Category });
+        }
+        aiLoadingId = null;
+      }
+    });
+
+    return () => {
+      unlistenTask.then(fn => fn());
+      unlistenAi.then(fn => fn());
+    };
   });
 </script>
 
-{#snippet taskMeta(task: import("../lib/types").Task)}
-  {#if task.priority}
-    {@const colors = priorityColors(task.priority)}
-    <span style="font-size:11px;padding:2px 6px;border-radius:4px;margin-left:6px;font-weight:500;
-      background-color:{colors.bg};color:{colors.fg};">
-      {priorityLabel(task.priority)}
-    </span>
+{#snippet taskMeta(task: Task)}
+  {@const colors = priorityColors(task.priority)}
+  <span style="font-size:11px;padding:2px 6px;border-radius:4px;margin-left:6px;font-weight:500;
+    background-color:{colors.bg};color:{colors.fg};">
+    {priorityLabel(task.priority)}
+  </span>
+  <span style="font-size:11px;padding:2px 6px;border-radius:4px;margin-left:6px;background:#f3f4f6;color:#6b7280;">
+    {task.category}
+  </span>
+  {#if task.tags.length > 0}
+    {#each task.tags as tag}
+      <span style="font-size:11px;padding:2px 6px;border-radius:4px;margin-left:4px;background:#e0f2fe;color:#0369a1;">#{tag}</span>
+    {/each}
   {/if}
   {#if task.deadline}
-    <span style="color:var(--text-secondary);margin-left:6px;">
+    <span style="color:var(--text-secondary,#6b7280);margin-left:6px;font-size:12px;">
       Дедлайн: {new Date(task.deadline).toLocaleString()}
     </span>
   {/if}
   {#if recurrenceLabel(task.recurrence)}
-    <span style="color:var(--accent);margin-left:6px;font-size:12px;font-weight:500;">
-      [Повтор: {recurrenceLabel(task.recurrence)}]
+    <span style="color:#7c3aed;margin-left:6px;font-size:12px;font-weight:500;">
+      ↻ {recurrenceLabel(task.recurrence)}
     </span>
   {/if}
 {/snippet}
 
-<div>
-  <button onclick={() => taskStore.load()}>Обновить</button>
-  <button onclick={() => showHistory = !showHistory}>
-    {showHistory ? "Скрыть историю" : "История"}
-  </button>
-  <button onclick={() => showForm = !showForm}>+ Новая задача</button>
-
-  <input
-    bind:value={searchQuery}
-    oninput={handleSearch}
-    placeholder="Поиск задач..."
+<!-- Modals -->
+{#if showCreateModal}
+  <TaskModal
+    onSave={handleCreate}
+    onClose={() => showCreateModal = false}
   />
+{/if}
+
+{#if editingTask}
+  <TaskModal
+    task={editingTask}
+    onSave={handleEdit}
+    onClose={() => editingTask = null}
+  />
+{/if}
+
+<div>
+  {#if aiError}
+    <div style="background:#ef4444;color:white;padding:6px 10px;border-radius:6px;margin-bottom:8px;display:flex;justify-content:space-between;">
+      <span>{aiError}</span>
+      <button onclick={() => aiError = null} style="background:transparent;border:none;color:white;cursor:pointer;">✕</button>
+    </div>
+  {/if}
+
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
+    <button onclick={() => showCreateModal = true}>+ Новая задача</button>
+    <button onclick={() => taskStore.load()}>Обновить</button>
+    <button onclick={() => showHistory = !showHistory}>
+      {showHistory ? "Скрыть историю" : "История"}
+    </button>
+    <input
+      bind:value={searchQuery}
+      oninput={handleSearch}
+      placeholder="Поиск задач..."
+      style="flex:1;min-width:150px;"
+    />
+  </div>
 
   {#if searchQuery.trim()}
     <h2>Результаты поиска</h2>
@@ -150,11 +211,16 @@
     {:else}
       <ul>
         {#each searchResults as task (task.id)}
-          <li>
+          <li style="margin-bottom:10px;">
             <strong>{task.title}</strong>
             {@render taskMeta(task)}
-            <button onclick={() => taskStore.complete(task.id)}>Выполнить</button>
-            <button onclick={() => taskStore.remove(task.id)}>Удалить</button>
+            {#if task.description}
+              <p style="margin:4px 0 0 0;font-size:13px;color:var(--text-secondary,#6b7280);">{task.description}</p>
+            {/if}
+            <div style="margin-top:4px;display:flex;gap:4px;">
+              <button onclick={() => taskStore.complete(task.id)}>Выполнить</button>
+              <button onclick={() => taskStore.remove(task.id)}>Удалить</button>
+            </div>
           </li>
         {/each}
       </ul>
@@ -165,48 +231,54 @@
   {#if taskStore.activeTasks.length === 0}
     <p>Нет активных задач</p>
   {:else}
-    <ul>
+    <ul style="list-style:none;padding:0;margin:0;">
       {#each taskStore.activeTasks as task (task.id)}
-        <li>
-          {#if editingId === task.id}
-            <input bind:value={editTitle} />
-            <button onclick={saveEdit}>Сохранить</button>
-            <button onclick={() => editingId = null}>Отмена</button>
-          {:else}
-            <strong>{task.title}</strong>
+        <li style="margin-bottom:14px;padding:10px;border:1px solid var(--border,#e5e7eb);border-radius:8px;">
+          <div style="display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;">
+            <strong style="font-size:15px;">{task.title}</strong>
             {@render taskMeta(task)}
-            <button onclick={() => startEdit(task.id, task.title)}>Изменить</button>
+          </div>
+
+          {#if task.description}
+            <p style="margin:6px 0 0 0;font-size:13px;color:var(--text-secondary,#6b7280);">{task.description}</p>
+          {/if}
+
+          <div style="margin-top:8px;display:flex;gap:4px;flex-wrap:wrap;">
+            <button onclick={() => editingTask = task}>Изменить</button>
+            <button
+              onclick={() => rewriteTask(task.id, task.title)}
+              disabled={aiLoadingId === task.id}
+              title="Переформулировать в SMART"
+            >{aiLoadingId === task.id ? "..." : "✨ SMART"}</button>
+            <button
+              onclick={() => generateSubtasks(task.id, task.title)}
+              disabled={aiLoadingId === task.id}
+              title="Разбить на подзадачи"
+            >{aiLoadingId === task.id ? "..." : "🔀 Подзадачи"}</button>
+            <button
+              onclick={() => classifyTask(task.id, task.title)}
+              disabled={aiLoadingId === task.id}
+              title="Авто-категория"
+            >{aiLoadingId === task.id ? "..." : "🏷 Категория"}</button>
             <button onclick={() => taskStore.complete(task.id)}>Выполнить</button>
             <button onclick={() => taskStore.remove(task.id)}>Удалить</button>
+          </div>
+
+          {#if subtasksPreview && subtasksPreview.taskId === task.id}
+            <div style="margin-top:8px;padding:10px;background:#f9fafb;border-radius:6px;">
+              <p style="margin:0 0 8px 0;font-size:12px;font-weight:600;color:#374151;">Предлагаемые подзадачи:</p>
+              {#each subtasksPreview.items as subtask}
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+                  <span style="font-size:13px;flex:1;">{subtask}</span>
+                  <button onclick={() => acceptSubtask(subtask)}>+ Добавить</button>
+                </div>
+              {/each}
+              <button onclick={() => subtasksPreview = null} style="margin-top:4px;">Закрыть</button>
+            </div>
           {/if}
         </li>
       {/each}
     </ul>
-  {/if}
-
-  {#if showForm}
-    <div>
-      <input bind:value={newTitle} placeholder="Название задачи" />
-      <select bind:value={newRecurrence}>
-        <option value="None">Без повтора</option>
-        <option value="Hourly">Каждый час</option>
-        <option value="Daily">Каждый день</option>
-        <option value="Weekly">Каждую неделю</option>
-        <option value="Custom">Свой интервал</option>
-      </select>
-      {#if newRecurrence === "Custom"}
-        <input type="number" bind:value={customN} min="1" />
-        <select bind:value={customUnit}>
-          <option value="Hours">Часов</option>
-          <option value="Days">Дней</option>
-          <option value="Weeks">Недель</option>
-        </select>
-      {/if}
-      {#if newRecurrence === "None"}
-        <input type="datetime-local" bind:value={newDeadline} />
-      {/if}
-      <button onclick={createTask} disabled={!newTitle.trim()}>Создать</button>
-    </div>
   {/if}
 
   {#if showHistory}
@@ -214,11 +286,15 @@
     {#if taskStore.historyTasks.length === 0}
       <p>История пуста</p>
     {:else}
-      <ul>
+      <ul style="list-style:none;padding:0;margin:0;">
         {#each taskStore.historyTasks as task (task.id)}
-          <li>
-            <strong>{task.title}</strong> — {task.status}
-            <button onclick={() => taskStore.remove(task.id)}>Удалить</button>
+          <li style="margin-bottom:8px;padding:8px;border:1px solid var(--border,#e5e7eb);border-radius:6px;opacity:0.7;">
+            <strong>{task.title}</strong>
+            <span style="margin-left:6px;font-size:12px;color:var(--text-secondary,#6b7280);">{task.status}</span>
+            {#if task.description}
+              <p style="margin:2px 0 0 0;font-size:13px;color:var(--text-secondary,#6b7280);">{task.description}</p>
+            {/if}
+            <button onclick={() => taskStore.remove(task.id)} style="margin-top:4px;">Удалить</button>
           </li>
         {/each}
       </ul>

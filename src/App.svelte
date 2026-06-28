@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { taskStore } from "./lib/stores/tasks";
+  import { taskStore } from "./lib/stores/tasks.svelte";
   import { api } from "./lib/api/tauri";
   import Tasks from "./views/Tasks.svelte";
   import "./app.css";
