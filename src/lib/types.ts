@@ -29,3 +29,25 @@ export interface Task {
   recurrence: Recurrence;
   hidden: boolean;
 }
+
+export interface CreateTaskPayload {
+  title: string;
+  description: string | null;
+  status: TaskStatus;
+  priority: Priority;
+  category: Category;
+  deadline: string | null;
+  tags: string[];
+  recurrence: Recurrence;
+}
+
+export interface UpdateTaskPayload {
+  title?: string;
+  description?: string;
+  status?: TaskStatus;
+  priority?: Priority;
+  category?: Category;
+  deadline?: string;
+  tags?: string[];
+  recurrence?: Recurrence;
+}
