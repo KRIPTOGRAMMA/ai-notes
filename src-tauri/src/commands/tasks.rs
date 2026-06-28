@@ -8,6 +8,10 @@ pub async fn create_task(
   pool: State<'_, SqlitePool>,
   task: CreateTask,
 ) -> Result<Task, String> {
+  if task.title.trim().is_empty() {
+    return Err("Название задачи не может быть пустым".into());
+  }
+
   let new_task = task.into_task();
 
   sqlx::query(
@@ -72,13 +76,20 @@ pub async fn update_task(
         .map_err(|e| e.to_string())?;
 
     let mut task = row.into_task();
+    let old_deadline = task.deadline;
 
-    if let Some(title) = patch.title        { task.title = title; }
+    if let Some(title) = patch.title {
+        if title.trim().is_empty() {
+            return Err("Название задачи не может быть пустым".into());
+        }
+        task.title = title;
+    }
     if let Some(desc) = patch.description   { task.description = Some(desc); }
     if let Some(status) = patch.status      { task.status = status; }
     if let Some(priority) = patch.priority  { task.priority = priority; }
     if let Some(category) = patch.category  { task.category = category; }
     if let Some(tags) = patch.tags          { task.tags = tags; }
+    if let Some(recurrence) = patch.recurrence { task.recurrence = recurrence; }
 
     if let Some(dl) = patch.deadline {
         task.deadline = if dl.is_empty() {
@@ -91,10 +102,18 @@ pub async fn update_task(
     }
 
     task.updated_at = Utc::now();
+    // Если дедлайн реально изменился, старые флаги notified_* больше не
+    // отражают актуальный дедлайн — иначе планировщик никогда не пришлёт
+    // уведомление по новой дате (раньше это был баг: флаги не сбрасывались).
+    let deadline_changed = task.deadline != old_deadline;
 
     sqlx::query(
         "UPDATE tasks SET title=?, description=?, status=?, priority=?,
-         category=?, deadline=?, tags=?, updated_at=? WHERE id=?"
+         category=?, deadline=?, tags=?, recurrence=?, updated_at=?,
+         notified_24h = CASE WHEN ? THEN 0 ELSE notified_24h END,
+         notified_1h = CASE WHEN ? THEN 0 ELSE notified_1h END,
+         notified_deadline = CASE WHEN ? THEN 0 ELSE notified_deadline END
+         WHERE id=?"
     )
     .bind(&task.title)
     .bind(&task.description)
@@ -103,7 +122,11 @@ pub async fn update_task(
     .bind(format!("{:?}", task.category))
     .bind(task.deadline.map(|d| d.to_rfc3339()))
     .bind(serde_json::to_string(&task.tags).unwrap())
+    .bind(task.recurrence.to_db())
     .bind(task.updated_at.to_rfc3339())
+    .bind(deadline_changed)
+    .bind(deadline_changed)
+    .bind(deadline_changed)
     .bind(&id)
     .execute(pool.inner())
     .await
@@ -125,6 +148,10 @@ pub async fn complete_task(
 
   let mut task = row.into_task();
   let now = Utc::now();
+  // recurring задачи едут на новый дедлайн -> старые notified_* флаги
+  // относятся к ПРОШЛОМУ дедлайну. Если их не сбросить, scheduler никогда
+  // больше не уведомит об этой задаче (баг: флаги раньше не сбрасывались).
+  let mut reset_notifications = false;
 
   match task.recurrence.to_duration() {
     None => {
@@ -134,19 +161,27 @@ pub async fn complete_task(
     }
     Some(duration) => {
       task.deadline = Some(now + duration);
+      reset_notifications = true;
     }
   }
 
   task.updated_at = now;
 
   sqlx::query(
-    "UPDATE tasks SET status=?, hidden=?, deadline=?, completed_at=?, updated_at=? WHERE id=?"
+    "UPDATE tasks SET status=?, hidden=?, deadline=?, completed_at=?, updated_at=?,
+     notified_24h = CASE WHEN ? THEN 0 ELSE notified_24h END,
+     notified_1h = CASE WHEN ? THEN 0 ELSE notified_1h END,
+     notified_deadline = CASE WHEN ? THEN 0 ELSE notified_deadline END
+     WHERE id=?"
   )
   .bind(format!("{:?}", task.status))
   .bind(task.hidden)
   .bind(task.deadline.map(|d| d.to_rfc3339()))
   .bind(task.completed_at.map(|d| d.to_rfc3339()))
   .bind(task.updated_at.to_rfc3339())
+  .bind(reset_notifications)
+  .bind(reset_notifications)
+  .bind(reset_notifications)
   .bind(&id)
   .execute(pool.inner())
   .await
@@ -160,31 +195,29 @@ pub async fn search_tasks(
   pool: State<'_, SqlitePool>,
   query: String,
 ) -> Result<Vec<Task>, String> {
-  if query.trim().is_empty() {
+  let trimmed = query.trim();
+  if trimmed.is_empty() {
     return Ok(vec![]);
   }
 
+  // Сырой ввод пользователя нельзя пускать в MATCH напрямую: символы вроде
+  // " - : ( ) AND/OR/NOT — это синтаксис FTS5, а не текст. Дефис в названии
+  // ("купить хлеб-2") уже падал с "no such column: 2". Оборачиваем как
+  // quoted-phrase-prefix: безопасно для любого ввода.
+  let escaped = trimmed.replace('"', "\"\"");
+  let fts_query = format!("\"{}\"*", escaped);
+
   let rows = sqlx::query_as::<_, TaskRow>(
     "SELECT t.* FROM tasks t
-     INNER JOIN tasks_fts ON tasks_fts.id = t.id
+     INNER JOIN tasks_fts ON tasks_fts.rowid = t.rowid
      WHERE tasks_fts MATCH ?
        AND t.hidden = 0
      ORDER BY rank"
   )
-  .bind(format!("{}*", query.trim()))
+  .bind(fts_query)
   .fetch_all(pool.inner())
   .await
   .map_err(|e| e.to_string())?;
 
   Ok(rows.into_iter().map(|r| r.into_task()).collect())
 }
-
-
-
-
-
-
-
-
-
-

@@ -98,7 +98,7 @@ pub fn start_activity_loop(
 
             // Логируем в БД каждые 60 секунд
             let state_str = if elapsed >= idle_threshold_secs { "Idle" } else { "Active" };
-            let _ = sqlx::query(
+            let result = sqlx::query(
                 "INSERT INTO activity_log (timestamp, state, app_focused, input_events)
                  VALUES (?, ?, ?, ?)"
             )
@@ -108,6 +108,12 @@ pub fn start_activity_loop(
             .bind(0i32)
             .execute(&pool)
             .await;
+
+            // Раньше ошибка тут просто пропадала (`let _ = ...`) — без логов
+            // в проекте нет другого способа узнать, что запись в БД отвалилась.
+            if let Err(e) = result {
+                eprintln!("[activity_log] insert failed: {e}");
+            }
         }
     });
 }

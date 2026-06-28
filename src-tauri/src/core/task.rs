@@ -27,7 +27,11 @@ pub enum Category {
   Other,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+// Внимание: Task НЕ читается из БД напрямую через FromRow — там разные
+// представления enum'ов/Vec, и query_as::<_, Task> никогда не вызывается.
+// Чтение всегда идёт через TaskRow -> into_task(). Не добавляйте сюда
+// derive(sqlx::FromRow) обратно, это вводит в заблуждение.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
   pub id: String,
   pub title: String,
@@ -82,6 +86,7 @@ pub struct UpdateTask {
     pub category: Option<Category>,
     pub deadline: Option<String>,
     pub tags: Option<Vec<String>>,
+    pub recurrence: Option<Recurrence>,
 }
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub enum RecurrenceUnit {
