@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Task, CreateTaskPayload, UpdateTaskPayload } from "../types";
+import type { Task, CreateTaskPayload, UpdateTaskPayload, Note, CreateNotePayload, UpdateNotePayload } from "../types";
 
 export const api = {
   getTasks: () => invoke<Task[]>("get_tasks"),
@@ -13,4 +13,8 @@ export const api = {
   aiRewrite: (taskId: string, title: string) => invoke<void>("ai_rewrite", { taskId, title }),
   aiSubtasks: (taskId: string, title: string) => invoke<void>("ai_subtasks", { taskId, title }),
   aiClassify: (taskId: string, title: string) => invoke<void>("ai_classify", { taskId, title }),
+  getNotes: () => invoke<Note[]>("get_notes"),
+  createNote: (note: CreateNotePayload) => invoke<Note>("create_note", { note }),
+  updateNote: (id: string, patch: UpdateNotePayload) => invoke<Note>("update_note", { id, patch }),
+  deleteNote: (id: string) => invoke<void>("delete_note", { id }),
 };

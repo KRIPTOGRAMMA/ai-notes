@@ -64,7 +64,6 @@ pub async fn ensure_running(app: &AppHandle, state: &SharedSidecar) -> Result<u1
         ]);
 
     let (_, child) = sidecar.spawn().map_err(|e| format!("spawn failed: {e}"))?;
-    eprintln!("[sidecar] spawned on port {port}");
 
     {
         let mut s = state.lock().unwrap();
@@ -80,7 +79,6 @@ pub async fn ensure_running(app: &AppHandle, state: &SharedSidecar) -> Result<u1
         s.ready = true;
     }
 
-    eprintln!("[sidecar] ready on port {port}");
     Ok(port)
 }
 
@@ -91,8 +89,7 @@ async fn wait_for_ready(port: u16) -> Result<(), String> {
         .build()
         .unwrap();
 
-    for i in 0..60 {
-        eprintln!("[sidecar] waiting for ready... attempt {i}");
+    for _i in 0..60 {
         match client.get(&url).send().await {
             Ok(r) if r.status().is_success() => return Ok(()),
             _ => tokio::time::sleep(std::time::Duration::from_secs(1)).await,

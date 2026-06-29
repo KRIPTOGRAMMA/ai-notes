@@ -24,10 +24,7 @@ async fn check_deadlines(app: &tauri::AppHandle, pool: &SqlitePool) {
     .await
     {
         Ok(rows) => rows,
-        Err(e) => {
-            eprintln!("[scheduler] failed to load tasks for deadline check: {e}");
-            return;
-        }
+        Err(_) => return,
     };
 
     for row in rows {
@@ -43,29 +40,20 @@ async fn check_deadlines(app: &tauri::AppHandle, pool: &SqlitePool) {
 
         if !notified_24h && deadline <= in_24h && deadline > in_1h {
             send_notification(app, &title, "Дедлайн через 24 часа");
-            if let Err(e) = sqlx::query("UPDATE tasks SET notified_24h = 1 WHERE id = ?")
-                .bind(&id).execute(pool).await
-            {
-                eprintln!("[scheduler] failed to mark notified_24h for {id}: {e}");
-            }
+            let _ = sqlx::query("UPDATE tasks SET notified_24h = 1 WHERE id = ?")
+                .bind(&id).execute(pool).await;
         }
 
         if !notified_1h && deadline <= in_1h && deadline > now {
             send_notification(app, &title, "Дедлайн через 1 час");
-            if let Err(e) = sqlx::query("UPDATE tasks SET notified_1h = 1 WHERE id = ?")
-                .bind(&id).execute(pool).await
-            {
-                eprintln!("[scheduler] failed to mark notified_1h for {id}: {e}");
-            }
+            let _ = sqlx::query("UPDATE tasks SET notified_1h = 1 WHERE id = ?")
+                .bind(&id).execute(pool).await;
         }
 
         if !notified_deadline && deadline <= now {
             send_notification(app, &title, "Дедлайн наступил!");
-            if let Err(e) = sqlx::query("UPDATE tasks SET notified_deadline = 1 WHERE id = ?")
-                .bind(&id).execute(pool).await
-            {
-                eprintln!("[scheduler] failed to mark notified_deadline for {id}: {e}");
-            }
+            let _ = sqlx::query("UPDATE tasks SET notified_deadline = 1 WHERE id = ?")
+                .bind(&id).execute(pool).await;
         }
     }
 }

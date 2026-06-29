@@ -51,7 +51,11 @@ pub fn run() {
                         commands::monitor::get_activity_state,
                         commands::ai::ai_rewrite,
                         commands::ai::ai_subtasks,
-                        commands::ai::ai_classify
+                        commands::ai::ai_classify,
+                        commands::notes::get_notes,
+                        commands::notes::create_note,
+                        commands::notes::update_note,
+                        commands::notes::delete_note
                     ]
                 )
                 .setup(|app| {

@@ -51,3 +51,21 @@ export interface UpdateTaskPayload {
   tags?: string[];
   recurrence?: Recurrence;
 }
+
+export interface Note {
+  id: string;
+  title: string;
+  content: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateNotePayload {
+  title: string;
+  content: string;
+}
+
+export interface UpdateNotePayload {
+  title?: string;
+  content?: string;
+}

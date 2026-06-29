@@ -109,11 +109,7 @@ pub fn start_activity_loop(
             .execute(&pool)
             .await;
 
-            // Раньше ошибка тут просто пропадала (`let _ = ...`) — без логов
-            // в проекте нет другого способа узнать, что запись в БД отвалилась.
-            if let Err(e) = result {
-                eprintln!("[activity_log] insert failed: {e}");
-            }
+            let _ = result;
         }
     });
 }
