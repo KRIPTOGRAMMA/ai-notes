@@ -1,7 +1,10 @@
-use tauri::{Emitter, Manager};
+use tauri::Emitter;
+use sqlx::SqlitePool;
+use tauri::Manager;
 use serde::Serialize;
 use crate::ai::sidecar::{SharedSidecar, ensure_running};
 use crate::ai::engine::ask;
+use crate::ai::cloud::{ask_openai, ask_anthropic};
 
 const SYSTEM_REWRITE: &str =
     "Перепиши задачу в SMART-формат: чёткая цель, измеримый результат, срок. Только результат, без пояснений.";
@@ -22,7 +25,6 @@ pub struct AiResult {
 }
 
 fn parse_subtasks(raw: &str) -> Option<String> {
-    // Try JSON array first.
     let trimmed = raw.trim();
     let json_start = trimmed.find('[').unwrap_or(0);
     let json_end = trimmed.rfind(']').map(|i| i + 1).unwrap_or(trimmed.len());
@@ -32,12 +34,10 @@ fn parse_subtasks(raw: &str) -> Option<String> {
         }
     }
 
-    // Fallback: parse numbered list lines like "1. Do something"
     let items: Vec<String> = trimmed
         .lines()
         .filter_map(|line| {
             let l = line.trim();
-            // Strip "1." / "1)" / "-" / "*" prefixes
             let stripped = l
                 .trim_start_matches(|c: char| c.is_ascii_digit())
                 .trim_start_matches(['.', ')', '-', '*', ' '])
@@ -54,14 +54,28 @@ fn into_payload(task_id: String, kind: &str, r: Result<String, String>) -> AiRes
     AiResult { task_id, kind: kind.into(), result, error }
 }
 
+async fn ask_ai(app: &tauri::AppHandle, system: &str, user: &str) -> Result<String, String> {
+    let settings = crate::commands::settings::load_settings_raw(app.state::<SqlitePool>().inner()).await?;
+
+    match settings.ai_provider.as_str() {
+        "openai" if !settings.openai_key.is_empty() => {
+            ask_openai(&settings.openai_key, &settings.openai_model, system, user).await
+        }
+        "anthropic" if !settings.anthropic_key.is_empty() => {
+            ask_anthropic(&settings.anthropic_key, &settings.anthropic_model, system, user).await
+        }
+        _ => {
+            let sidecar = app.state::<SharedSidecar>();
+            let port = ensure_running(app, &sidecar).await?;
+            ask(port, system, user).await
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn ai_rewrite(app: tauri::AppHandle, task_id: String, title: String) -> Result<(), String> {
     tokio::spawn(async move {
-        let r = async {
-            let sidecar = app.state::<SharedSidecar>();
-            let port = ensure_running(&app, &sidecar).await?;
-            ask(port, SYSTEM_REWRITE, &title).await
-        }.await;
+        let r = ask_ai(&app, SYSTEM_REWRITE, &title).await;
         let _ = app.emit("ai-result", into_payload(task_id, "rewrite", r));
     });
     Ok(())
@@ -71,9 +85,7 @@ pub async fn ai_rewrite(app: tauri::AppHandle, task_id: String, title: String) -
 pub async fn ai_subtasks(app: tauri::AppHandle, task_id: String, title: String) -> Result<(), String> {
     tokio::spawn(async move {
         let r = async {
-            let sidecar = app.state::<SharedSidecar>();
-            let port = ensure_running(&app, &sidecar).await?;
-            let raw = ask(port, SYSTEM_SUBTASKS, &title).await?;
+            let raw = ask_ai(&app, SYSTEM_SUBTASKS, &title).await?;
             parse_subtasks(&raw).ok_or_else(|| format!("Не удалось разобрать ответ модели: {}", raw))
         }.await;
         let _ = app.emit("ai-result", into_payload(task_id, "subtasks", r));
@@ -84,11 +96,7 @@ pub async fn ai_subtasks(app: tauri::AppHandle, task_id: String, title: String) 
 #[tauri::command]
 pub async fn ai_classify(app: tauri::AppHandle, task_id: String, title: String) -> Result<(), String> {
     tokio::spawn(async move {
-        let r = async {
-            let sidecar = app.state::<SharedSidecar>();
-            let port = ensure_running(&app, &sidecar).await?;
-            ask(port, SYSTEM_CLASSIFY, &title).await
-        }.await;
+        let r = ask_ai(&app, SYSTEM_CLASSIFY, &title).await;
         let _ = app.emit("ai-result", into_payload(task_id, "classify", r));
     });
     Ok(())

@@ -4,9 +4,11 @@
   import { api } from "./lib/api/tauri";
   import Tasks from "./views/Tasks.svelte";
   import Notes from "./views/Notes.svelte";
+  import Settings from "./views/Settings.svelte";
+  import Dashboard from "./views/Dashboard.svelte";
   import "./app.css";
 
-  type View = "tasks" | "notes";
+  type View = "tasks" | "notes" | "settings" | "dashboard";
   let activeView: View = $state("tasks");
 
   let isDark = $state(window.matchMedia("(prefers-color-scheme: dark)").matches);
@@ -70,6 +72,14 @@
     onclick={() => activeView = "notes"}
     style="font-weight:{activeView === 'notes' ? '600' : '400'};"
   >Заметки</button>
+  <button
+    onclick={() => activeView = "settings"}
+    style="font-weight:{activeView === 'settings' ? '600' : '400'};"
+  >Настройки</button>
+  <button
+    onclick={() => activeView = "dashboard"}
+    style="font-weight:{activeView === 'dashboard' ? '600' : '400'};"
+  >Дашборд</button>
   <span style="flex:1;"></span>
   <button onclick={toggleTheme}>{isDark ? "Светлая" : "Тёмная"}</button>
 </div>
@@ -78,4 +88,8 @@
   <Tasks />
 {:else if activeView === "notes"}
   <Notes />
+{:else if activeView === "settings"}
+  <Settings />
+{:else if activeView === "dashboard"}
+  <Dashboard />
 {/if}

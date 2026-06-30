@@ -69,3 +69,11 @@ export interface UpdateNotePayload {
   title?: string;
   content?: string;
 }
+
+export interface AppSettings {
+  ai_provider: "local" | "openai" | "anthropic";
+  openai_key: string;
+  openai_model: string;
+  anthropic_key: string;
+  anthropic_model: string;
+}

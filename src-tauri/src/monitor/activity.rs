@@ -113,3 +113,9 @@ pub fn start_activity_loop(
         }
     });
 }
+
+#[derive(serde::Serialize)]
+pub struct ActivityDay {
+    pub date: String,
+    pub minutes: i64,
+}

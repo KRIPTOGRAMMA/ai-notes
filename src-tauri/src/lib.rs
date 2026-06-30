@@ -49,13 +49,16 @@ pub fn run() {
                         commands::monitor::record_input,
                         commands::monitor::get_session_stats,
                         commands::monitor::get_activity_state,
+                        commands::monitor::get_activity_by_day,
                         commands::ai::ai_rewrite,
                         commands::ai::ai_subtasks,
                         commands::ai::ai_classify,
                         commands::notes::get_notes,
                         commands::notes::create_note,
                         commands::notes::update_note,
-                        commands::notes::delete_note
+                        commands::notes::delete_note,
+                        commands::settings::get_settings,
+                        commands::settings::save_settings
                     ]
                 )
                 .setup(|app| {
