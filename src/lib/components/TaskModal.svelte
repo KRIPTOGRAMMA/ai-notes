@@ -146,7 +146,7 @@
 
     <!-- Title -->
     <div style="display:flex;flex-direction:column;gap:4px;">
-      <label style="font-size:12px;font-weight:600;color:var(--text-secondary,#6b7280);">НАЗВАНИЕ *</label>
+      <span style="font-size:12px;font-weight:600;color:var(--text-secondary,#6b7280);">НАЗВАНИЕ *</span>
       <input
         bind:value={title}
         placeholder="Название задачи"
@@ -157,7 +157,7 @@
 
     <!-- Description -->
     <div style="display:flex;flex-direction:column;gap:4px;">
-      <label style="font-size:12px;font-weight:600;color:var(--text-secondary,#6b7280);">ОПИСАНИЕ</label>
+      <span style="font-size:12px;font-weight:600;color:var(--text-secondary,#6b7280);">ОПИСАНИЕ</span>
       <textarea
         bind:value={description}
         placeholder="Описание (необязательно)"
@@ -169,7 +169,7 @@
     <!-- Priority + Category -->
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
       <div style="display:flex;flex-direction:column;gap:4px;">
-        <label style="font-size:12px;font-weight:600;color:var(--text-secondary,#6b7280);">ПРИОРИТЕТ</label>
+        <span style="font-size:12px;font-weight:600;color:var(--text-secondary,#6b7280);">ПРИОРИТЕТ</span>
         <select bind:value={priority} style="padding:8px 10px;border:1px solid var(--border,#e5e7eb);border-radius:6px;font-size:14px;">
           <option value="Low">Низкий</option>
           <option value="Medium">Средний</option>
@@ -178,7 +178,7 @@
         </select>
       </div>
       <div style="display:flex;flex-direction:column;gap:4px;">
-        <label style="font-size:12px;font-weight:600;color:var(--text-secondary,#6b7280);">КАТЕГОРИЯ</label>
+        <span style="font-size:12px;font-weight:600;color:var(--text-secondary,#6b7280);">КАТЕГОРИЯ</span>
         <select bind:value={category} style="padding:8px 10px;border:1px solid var(--border,#e5e7eb);border-radius:6px;font-size:14px;">
           <option value="Work">Работа</option>
           <option value="Study">Учёба</option>
@@ -192,7 +192,7 @@
     <!-- Status (edit only) -->
     {#if isEdit}
       <div style="display:flex;flex-direction:column;gap:4px;">
-        <label style="font-size:12px;font-weight:600;color:var(--text-secondary,#6b7280);">СТАТУС</label>
+        <span style="font-size:12px;font-weight:600;color:var(--text-secondary,#6b7280);">СТАТУС</span>
         <select bind:value={status} style="padding:8px 10px;border:1px solid var(--border,#e5e7eb);border-radius:6px;font-size:14px;">
           <option value="Todo">К выполнению</option>
           <option value="InProgress">В процессе</option>
@@ -204,7 +204,7 @@
 
     <!-- Deadline -->
     <div style="display:flex;flex-direction:column;gap:4px;">
-      <label style="font-size:12px;font-weight:600;color:var(--text-secondary,#6b7280);">ДЕДЛАЙН</label>
+      <span style="font-size:12px;font-weight:600;color:var(--text-secondary,#6b7280);">ДЕДЛАЙН</span>
       <input
         type="datetime-local"
         bind:value={deadline}
@@ -215,7 +215,7 @@
 
     <!-- Recurrence -->
     <div style="display:flex;flex-direction:column;gap:6px;">
-      <label style="font-size:12px;font-weight:600;color:var(--text-secondary,#6b7280);">ПОВТОР</label>
+      <span style="font-size:12px;font-weight:600;color:var(--text-secondary,#6b7280);">ПОВТОР</span>
       <select bind:value={recurrenceKey} style="padding:8px 10px;border:1px solid var(--border,#e5e7eb);border-radius:6px;font-size:14px;">
         <option value="None">Без повтора</option>
         <option value="Hourly">Каждый час</option>
@@ -239,7 +239,7 @@
 
     <!-- Tags -->
     <div style="display:flex;flex-direction:column;gap:4px;">
-      <label style="font-size:12px;font-weight:600;color:var(--text-secondary,#6b7280);">ТЕГИ (через запятую)</label>
+      <span style="font-size:12px;font-weight:600;color:var(--text-secondary,#6b7280);">ТЕГИ (через запятую)</span>
       <input
         bind:value={tagsInput}
         placeholder="работа, важное, срочное"

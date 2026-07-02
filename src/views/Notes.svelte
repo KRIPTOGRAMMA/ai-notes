@@ -59,17 +59,20 @@
     {:else}
       <ul style="list-style:none;padding:0;margin:0;overflow-y:auto;flex:1;">
         {#each noteStore.notes as note (note.id)}
-          <li
-            onclick={() => selectNote(note)}
-            style="padding:10px 12px;cursor:pointer;border-bottom:1px solid var(--border,#e5e7eb);
-              background:{selectedId === note.id ? 'var(--accent-light,#eff6ff)' : 'transparent'};"
-          >
-            <div style="font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
-              {note.title}
-            </div>
-            <div style="font-size:11px;color:var(--text-secondary,#6b7280);margin-top:2px;">
-              {formatDate(note.updated_at)}
-            </div>
+          <li style="border-bottom:1px solid var(--border,#e5e7eb);">
+            <button
+              onclick={() => selectNote(note)}
+              style="display:block;width:100%;text-align:left;padding:10px 12px;cursor:pointer;
+                border:none;border-radius:0;font:inherit;color:inherit;
+                background:{selectedId === note.id ? 'var(--accent-light,#eff6ff)' : 'transparent'};"
+            >
+              <div style="font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                {note.title}
+              </div>
+              <div style="font-size:11px;color:var(--text-secondary,#6b7280);margin-top:2px;">
+                {formatDate(note.updated_at)}
+              </div>
+            </button>
           </li>
         {/each}
       </ul>

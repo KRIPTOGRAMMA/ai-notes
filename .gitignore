@@ -11,3 +11,5 @@ vite.config.ts.timestamp-*
 src-tauri/*.log
 src-tauri/target/debug/binaries/
 src-tauri/binaries/
+AGENTS.md
+ТЗ_AI_Notes.md

@@ -215,8 +215,8 @@ impl TaskRow {
                 .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
                 .map(|d| d.with_timezone(&Utc)),
             tags: serde_json::from_str(&self.tags).unwrap_or_default(),
-            created_at: self.created_at.parse().unwrap(),
-            updated_at: self.updated_at.parse().unwrap(),
+            created_at: self.created_at.parse().unwrap_or_else(|_| Utc::now()),
+            updated_at: self.updated_at.parse().unwrap_or_else(|_| Utc::now()),
             completed_at: self.completed_at
                 .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
                 .map(|d| d.with_timezone(&Utc)),

@@ -25,10 +25,13 @@ pub async fn export(app: tauri::AppHandle, path: String) -> AppResult<()> {
     Ok(())
 }
 
+// Нельзя перезаписывать data.db на живом пуле: activity-loop пишет в БД
+// каждые 60 сек и затёр бы импорт. Кладём staging-файл и перезапускаем
+// приложение — apply_pending_import() подхватит его до открытия пула.
 #[tauri::command]
 pub async fn import(app: tauri::AppHandle, path: String) -> AppResult<()> {
     let data_dir = app.path().app_data_dir()?;
-    let db_path = data_dir.join("data.db");
+    let staging_path = data_dir.join("data.db.import");
 
     let zip_file = File::open(&path)?;
     let mut archive = ZipArchive::new(zip_file)?;
@@ -37,6 +40,13 @@ pub async fn import(app: tauri::AppHandle, path: String) -> AppResult<()> {
     let mut buf = Vec::new();
     entry.read_to_end(&mut buf)?;
 
-    std::fs::write(&db_path, &buf)?;
-    Ok(())
+    std::fs::write(&staging_path, &buf)?;
+    app.restart()
+}
+
+pub fn apply_pending_import(data_dir: &std::path::Path) {
+    let staging = data_dir.join("data.db.import");
+    if staging.exists() {
+        let _ = std::fs::rename(&staging, data_dir.join("data.db"));
+    }
 }

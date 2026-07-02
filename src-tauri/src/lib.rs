@@ -157,6 +157,7 @@ pub fn run() {
                 .expect("Failed to get app data dir");
             std::fs::create_dir_all(&db_path)
                 .expect("Failed to create app data dir");
+            commands::backup::apply_pending_import(&db_path);
             let db_url = format!("sqlite:{}?mode=rwc", db_path.join("data.db").display());
             let pool: sqlx::SqlitePool = init_db(&db_url).await.expect("Failed to init DB");
 

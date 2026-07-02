@@ -67,7 +67,7 @@
       });
       if (!path) return;
       await api.importData(path as string);
-      backupMsg = "Импорт завершён ✓ Перезапустите приложение.";
+      backupMsg = "Импорт завершён ✓ Приложение перезапускается...";
     } catch (e) {
       error = String(e);
     }

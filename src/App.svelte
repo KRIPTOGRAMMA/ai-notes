@@ -11,18 +11,21 @@
   type View = "tasks" | "notes" | "settings" | "dashboard";
   let activeView: View = $state("tasks");
 
-  let isDark = $state(window.matchMedia("(prefers-color-scheme: dark)").matches);
+  const savedTheme = localStorage.getItem("theme");
+  let isDark = $state(
+    savedTheme !== null
+      ? savedTheme === "dark"
+      : window.matchMedia("(prefers-color-scheme: dark)").matches
+  );
 
   if (typeof document !== "undefined") {
-    document.documentElement.classList.toggle(
-      "dark",
-      window.matchMedia("(prefers-color-scheme: dark)").matches
-    );
+    document.documentElement.classList.toggle("dark", isDark);
   }
 
   function toggleTheme() {
     isDark = !isDark;
     document.documentElement.classList.toggle("dark", isDark);
+    localStorage.setItem("theme", isDark ? "dark" : "light");
   }
 
   let lastActivityPing = 0;
