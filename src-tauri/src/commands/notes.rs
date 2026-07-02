@@ -3,6 +3,7 @@ use sqlx::{SqlitePool, Row};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use crate::error::AppResult;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Note {
@@ -36,18 +37,18 @@ fn row_to_note(row: sqlx::sqlite::SqliteRow) -> Note {
 }
 
 #[tauri::command]
-pub async fn get_notes(pool: State<'_, SqlitePool>) -> Result<Vec<Note>, String> {
-    sqlx::query(
+pub async fn get_notes(pool: State<'_, SqlitePool>) -> AppResult<Vec<Note>> {
+    let rows = sqlx::query(
         "SELECT id, title, content, created_at, updated_at FROM notes ORDER BY updated_at DESC"
     )
     .fetch_all(pool.inner())
-    .await
-    .map(|rows| rows.into_iter().map(row_to_note).collect())
-    .map_err(|e| e.to_string())
+    .await?;
+
+    Ok(rows.into_iter().map(row_to_note).collect())
 }
 
 #[tauri::command]
-pub async fn create_note(pool: State<'_, SqlitePool>, note: CreateNote) -> Result<Note, String> {
+pub async fn create_note(pool: State<'_, SqlitePool>, note: CreateNote) -> AppResult<Note> {
     let now = Utc::now().to_rfc3339();
     let id = Uuid::new_v4().to_string();
     let title = if note.title.trim().is_empty() { "Без названия".to_string() } else { note.title };
@@ -61,8 +62,7 @@ pub async fn create_note(pool: State<'_, SqlitePool>, note: CreateNote) -> Resul
     .bind(&now)
     .bind(&now)
     .execute(pool.inner())
-    .await
-    .map_err(|e| e.to_string())?;
+    .await?;
 
     Ok(Note { id, title, content: note.content, created_at: now.clone(), updated_at: now })
 }
@@ -72,36 +72,35 @@ pub async fn update_note(
     pool: State<'_, SqlitePool>,
     id: String,
     patch: UpdateNote,
-) -> Result<Note, String> {
+) -> AppResult<Note> {
     let now = Utc::now().to_rfc3339();
 
     if let Some(ref title) = patch.title {
         sqlx::query("UPDATE notes SET title = ?, updated_at = ? WHERE id = ?")
             .bind(title).bind(&now).bind(&id)
-            .execute(pool.inner()).await.map_err(|e| e.to_string())?;
+            .execute(pool.inner()).await?;
     }
     if let Some(ref content) = patch.content {
         sqlx::query("UPDATE notes SET content = ?, updated_at = ? WHERE id = ?")
             .bind(content).bind(&now).bind(&id)
-            .execute(pool.inner()).await.map_err(|e| e.to_string())?;
+            .execute(pool.inner()).await?;
     }
 
-    sqlx::query(
+    let row = sqlx::query(
         "SELECT id, title, content, created_at, updated_at FROM notes WHERE id = ?"
     )
     .bind(&id)
     .fetch_one(pool.inner())
-    .await
-    .map(row_to_note)
-    .map_err(|e| e.to_string())
+    .await?;
+
+    Ok(row_to_note(row))
 }
 
 #[tauri::command]
-pub async fn delete_note(pool: State<'_, SqlitePool>, id: String) -> Result<(), String> {
+pub async fn delete_note(pool: State<'_, SqlitePool>, id: String) -> AppResult<()> {
     sqlx::query("DELETE FROM notes WHERE id = ?")
         .bind(&id)
         .execute(pool.inner())
-        .await
-        .map_err(|e| e.to_string())?;
+        .await?;
     Ok(())
 }

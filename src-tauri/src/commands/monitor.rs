@@ -1,6 +1,7 @@
 use tauri::State;
 use std::sync::Arc;
 use sqlx::{SqlitePool, Row};
+use crate::error::AppResult;
 use crate::monitor::activity::{ActivityTracker, SessionStats, ActivityState, ActivityDay, TaskCompletion};
 
 #[tauri::command]
@@ -22,7 +23,7 @@ pub fn get_activity_state(tracker: State<'_, Arc<ActivityTracker>>) -> String {
 }
 
 #[tauri::command]
-pub async fn get_activity_by_day(pool: State<'_, SqlitePool>) -> Result<Vec<ActivityDay>, String> {
+pub async fn get_activity_by_day(pool: State<'_, SqlitePool>) -> AppResult<Vec<ActivityDay>> {
     let rows = sqlx::query(
         "SELECT date(timestamp) as date, COUNT(*) * 5 as minutes
          FROM activity_log
@@ -30,8 +31,7 @@ pub async fn get_activity_by_day(pool: State<'_, SqlitePool>) -> Result<Vec<Acti
          GROUP BY date(timestamp)"
     )
     .fetch_all(pool.inner())
-    .await
-    .map_err(|e| e.to_string())?;
+    .await?;
 
     Ok(rows.iter().map(|row| ActivityDay {
         date: row.get("date"),
@@ -40,7 +40,7 @@ pub async fn get_activity_by_day(pool: State<'_, SqlitePool>) -> Result<Vec<Acti
 }
 
 #[tauri::command]
-pub async fn get_task_completions_by_day(pool: State<'_, SqlitePool>) -> Result<Vec<TaskCompletion>, String> {
+pub async fn get_task_completions_by_day(pool: State<'_, SqlitePool>) -> AppResult<Vec<TaskCompletion>> {
     let rows = sqlx::query(
       "SELECT date(completed_at) as date, COUNT(*) as completed
        FROM tasks
@@ -48,8 +48,7 @@ pub async fn get_task_completions_by_day(pool: State<'_, SqlitePool>) -> Result<
        GROUP BY date(completed_at)"
     )
     .fetch_all(pool.inner())
-    .await
-    .map_err(|e| e.to_string())?;
+    .await?;
 
     Ok(rows.iter().map(|row| TaskCompletion {
       date: row.get("date"),

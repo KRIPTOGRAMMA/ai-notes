@@ -1,5 +1,6 @@
 mod core;
 mod db;
+mod error;
 mod commands;
 mod notifier;
 mod monitor;
@@ -164,7 +165,7 @@ pub fn run() {
 
             let tracker = Arc::new(monitor::activity::ActivityTracker::new());
             app.manage(tracker.clone());
-            monitor::activity::start_activity_loop(tracker, pool.clone(), 300);
+            monitor::activity::start_activity_loop(app.app_handle().clone(), tracker, pool.clone(), 300);
 
             notifier::scheduler::start_scheduler(app.app_handle().clone(), pool);
             app.run(|_, _| {});

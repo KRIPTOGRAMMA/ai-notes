@@ -34,3 +34,4 @@ tokio = { version = "1", features = ["full"] }
 sysinfo = "0.33"
 zip = "8.6.0"
 tauri-plugin-dialog = "2.7.1"
+thiserror = "2.0.18"

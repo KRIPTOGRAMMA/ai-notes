@@ -59,12 +59,17 @@ impl ActivityTracker {
 }
 
 pub fn start_activity_loop(
+    app: tauri::AppHandle,
     tracker: Arc<ActivityTracker>,
     pool: SqlitePool,
     idle_threshold_secs: u64,
 ) {
     tokio::spawn(async move {
         let mut tick = interval(Duration::from_secs(60));
+        // Локальное prev_state: tracker.state мгновенно сбрасывается в Active
+        // из record_input, поэтому переход Idle→Active по нему не поймать.
+        let mut prev_state = ActivityState::Active;
+        let mut idle_since: Option<chrono::DateTime<Utc>> = None;
         loop {
             tick.tick().await;
 
@@ -83,6 +88,17 @@ pub fn start_activity_loop(
                 let mut state = tracker.state.lock().unwrap();
                 *state = new_state.clone();
             }
+
+            // Контекстные уведомления: ловим переходы между состояниями
+            if prev_state == ActivityState::Active && new_state == ActivityState::Idle {
+                idle_since = Some(last_input);
+            }
+            if prev_state == ActivityState::Idle && new_state == ActivityState::Active {
+                let away_mins = idle_since.map(|t| (now - t).num_minutes()).unwrap_or(0);
+                idle_since = None;
+                notify_return(&app, &pool, away_mins).await;
+            }
+            prev_state = new_state.clone();
 
             // Накапливаем статистику
             match new_state {
@@ -112,6 +128,40 @@ pub fn start_activity_loop(
             let _ = result;
         }
     });
+}
+
+// Нотификация при возвращении после простоя: топ-задача = ближайший дедлайн,
+// затем наивысший приоритет. Не шлём, если пользователь отходил ненадолго.
+async fn notify_return(app: &tauri::AppHandle, pool: &SqlitePool, away_mins: i64) {
+    if away_mins < 10 {
+        return;
+    }
+
+    use sqlx::Row;
+    let top_task: Option<String> = sqlx::query(
+        "SELECT title FROM tasks
+         WHERE status IN ('Todo', 'InProgress') AND hidden = 0
+         ORDER BY deadline IS NULL, deadline ASC,
+                  CASE priority
+                      WHEN 'Critical' THEN 0
+                      WHEN 'High' THEN 1
+                      WHEN 'Medium' THEN 2
+                      ELSE 3
+                  END
+         LIMIT 1"
+    )
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten()
+    .map(|row| row.get("title"));
+
+    let body = match top_task {
+        Some(title) => format!("Вы отсутствовали {} мин. Ближайшая задача: {}", away_mins, title),
+        None => format!("Вы отсутствовали {} мин. С возвращением!", away_mins),
+    };
+
+    crate::notifier::scheduler::send_notification(app, "AI Notes", &body);
 }
 
 #[derive(serde::Serialize)]

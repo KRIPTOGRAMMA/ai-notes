@@ -55,7 +55,9 @@ fn into_payload(task_id: String, kind: &str, r: Result<String, String>) -> AiRes
 }
 
 async fn ask_ai(app: &tauri::AppHandle, system: &str, user: &str) -> Result<String, String> {
-    let settings = crate::commands::settings::load_settings_raw(app.state::<SqlitePool>().inner()).await?;
+    let settings = crate::commands::settings::load_settings_raw(app.state::<SqlitePool>().inner())
+        .await
+        .map_err(|e| e.to_string())?;
 
     match settings.ai_provider.as_str() {
         "openai" if !settings.openai_key.is_empty() => {

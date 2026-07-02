@@ -58,7 +58,7 @@ async fn check_deadlines(app: &tauri::AppHandle, pool: &SqlitePool) {
     }
 }
 
-fn send_notification(app: &tauri::AppHandle, title: &str, body: &str) {
+pub fn send_notification(app: &tauri::AppHandle, title: &str, body: &str) {
     let _ = app.notification()
         .builder()
         .title(title)

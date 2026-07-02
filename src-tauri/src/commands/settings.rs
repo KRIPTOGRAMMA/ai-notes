@@ -1,6 +1,7 @@
 use tauri::State;
 use sqlx::{SqlitePool, Row};
 use serde::{Deserialize, Serialize};
+use crate::error::AppResult;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppSettings {
@@ -33,17 +34,16 @@ async fn get_setting(pool: &SqlitePool, key: &str) -> Option<String> {
         .map(|r| r.get("value"))
 }
 
-async fn set_setting(pool: &SqlitePool, key: &str, value: &str) -> Result<(), String> {
+async fn set_setting(pool: &SqlitePool, key: &str, value: &str) -> AppResult<()> {
     sqlx::query("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
         .bind(key)
         .bind(value)
         .execute(pool)
-        .await
-        .map(|_| ())
-        .map_err(|e| e.to_string())
+        .await?;
+    Ok(())
 }
 
-pub async fn load_settings_raw(pool: &SqlitePool) -> Result<AppSettings, String> {
+pub async fn load_settings_raw(pool: &SqlitePool) -> AppResult<AppSettings> {
     let mut s = AppSettings::default();
     if let Some(v) = get_setting(pool, "ai_provider").await { s.ai_provider = v; }
     if let Some(v) = get_setting(pool, "openai_key").await { s.openai_key = v; }
@@ -54,12 +54,12 @@ pub async fn load_settings_raw(pool: &SqlitePool) -> Result<AppSettings, String>
 }
 
 #[tauri::command]
-pub async fn get_settings(pool: State<'_, SqlitePool>) -> Result<AppSettings, String> {
+pub async fn get_settings(pool: State<'_, SqlitePool>) -> AppResult<AppSettings> {
     load_settings_raw(pool.inner()).await
 }
 
 #[tauri::command]
-pub async fn save_settings(pool: State<'_, SqlitePool>, settings: AppSettings) -> Result<(), String> {
+pub async fn save_settings(pool: State<'_, SqlitePool>, settings: AppSettings) -> AppResult<()> {
     set_setting(pool.inner(), "ai_provider", &settings.ai_provider).await?;
     set_setting(pool.inner(), "openai_key", &settings.openai_key).await?;
     set_setting(pool.inner(), "openai_model", &settings.openai_model).await?;
