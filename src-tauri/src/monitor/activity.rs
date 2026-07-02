@@ -119,3 +119,9 @@ pub struct ActivityDay {
     pub date: String,
     pub minutes: i64,
 }
+
+#[derive(serde::Serialize)]
+pub struct TaskCompletion {
+    pub date: String,
+    pub completed: i64,
+}

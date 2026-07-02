@@ -1,7 +1,7 @@
 use tauri::State;
 use std::sync::Arc;
 use sqlx::{SqlitePool, Row};
-use crate::monitor::activity::{ActivityTracker, SessionStats, ActivityState, ActivityDay};
+use crate::monitor::activity::{ActivityTracker, SessionStats, ActivityState, ActivityDay, TaskCompletion};
 
 #[tauri::command]
 pub fn record_input(tracker: State<'_, Arc<ActivityTracker>>) {
@@ -36,5 +36,23 @@ pub async fn get_activity_by_day(pool: State<'_, SqlitePool>) -> Result<Vec<Acti
     Ok(rows.iter().map(|row| ActivityDay {
         date: row.get("date"),
         minutes: row.get("minutes"),
+    }).collect())
+}
+
+#[tauri::command]
+pub async fn get_task_completions_by_day(pool: State<'_, SqlitePool>) -> Result<Vec<TaskCompletion>, String> {
+    let rows = sqlx::query(
+      "SELECT date(completed_at) as date, COUNT(*) as completed
+       FROM tasks
+       WHERE completed_at IS NOT NULL
+       GROUP BY date(completed_at)"
+    )
+    .fetch_all(pool.inner())
+    .await
+    .map_err(|e| e.to_string())?;
+
+    Ok(rows.iter().map(|row| TaskCompletion {
+      date: row.get("date"),
+      completed: row.get("completed"),
     }).collect())
 }

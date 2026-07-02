@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { save as saveDialog, open as openDialog } from "@tauri-apps/plugin-dialog";
   import { api } from "../lib/api/tauri";
   import type { AppSettings } from "../lib/types";
 
@@ -34,6 +35,41 @@
       error = String(e);
     } finally {
       saving = false;
+    }
+  }
+
+  let backupMsg: string | null = $state(null);
+
+  async function exportData() {
+    backupMsg = null;
+    error = null;
+    try {
+      const path = await saveDialog({
+        defaultPath: "ai-notes-backup.zip",
+        filters: [{ name: "ZIP", extensions: ["zip"] }],
+      });
+      if (!path) return;
+      await api.exportData(path);
+      backupMsg = "Экспорт завершён ✓";
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
+  async function importData() {
+    backupMsg = null;
+    error = null;
+    if (!confirm("Импорт заменит все текущие данные. Продолжить?")) return;
+    try {
+      const path = await openDialog({
+        multiple: false,
+        filters: [{ name: "ZIP", extensions: ["zip"] }],
+      });
+      if (!path) return;
+      await api.importData(path as string);
+      backupMsg = "Импорт завершён ✓ Перезапустите приложение.";
+    } catch (e) {
+      error = String(e);
     }
   }
 </script>
@@ -119,4 +155,15 @@
   <button onclick={save} disabled={saving}>
     {saving ? "Сохранение..." : saved ? "Сохранено ✓" : "Сохранить"}
   </button>
+
+  <section style="margin-top:32px;">
+    <h3 style="margin:0 0 10px 0;font-size:14px;text-transform:uppercase;color:var(--text-secondary,#6b7280);letter-spacing:.05em;">Данные</h3>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <button onclick={exportData}>Экспорт (ZIP)</button>
+      <button onclick={importData}>Импорт (ZIP)</button>
+      {#if backupMsg}
+        <span style="font-size:12px;color:var(--text-secondary,#6b7280);">{backupMsg}</span>
+      {/if}
+    </div>
+  </section>
 </div>

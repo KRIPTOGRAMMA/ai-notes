@@ -17,6 +17,10 @@ export const api = {
   createNote: (note: CreateNotePayload) => invoke<Note>("create_note", { note }),
   updateNote: (id: string, patch: UpdateNotePayload) => invoke<Note>("update_note", { id, patch }),
   deleteNote: (id: string) => invoke<void>("delete_note", { id }),
+  getActivityByDay: () => invoke<{ date: string; minutes: number }[]>("get_activity_by_day"),
+  getTaskCompletionsByDay: () => invoke<{ date: string; completed: number }[]>("get_task_completions_by_day"),
   getSettings: () => invoke<AppSettings>("get_settings"),
   saveSettings: (settings: AppSettings) => invoke<void>("save_settings", { settings }),
+  exportData: (path: string) => invoke<void>("export", { path }),
+  importData: (path: string) => invoke<void>("import", { path }),
 };

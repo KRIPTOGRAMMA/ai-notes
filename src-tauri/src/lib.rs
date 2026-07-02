@@ -37,6 +37,7 @@ pub fn run() {
                 ))
                 .plugin(tauri_plugin_global_shortcut::Builder::new().build())
                 .plugin(tauri_plugin_shell::init())
+                .plugin(tauri_plugin_dialog::init())
                 .invoke_handler(
                     tauri::generate_handler![
                         commands::tasks::create_task,
@@ -50,6 +51,7 @@ pub fn run() {
                         commands::monitor::get_session_stats,
                         commands::monitor::get_activity_state,
                         commands::monitor::get_activity_by_day,
+                        commands::monitor::get_task_completions_by_day,
                         commands::ai::ai_rewrite,
                         commands::ai::ai_subtasks,
                         commands::ai::ai_classify,
@@ -58,7 +60,9 @@ pub fn run() {
                         commands::notes::update_note,
                         commands::notes::delete_note,
                         commands::settings::get_settings,
-                        commands::settings::save_settings
+                        commands::settings::save_settings,
+                        commands::backup::export,
+                        commands::backup::import
                     ]
                 )
                 .setup(|app| {

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { invoke } from "@tauri-apps/api/core";
+  import { api } from "../lib/api/tauri";
 
   interface ActivityDay {
     date: string;
@@ -9,7 +9,7 @@
 
   interface TaskCompletion {
     date: string;
-    count: number;
+    completed: number;
   }
 
   let activityDays: ActivityDay[] = $state([]);
@@ -18,8 +18,8 @@
 
   onMount(async () => {
     try {
-      activityDays = await invoke<ActivityDay[]>("get_activity_by_day");
-      taskCompletions = await invoke<TaskCompletion[]>("get_task_completions_by_day");
+      activityDays = await api.getActivityByDay();
+      taskCompletions = await api.getTaskCompletionsByDay();
     } catch (e) {
       error = String(e);
     }
@@ -87,11 +87,11 @@
           <div style="display:flex;align-items:center;gap:8px;font-size:12px;">
             <span style="width:80px;color:var(--text-secondary,#6b7280);flex-shrink:0;">{day.date}</span>
             <div style="display:flex;gap:4px;flex-wrap:wrap;">
-              {#each Array(day.count) as _}
+              {#each Array(day.completed) as _}
                 <span style="width:14px;height:14px;background:#6366f1;border-radius:3px;display:inline-block;"></span>
               {/each}
             </div>
-            <span style="color:var(--text-secondary,#6b7280);">{day.count}</span>
+            <span style="color:var(--text-secondary,#6b7280);">{day.completed}</span>
           </div>
         {/each}
       </div>
