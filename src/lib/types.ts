@@ -79,4 +79,5 @@ export interface AppSettings {
   idle_threshold_secs: number;
   log_interval_secs: number;
   work_mode: "Light" | "Study" | "Focus";
+  onboarding_complete: boolean;
 }

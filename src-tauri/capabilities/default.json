@@ -17,6 +17,9 @@
     "core:window:allow-hide",
     "core:window:allow-show",
     "dialog:allow-save",
-    "dialog:allow-open"
+    "dialog:allow-open",
+    "autostart:allow-enable",
+    "autostart:allow-disable",
+    "autostart:allow-is-enabled"
   ]
 }

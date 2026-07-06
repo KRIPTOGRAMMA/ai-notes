@@ -13,6 +13,7 @@
     idle_threshold_secs: 300,
     log_interval_secs: 60,
     work_mode: "Light",
+    onboarding_complete: true,
   });
 
   let saving = $state(false);

@@ -40,6 +40,7 @@ pub struct AppSettings {
     pub idle_threshold_secs: u64,  // порог простоя; применяется после перезапуска
     pub log_interval_secs: u64,    // интервал тика activity-loop
     pub work_mode: WorkMode,   // Light | Study | Focus
+    pub onboarding_complete: bool,
 }
 
 impl Default for AppSettings {
@@ -53,6 +54,7 @@ impl Default for AppSettings {
             idle_threshold_secs: 300,
             log_interval_secs: 60,
             work_mode: WorkMode::Light,
+            onboarding_complete: false,
         }
     }
 }
@@ -114,6 +116,9 @@ pub async fn load_settings_raw(pool: &SqlitePool) -> AppResult<AppSettings> {
     if let Some(v) = get_setting(pool, "work_mode").await {
         s.work_mode = WorkMode::from_str(&v);
     }
+    if let Some(v) = get_setting(pool, "onboarding_complete").await {
+        s.onboarding_complete = v == "true";
+    }
     // Ключи: сначала keyring, затем legacy-значение из БД
     s.openai_key = keyring_get("openai_key")
         .or(get_setting(pool, "openai_key").await)
@@ -142,6 +147,7 @@ pub async fn save_settings(
     set_setting(pool.inner(), "idle_threshold_secs", &settings.idle_threshold_secs.max(60).to_string()).await?;
     set_setting(pool.inner(), "log_interval_secs", &settings.log_interval_secs.clamp(10, 600).to_string()).await?;
     set_setting(pool.inner(), "work_mode", settings.work_mode.as_str()).await?;
+    set_setting(pool.inner(), "onboarding_complete", if settings.onboarding_complete { "true" } else { "false" }).await?;
 
     for (name, value) in [("openai_key", &settings.openai_key), ("anthropic_key", &settings.anthropic_key)] {
         match keyring_set(name, value) {
@@ -158,4 +164,61 @@ pub async fn save_settings(
 
     *mode_state.lock().unwrap() = settings.work_mode.clone();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn work_mode_roundtrip() {
+    for mode in [WorkMode::Light, WorkMode::Study, WorkMode::Focus] {
+      assert_eq!(WorkMode::from_str(mode.as_str()), mode);
+    }
+  }
+
+  #[test]
+  fn work_mode_unknown_falls_back_to_light() {
+    assert_eq!(WorkMode::from_str("abrakadabra"), WorkMode::Light);
+    assert_eq!(WorkMode::from_str(""), WorkMode::Light);
+  }
+}
+// Интеграционные тесты на in-memory SQLite: реальные миграции, реальные запросы
+#[cfg(test)]
+mod db_tests {
+    use super::*;
+
+    async fn test_pool() -> SqlitePool {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./src/db/migrations").run(&pool).await.unwrap();
+        pool
+    }
+
+    #[tokio::test]
+    async fn defaults_when_db_empty() {
+        let pool = test_pool().await;
+        let s = load_settings_raw(&pool).await.unwrap();
+        assert_eq!(s.work_mode, WorkMode::Light);
+        assert_eq!(s.idle_threshold_secs, 300);
+        assert!(!s.onboarding_complete);
+    }
+
+    #[tokio::test]
+    async fn set_get_roundtrip() {
+        let pool = test_pool().await;
+        set_setting(&pool, "ai_provider", "anthropic").await.unwrap();
+        assert_eq!(get_setting(&pool, "ai_provider").await.unwrap(), "anthropic");
+
+        // Повторная запись перезаписывает, а не дублирует
+        set_setting(&pool, "ai_provider", "openai").await.unwrap();
+        assert_eq!(get_setting(&pool, "ai_provider").await.unwrap(), "openai");
+    }
+
+    #[tokio::test]
+    async fn persist_work_mode_is_loaded_back() {
+        let pool = test_pool().await;
+        persist_work_mode(&pool, &WorkMode::Focus).await.unwrap();
+        let s = load_settings_raw(&pool).await.unwrap();
+        assert_eq!(s.work_mode, WorkMode::Focus);
+    }
 }

@@ -2,6 +2,9 @@
   import { taskStore } from "./lib/stores/tasks.svelte";
   import { noteStore } from "./lib/stores/notes.svelte";
   import { api } from "./lib/api/tauri";
+  import { onMount } from "svelte";
+  import type { AppSettings } from "./lib/types";
+  import Onboarding from "./views/Onboarding.svelte";
   import Tasks from "./views/Tasks.svelte";
   import Notes from "./views/Notes.svelte";
   import Settings from "./views/Settings.svelte";
@@ -10,6 +13,23 @@
 
   type View = "tasks" | "notes" | "settings" | "dashboard";
   let activeView: View = $state("tasks");
+
+  // Онбординг: пока настройки не загружены — ничего не показываем,
+  // чтобы главный экран не мелькал перед онбордингом
+  let loadedSettings: AppSettings | null = $state(null);
+  let showOnboarding = $state(false);
+  let isWayland = $state(false);
+
+  onMount(async () => {
+    try {
+      isWayland = await api.isWayland();
+      loadedSettings = await api.getSettings();
+      showOnboarding = !loadedSettings.onboarding_complete;
+    } catch {
+      loadedSettings = null;
+      showOnboarding = false;
+    }
+  });
 
   const savedTheme = localStorage.getItem("theme");
   let isDark = $state(
@@ -48,6 +68,13 @@
   }}
 />
 
+{#if showOnboarding && loadedSettings}
+  <Onboarding
+    settings={loadedSettings}
+    {isWayland}
+    onDone={() => showOnboarding = false}
+  />
+{:else}
 {#if taskStore.error}
   <div style="background:var(--danger);color:white;padding:8px 12px;border-radius:6px;
     margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;gap:12px;">
@@ -95,4 +122,5 @@
   <Settings />
 {:else if activeView === "dashboard"}
   <Dashboard />
+{/if}
 {/if}

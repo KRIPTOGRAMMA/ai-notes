@@ -14,6 +14,11 @@ use crate::db::init_db;
 use crate::ai::sidecar::{SharedSidecar, SidecarState};
 
 #[tauri::command]
+fn is_wayland() -> bool {
+    std::env::var("WAYLAND_DISPLAY").is_ok()
+}
+
+#[tauri::command]
 fn open_quick_task(app: tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("quick-task") {
         let _ = w.show();
@@ -48,6 +53,7 @@ pub fn run() {
                         commands::tasks::complete_task,
                         commands::tasks::search_tasks,
                         open_quick_task,
+                        is_wayland,
                         commands::monitor::record_input,
                         commands::monitor::get_session_stats,
                         commands::monitor::get_activity_state,

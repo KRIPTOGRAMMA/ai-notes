@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Priority {
   Low,
   Medium,
@@ -10,7 +10,7 @@ pub enum Priority {
   Critical,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum TaskStatus {
   Todo,
   InProgress,
@@ -18,7 +18,7 @@ pub enum TaskStatus {
   Archived,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Category {
   Work,
   Study,
@@ -31,7 +31,7 @@ pub enum Category {
 // представления enum'ов/Vec, и query_as::<_, Task> никогда не вызывается.
 // Чтение всегда идёт через TaskRow -> into_task(). Не добавляйте сюда
 // derive(sqlx::FromRow) обратно, это вводит в заблуждение.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Task {
   pub id: String,
   pub title: String,
@@ -88,7 +88,7 @@ pub struct UpdateTask {
     pub tags: Option<Vec<String>>,
     pub recurrence: Option<Recurrence>,
 }
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub enum RecurrenceUnit {
     Minutes,
     Hours,
@@ -96,7 +96,7 @@ pub enum RecurrenceUnit {
     Weeks,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub enum Recurrence {
     None,
     Hourly,
@@ -223,5 +223,102 @@ impl TaskRow {
             recurrence: Recurrence::from_db(&self.recurrence),
             hidden: self.hidden,
         }
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row(overrides: impl FnOnce(&mut TaskRow)) -> TaskRow {
+        let mut r = TaskRow {
+            id: "id-1".into(),
+            title: "t".into(),
+            description: None,
+            status: "Todo".into(),
+            priority: "Medium".into(),
+            category: "Work".into(),
+            deadline: None,
+            tags: "[]".into(),
+            created_at: "2026-07-06T10:00:00+00:00".into(),
+            updated_at: "2026-07-06T10:00:00+00:00".into(),
+            completed_at: None,
+            recurrence: "None".into(),
+            hidden: false,
+        };
+        overrides(&mut r);
+        r
+    }
+
+    #[test]
+    fn recurrence_db_roundtrip() {
+        let cases = [
+            Recurrence::None,
+            Recurrence::Hourly,
+            Recurrence::Daily,
+            Recurrence::Weekly,
+            Recurrence::Custom(4, RecurrenceUnit::Hours),
+            Recurrence::Custom(90, RecurrenceUnit::Minutes),
+            Recurrence::Custom(2, RecurrenceUnit::Weeks),
+            Recurrence::Custom(10, RecurrenceUnit::Days),
+        ];
+        for rec in cases {
+            assert_eq!(Recurrence::from_db(&rec.to_db()), rec);
+        }
+    }
+
+    #[test]
+    fn recurrence_from_db_garbage_is_none() {
+        assert_eq!(Recurrence::from_db("abrakadabra"), Recurrence::None);
+        assert_eq!(Recurrence::from_db(""), Recurrence::None);
+        assert_eq!(Recurrence::from_db("Custom(broken"), Recurrence::None);
+    }
+
+    #[test]
+    fn recurrence_to_duration() {
+        assert_eq!(Recurrence::None.to_duration(), None);
+        assert_eq!(Recurrence::Daily.to_duration(), Some(chrono::Duration::days(1)));
+        assert_eq!(
+            Recurrence::Custom(90, RecurrenceUnit::Minutes).to_duration(),
+            Some(chrono::Duration::minutes(90))
+        );
+    }
+
+    #[test]
+    fn task_row_parses_valid_fields() {
+        let task = row(|r| {
+            r.status = "InProgress".into();
+            r.priority = "Critical".into();
+            r.category = "Health".into();
+            r.tags = r#"["a","b"]"#.into();
+            r.deadline = Some("2026-12-31T23:59:00+00:00".into());
+        })
+        .into_task();
+
+        assert_eq!(task.status, TaskStatus::InProgress);
+        assert_eq!(task.priority, Priority::Critical);
+        assert_eq!(task.category, Category::Health);
+        assert_eq!(task.tags, vec!["a", "b"]);
+        assert!(task.deadline.is_some());
+    }
+
+    #[test]
+    fn task_row_falls_back_on_garbage() {
+        let task = row(|r| {
+            r.status = "???".into();
+            r.priority = "???".into();
+            r.category = "???".into();
+            r.tags = "not json".into();
+            r.deadline = Some("not a date".into());
+            r.created_at = "not a date".into();
+        })
+        .into_task();
+
+        assert_eq!(task.status, TaskStatus::Todo);
+        assert_eq!(task.priority, Priority::Medium);
+        assert_eq!(task.category, Category::Other);
+        assert!(task.tags.is_empty());
+        assert_eq!(task.deadline, None);
+        // Битая дата не роняет парсинг — подставляется "сейчас"
+        assert!(task.created_at <= Utc::now());
     }
 }
