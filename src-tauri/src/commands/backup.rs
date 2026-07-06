@@ -6,23 +6,41 @@ use zip::write::SimpleFileOptions;
 use tauri::Manager;
 use crate::error::AppResult;
 
+// БД работает в WAL-режиме: свежие записи лежат в data.db-wal, а не в data.db.
+// Просто скопировать файл нельзя — снимок будет неполным. VACUUM INTO пишет
+// целостную копию всей БД (включая WAL) в отдельный файл.
 #[tauri::command]
-pub async fn export(app: tauri::AppHandle, path: String) -> AppResult<()> {
+pub async fn export(
+    app: tauri::AppHandle,
+    pool: tauri::State<'_, sqlx::SqlitePool>,
+    path: String,
+) -> AppResult<()> {
     let data_dir = app.path().app_data_dir()?;
-    let db_path = data_dir.join("data.db");
+    let snapshot_path = data_dir.join("data.db.export");
 
-    let zip_file = File::create(&path)?;
-    let mut zip = ZipWriter::new(zip_file);
-    let options = SimpleFileOptions::default();
+    let _ = std::fs::remove_file(&snapshot_path); // VACUUM INTO требует, чтобы файла не было
+    sqlx::query("VACUUM INTO ?")
+        .bind(snapshot_path.to_string_lossy().as_ref())
+        .execute(pool.inner())
+        .await?;
 
-    zip.start_file("data.db", options)?;
-    let mut db_file = File::open(&db_path)?;
-    let mut buf = Vec::new();
-    db_file.read_to_end(&mut buf)?;
-    zip.write_all(&buf)?;
+    let result: AppResult<()> = (|| {
+        let zip_file = File::create(&path)?;
+        let mut zip = ZipWriter::new(zip_file);
+        let options = SimpleFileOptions::default();
 
-    zip.finish()?;
-    Ok(())
+        zip.start_file("data.db", options)?;
+        let mut db_file = File::open(&snapshot_path)?;
+        let mut buf = Vec::new();
+        db_file.read_to_end(&mut buf)?;
+        zip.write_all(&buf)?;
+
+        zip.finish()?;
+        Ok(())
+    })();
+
+    let _ = std::fs::remove_file(&snapshot_path);
+    result
 }
 
 // Нельзя перезаписывать data.db на живом пуле: activity-loop пишет в БД
@@ -48,5 +66,9 @@ pub fn apply_pending_import(data_dir: &std::path::Path) {
     let staging = data_dir.join("data.db.import");
     if staging.exists() {
         let _ = std::fs::rename(&staging, data_dir.join("data.db"));
+        // Остатки WAL от старой БД иначе "переиграются" поверх импортированной
+        // и молча откатят импорт.
+        let _ = std::fs::remove_file(data_dir.join("data.db-wal"));
+        let _ = std::fs::remove_file(data_dir.join("data.db-shm"));
     }
 }

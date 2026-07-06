@@ -25,7 +25,7 @@ pub fn get_activity_state(tracker: State<'_, Arc<ActivityTracker>>) -> String {
 #[tauri::command]
 pub async fn get_activity_by_day(pool: State<'_, SqlitePool>) -> AppResult<Vec<ActivityDay>> {
     let rows = sqlx::query(
-        "SELECT date(timestamp) as date, COUNT(*) * 5 as minutes
+        "SELECT date(timestamp) as date, SUM(duration_secs) / 60 as minutes
          FROM activity_log
          WHERE state = 'Active'
          GROUP BY date(timestamp)"

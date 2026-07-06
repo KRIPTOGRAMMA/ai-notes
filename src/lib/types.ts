@@ -76,4 +76,6 @@ export interface AppSettings {
   openai_model: string;
   anthropic_key: string;
   anthropic_model: string;
+  idle_threshold_secs: number;
+  log_interval_secs: number;
 }

@@ -166,7 +166,16 @@ pub fn run() {
 
             let tracker = Arc::new(monitor::activity::ActivityTracker::new());
             app.manage(tracker.clone());
-            monitor::activity::start_activity_loop(app.app_handle().clone(), tracker, pool.clone(), 300);
+            let settings = commands::settings::load_settings_raw(&pool)
+                .await
+                .unwrap_or_default();
+            monitor::activity::start_activity_loop(
+                app.app_handle().clone(),
+                tracker,
+                pool.clone(),
+                settings.idle_threshold_secs,
+                settings.log_interval_secs,
+            );
 
             notifier::scheduler::start_scheduler(app.app_handle().clone(), pool);
             app.run(|_, _| {});

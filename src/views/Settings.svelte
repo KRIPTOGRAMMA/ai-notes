@@ -10,6 +10,8 @@
     openai_model: "gpt-4o-mini",
     anthropic_key: "",
     anthropic_model: "claude-haiku-4-5-20251001",
+    idle_threshold_secs: 300,
+    log_interval_secs: 60,
   });
 
   let saving = $state(false);
@@ -151,6 +153,34 @@
       </p>
     </section>
   {/if}
+
+  <section style="margin-bottom:24px;">
+    <h3 style="margin:0 0 10px 0;font-size:14px;text-transform:uppercase;color:var(--text-secondary,#6b7280);letter-spacing:.05em;">Мониторинг</h3>
+    <div style="display:flex;flex-direction:column;gap:8px;">
+      <label style="font-size:13px;">
+        Порог простоя (секунды, мин. 60)
+        <input
+          type="number"
+          min="60"
+          bind:value={settings.idle_threshold_secs}
+          style="display:block;width:100%;margin-top:4px;box-sizing:border-box;"
+        />
+      </label>
+      <label style="font-size:13px;">
+        Интервал логирования (секунды, 10–600)
+        <input
+          type="number"
+          min="10"
+          max="600"
+          bind:value={settings.log_interval_secs}
+          style="display:block;width:100%;margin-top:4px;box-sizing:border-box;"
+        />
+      </label>
+      <p style="font-size:12px;color:var(--text-secondary,#6b7280);margin:0;">
+        Применяется после перезапуска приложения.
+      </p>
+    </div>
+  </section>
 
   <button onclick={save} disabled={saving}>
     {saving ? "Сохранение..." : saved ? "Сохранено ✓" : "Сохранить"}

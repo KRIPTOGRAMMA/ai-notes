@@ -10,6 +10,8 @@ pub struct AppSettings {
     pub openai_model: String,
     pub anthropic_key: String,
     pub anthropic_model: String,
+    pub idle_threshold_secs: u64,  // порог простоя; применяется после перезапуска
+    pub log_interval_secs: u64,    // интервал тика activity-loop
 }
 
 impl Default for AppSettings {
@@ -20,6 +22,8 @@ impl Default for AppSettings {
             openai_model: "gpt-4o-mini".into(),
             anthropic_key: String::new(),
             anthropic_model: "claude-haiku-4-5-20251001".into(),
+            idle_threshold_secs: 300,
+            log_interval_secs: 60,
         }
     }
 }
@@ -67,6 +71,12 @@ pub async fn load_settings_raw(pool: &SqlitePool) -> AppResult<AppSettings> {
     if let Some(v) = get_setting(pool, "ai_provider").await { s.ai_provider = v; }
     if let Some(v) = get_setting(pool, "openai_model").await { s.openai_model = v; }
     if let Some(v) = get_setting(pool, "anthropic_model").await { s.anthropic_model = v; }
+    if let Some(v) = get_setting(pool, "idle_threshold_secs").await {
+        if let Ok(n) = v.parse() { s.idle_threshold_secs = n; }
+    }
+    if let Some(v) = get_setting(pool, "log_interval_secs").await {
+        if let Ok(n) = v.parse() { s.log_interval_secs = n; }
+    }
     // Ключи: сначала keyring, затем legacy-значение из БД
     s.openai_key = keyring_get("openai_key")
         .or(get_setting(pool, "openai_key").await)
@@ -87,6 +97,9 @@ pub async fn save_settings(pool: State<'_, SqlitePool>, settings: AppSettings) -
     set_setting(pool.inner(), "ai_provider", &settings.ai_provider).await?;
     set_setting(pool.inner(), "openai_model", &settings.openai_model).await?;
     set_setting(pool.inner(), "anthropic_model", &settings.anthropic_model).await?;
+    // Минимумы: не даём выставить значения, ломающие трекинг
+    set_setting(pool.inner(), "idle_threshold_secs", &settings.idle_threshold_secs.max(60).to_string()).await?;
+    set_setting(pool.inner(), "log_interval_secs", &settings.log_interval_secs.clamp(10, 600).to_string()).await?;
 
     for (name, value) in [("openai_key", &settings.openai_key), ("anthropic_key", &settings.anthropic_key)] {
         match keyring_set(name, value) {

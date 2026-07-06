@@ -63,9 +63,10 @@ pub fn start_activity_loop(
     tracker: Arc<ActivityTracker>,
     pool: SqlitePool,
     idle_threshold_secs: u64,
+    log_interval_secs: u64,
 ) {
     tokio::spawn(async move {
-        let mut tick = interval(Duration::from_secs(60));
+        let mut tick = interval(Duration::from_secs(log_interval_secs));
         // Локальное prev_state: tracker.state мгновенно сбрасывается в Active
         // из record_input, поэтому переход Idle→Active по нему не поймать.
         let mut prev_state = ActivityState::Active;
@@ -104,24 +105,25 @@ pub fn start_activity_loop(
             match new_state {
                 ActivityState::Active => {
                     let mut secs = tracker.active_secs.lock().unwrap();
-                    *secs += 60;
+                    *secs += log_interval_secs;
                 }
                 ActivityState::Idle => {
                     let mut secs = tracker.idle_secs.lock().unwrap();
-                    *secs += 60;
+                    *secs += log_interval_secs;
                 }
             }
 
             // Логируем в БД каждые 60 секунд
             let state_str = if elapsed >= idle_threshold_secs { "Idle" } else { "Active" };
             let result = sqlx::query(
-                "INSERT INTO activity_log (timestamp, state, app_focused, input_events)
-                 VALUES (?, ?, ?, ?)"
+                "INSERT INTO activity_log (timestamp, state, app_focused, input_events, duration_secs)
+                 VALUES (?, ?, ?, ?, ?)"
             )
             .bind(now.to_rfc3339())
             .bind(state_str)
             .bind(true)
             .bind(0i32)
+            .bind(log_interval_secs as i64)
             .execute(&pool)
             .await;
 
