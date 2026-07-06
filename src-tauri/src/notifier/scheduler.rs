@@ -1,17 +1,22 @@
 use chrono::Utc;
+use std::sync::{Arc, Mutex};
 use sqlx::{SqlitePool, Row};
 use tauri_plugin_notification::NotificationExt;
+use crate::commands::settings::WorkMode;
 
-pub fn start_scheduler(app: tauri::AppHandle, pool: SqlitePool) {
+pub fn start_scheduler(app: tauri::AppHandle, pool: SqlitePool, work_mode: Arc<Mutex<WorkMode>>) {
     tokio::spawn(async move {
         loop {
-            check_deadlines(&app, &pool).await;
+            // В режиме Focus дедлайны всё равно проверяем и помечаем, но не шлём:
+            // иначе после выхода из Focus прилетит пачка устаревших уведомлений.
+            let muted = *work_mode.lock().unwrap() == WorkMode::Focus;
+            check_deadlines(&app, &pool, muted).await;
             tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
         }
     });
 }
 
-async fn check_deadlines(app: &tauri::AppHandle, pool: &SqlitePool) {
+async fn check_deadlines(app: &tauri::AppHandle, pool: &SqlitePool, muted: bool) {
     let now = Utc::now();
     let in_1h = now + chrono::Duration::hours(1);
     let in_24h = now + chrono::Duration::hours(24);
@@ -39,19 +44,19 @@ async fn check_deadlines(app: &tauri::AppHandle, pool: &SqlitePool) {
         let deadline = deadline.with_timezone(&Utc);
 
         if !notified_24h && deadline <= in_24h && deadline > in_1h {
-            send_notification(app, &title, "Дедлайн через 24 часа");
+            if !muted { send_notification(app, &title, "Дедлайн через 24 часа"); }
             let _ = sqlx::query("UPDATE tasks SET notified_24h = 1 WHERE id = ?")
                 .bind(&id).execute(pool).await;
         }
 
         if !notified_1h && deadline <= in_1h && deadline > now {
-            send_notification(app, &title, "Дедлайн через 1 час");
+            if !muted { send_notification(app, &title, "Дедлайн через 1 час"); }
             let _ = sqlx::query("UPDATE tasks SET notified_1h = 1 WHERE id = ?")
                 .bind(&id).execute(pool).await;
         }
 
         if !notified_deadline && deadline <= now {
-            send_notification(app, &title, "Дедлайн наступил!");
+            if !muted { send_notification(app, &title, "Дедлайн наступил!"); }
             let _ = sqlx::query("UPDATE tasks SET notified_deadline = 1 WHERE id = ?")
                 .bind(&id).execute(pool).await;
         }

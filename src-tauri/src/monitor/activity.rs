@@ -64,6 +64,7 @@ pub fn start_activity_loop(
     pool: SqlitePool,
     idle_threshold_secs: u64,
     log_interval_secs: u64,
+    work_mode: Arc<Mutex<crate::commands::settings::WorkMode>>,
 ) {
     tokio::spawn(async move {
         let mut tick = interval(Duration::from_secs(log_interval_secs));
@@ -97,7 +98,11 @@ pub fn start_activity_loop(
             if prev_state == ActivityState::Idle && new_state == ActivityState::Active {
                 let away_mins = idle_since.map(|t| (now - t).num_minutes()).unwrap_or(0);
                 idle_since = None;
-                notify_return(&app, &pool, away_mins).await;
+                // Копируем режим в локальную переменную: держать lock через .await нельзя
+                let focus = *work_mode.lock().unwrap() == crate::commands::settings::WorkMode::Focus;
+                if !focus {
+                    notify_return(&app, &pool, away_mins).await;
+                }
             }
             prev_state = new_state.clone();
 

@@ -12,6 +12,7 @@
     anthropic_model: "claude-haiku-4-5-20251001",
     idle_threshold_secs: 300,
     log_interval_secs: 60,
+    work_mode: "Light",
   });
 
   let saving = $state(false);
@@ -153,6 +154,20 @@
       </p>
     </section>
   {/if}
+
+  <section style="margin-bottom:24px;">
+    <h3 style="margin:0 0 10px 0;font-size:14px;text-transform:uppercase;color:var(--text-secondary,#6b7280);letter-spacing:.05em;">Режим работы</h3>
+    <label style="font-size:13px;">
+      <select bind:value={settings.work_mode} style="display:block;width:100%;margin-top:4px;">
+        <option value="Light">Light — обычный режим</option>
+        <option value="Focus">Focus — без уведомлений</option>
+        <option value="Study">Study — помодоро-сессии (25/5)</option>
+      </select>
+    </label>
+    <p style="font-size:12px;color:var(--text-secondary,#6b7280);margin:6px 0 0 0;">
+      Применяется сразу после сохранения.
+    </p>
+  </section>
 
   <section style="margin-bottom:24px;">
     <h3 style="margin:0 0 10px 0;font-size:14px;text-transform:uppercase;color:var(--text-secondary,#6b7280);letter-spacing:.05em;">Мониторинг</h3>

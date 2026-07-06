@@ -8,7 +8,7 @@ mod ai;
 
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
-use tauri::menu::{Menu, MenuItem};
+use tauri::menu::{Menu, MenuItem, Submenu};
 use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
 use crate::db::init_db;
 use crate::ai::sidecar::{SharedSidecar, SidecarState};
@@ -69,8 +69,12 @@ pub fn run() {
                 .setup(|app| {
                     // Трей
                     let open = MenuItem::with_id(app, "open", "Открыть", true, None::<&str>)?;
+                    let mode_light = MenuItem::with_id(app, "mode_Light", "Light", true, None::<&str>)?;
+                    let mode_focus = MenuItem::with_id(app, "mode_Focus", "Focus", true, None::<&str>)?;
+                    let mode_study = MenuItem::with_id(app, "mode_Study", "Study", true, None::<&str>)?;
+                    let mode_menu = Submenu::with_items(app, "Режим", true, &[&mode_light, &mode_focus, &mode_study])?;
                     let quit = MenuItem::with_id(app, "quit", "Выход", true, None::<&str>)?;
-                    let menu = Menu::with_items(app, &[&open, &quit])?;
+                    let menu = Menu::with_items(app, &[&open, &mode_menu, &quit])?;
 
                     TrayIconBuilder::new()
                         .icon(app.default_window_icon().unwrap().clone())
@@ -83,6 +87,16 @@ pub fn run() {
                                 }
                             }
                             "quit" => app.exit(0),
+                            id if id.starts_with("mode_") => {
+                                let mode = commands::settings::WorkMode::from_str(&id["mode_".len()..]);
+                                // Живое состояние — сразу; в БД — асинхронно, чтобы
+                                // не блокировать поток событий меню
+                                *app.state::<Arc<Mutex<commands::settings::WorkMode>>>().lock().unwrap() = mode.clone();
+                                let pool = app.state::<sqlx::SqlitePool>().inner().clone();
+                                tauri::async_runtime::spawn(async move {
+                                    let _ = commands::settings::persist_work_mode(&pool, &mode).await;
+                                });
+                            }
                             _ => {}
                         })
                         .on_tray_icon_event(|tray, event| {
@@ -169,15 +183,21 @@ pub fn run() {
             let settings = commands::settings::load_settings_raw(&pool)
                 .await
                 .unwrap_or_default();
+            // Режим работы — живое разделяемое состояние: save_settings обновляет
+            // его сразу, без перезапуска приложения.
+            let work_mode = Arc::new(Mutex::new(settings.work_mode.clone()));
+            app.manage(work_mode.clone());
             monitor::activity::start_activity_loop(
                 app.app_handle().clone(),
                 tracker,
                 pool.clone(),
                 settings.idle_threshold_secs,
                 settings.log_interval_secs,
+                work_mode.clone(),
             );
 
-            notifier::scheduler::start_scheduler(app.app_handle().clone(), pool);
+            notifier::scheduler::start_scheduler(app.app_handle().clone(), pool, work_mode.clone());
+            notifier::pomodoro::start_pomodoro(app.app_handle().clone(), work_mode);
             app.run(|_, _| {});
         });
 }

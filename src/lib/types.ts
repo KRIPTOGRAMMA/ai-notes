@@ -78,4 +78,5 @@ export interface AppSettings {
   anthropic_model: string;
   idle_threshold_secs: number;
   log_interval_secs: number;
+  work_mode: "Light" | "Study" | "Focus";
 }
