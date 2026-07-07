@@ -38,10 +38,14 @@ fn row_to_note(row: sqlx::sqlite::SqliteRow) -> Note {
 
 #[tauri::command]
 pub async fn get_notes(pool: State<'_, SqlitePool>) -> AppResult<Vec<Note>> {
+    get_notes_impl(pool.inner()).await
+}
+
+pub async fn get_notes_impl(pool: &SqlitePool) -> AppResult<Vec<Note>> {
     let rows = sqlx::query(
         "SELECT id, title, content, created_at, updated_at FROM notes ORDER BY updated_at DESC"
     )
-    .fetch_all(pool.inner())
+    .fetch_all(pool)
     .await?;
 
     Ok(rows.into_iter().map(row_to_note).collect())
@@ -49,6 +53,10 @@ pub async fn get_notes(pool: State<'_, SqlitePool>) -> AppResult<Vec<Note>> {
 
 #[tauri::command]
 pub async fn create_note(pool: State<'_, SqlitePool>, note: CreateNote) -> AppResult<Note> {
+    create_note_impl(pool.inner(), note).await
+}
+
+pub async fn create_note_impl(pool: &SqlitePool, note: CreateNote) -> AppResult<Note> {
     let now = Utc::now().to_rfc3339();
     let id = Uuid::new_v4().to_string();
     let title = if note.title.trim().is_empty() { "Без названия".to_string() } else { note.title };
@@ -61,7 +69,7 @@ pub async fn create_note(pool: State<'_, SqlitePool>, note: CreateNote) -> AppRe
     .bind(&note.content)
     .bind(&now)
     .bind(&now)
-    .execute(pool.inner())
+    .execute(pool)
     .await?;
 
     Ok(Note { id, title, content: note.content, created_at: now.clone(), updated_at: now })
@@ -73,24 +81,28 @@ pub async fn update_note(
     id: String,
     patch: UpdateNote,
 ) -> AppResult<Note> {
+    update_note_impl(pool.inner(), id, patch).await
+}
+
+pub async fn update_note_impl(pool: &SqlitePool, id: String, patch: UpdateNote) -> AppResult<Note> {
     let now = Utc::now().to_rfc3339();
 
     if let Some(ref title) = patch.title {
         sqlx::query("UPDATE notes SET title = ?, updated_at = ? WHERE id = ?")
             .bind(title).bind(&now).bind(&id)
-            .execute(pool.inner()).await?;
+            .execute(pool).await?;
     }
     if let Some(ref content) = patch.content {
         sqlx::query("UPDATE notes SET content = ?, updated_at = ? WHERE id = ?")
             .bind(content).bind(&now).bind(&id)
-            .execute(pool.inner()).await?;
+            .execute(pool).await?;
     }
 
     let row = sqlx::query(
         "SELECT id, title, content, created_at, updated_at FROM notes WHERE id = ?"
     )
     .bind(&id)
-    .fetch_one(pool.inner())
+    .fetch_one(pool)
     .await?;
 
     Ok(row_to_note(row))
@@ -98,9 +110,58 @@ pub async fn update_note(
 
 #[tauri::command]
 pub async fn delete_note(pool: State<'_, SqlitePool>, id: String) -> AppResult<()> {
+    delete_note_impl(pool.inner(), id).await
+}
+
+pub async fn delete_note_impl(pool: &SqlitePool, id: String) -> AppResult<()> {
     sqlx::query("DELETE FROM notes WHERE id = ?")
         .bind(&id)
-        .execute(pool.inner())
+        .execute(pool)
         .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn test_pool() -> SqlitePool {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./src/db/migrations").run(&pool).await.unwrap();
+        pool
+    }
+
+    #[tokio::test]
+    async fn create_get_update_delete_roundtrip() {
+        let pool = test_pool().await;
+
+        let note = create_note_impl(&pool, CreateNote {
+            title: "заметка".into(),
+            content: "текст".into(),
+        }).await.unwrap();
+
+        let all = get_notes_impl(&pool).await.unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].title, "заметка");
+
+        let updated = update_note_impl(&pool, note.id.clone(), UpdateNote {
+            title: None,
+            content: Some("новый текст".into()),
+        }).await.unwrap();
+        assert_eq!(updated.content, "новый текст");
+        assert_eq!(updated.title, "заметка"); // не тронут
+
+        delete_note_impl(&pool, note.id).await.unwrap();
+        assert!(get_notes_impl(&pool).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn empty_title_becomes_placeholder() {
+        let pool = test_pool().await;
+        let note = create_note_impl(&pool, CreateNote {
+            title: "   ".into(),
+            content: "x".into(),
+        }).await.unwrap();
+        assert_eq!(note.title, "Без названия");
+    }
 }
