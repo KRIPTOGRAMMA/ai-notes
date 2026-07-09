@@ -3,6 +3,7 @@
   import { save as saveDialog, open as openDialog } from "@tauri-apps/plugin-dialog";
   import { api } from "../lib/api/tauri";
   import type { AppSettings } from "../lib/types";
+  import ModelDownloader from "../lib/components/ModelDownloader.svelte";
 
   let settings: AppSettings = $state({
     ai_provider: "local",
@@ -19,6 +20,7 @@
     idle_notify_min_mins: 10,
     pomodoro_work_mins: 25,
     pomodoro_break_mins: 5,
+    nudge_after_mins: 90,
     openai_in_keyring: false,
     anthropic_in_keyring: false,
   });
@@ -96,7 +98,7 @@
     <h3 style="margin:0 0 10px 0;font-size:14px;text-transform:uppercase;color:var(--text-secondary,#6b7280);letter-spacing:.05em;">ИИ-провайдер</h3>
 
     <div style="display:flex;flex-direction:column;gap:8px;">
-      {#each [["local","Локальная модель (llamafile)"],["openai","OpenAI"],["anthropic","Anthropic"]] as [val, label]}
+      {#each [["none","Без ИИ (функции отключены)"],["local","Локальная модель (llamafile)"],["openai","OpenAI"],["anthropic","Anthropic"]] as [val, label]}
         <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
           <input type="radio" name="provider" value={val} bind:group={settings.ai_provider} />
           {label}
@@ -170,10 +172,11 @@
 
   {#if settings.ai_provider === "local"}
     <section style="margin-bottom:24px;">
-      <p style="font-size:13px;color:var(--text-secondary,#6b7280);margin:0;">
-        Модель должна находиться по пути:<br/>
+      <p style="font-size:13px;color:var(--text-secondary,#6b7280);margin:0 0 10px 0;">
+        Локальная модель хранится в<br/>
         <code>~/.local/share/ai-notes/models/model.gguf</code>
       </p>
+      <ModelDownloader />
     </section>
   {/if}
 
@@ -235,6 +238,11 @@
       <label style="font-size:13px;">
         Уведомление о возвращении после простоя (минут, мин. 1)
         <input type="number" min="1" bind:value={settings.idle_notify_min_mins}
+          style="display:block;width:100%;margin-top:4px;box-sizing:border-box;" />
+      </label>
+      <label style="font-size:13px;">
+        Напоминание о перерыве после N минут непрерывной работы (0 — выкл, только режим Light)
+        <input type="number" min="0" bind:value={settings.nudge_after_mins}
           style="display:block;width:100%;margin-top:4px;box-sizing:border-box;" />
       </label>
     </div>

@@ -2,6 +2,7 @@
   import { enable as enableAutostart, disable as disableAutostart } from "@tauri-apps/plugin-autostart";
   import { api } from "../lib/api/tauri";
   import type { AppSettings } from "../lib/types";
+  import ModelDownloader from "../lib/components/ModelDownloader.svelte";
 
   interface Props {
     settings: AppSettings;
@@ -36,7 +37,8 @@
       } else {
         await disableAutostart().catch(() => {});
       }
-      settings.ai_provider = aiChoice === "cloud" ? "openai" : "local";
+      settings.ai_provider =
+        aiChoice === "cloud" ? "openai" : aiChoice === "none" ? "none" : "local";
       settings.onboarding_complete = true;
       await api.saveSettings(settings);
       onDone();
@@ -68,8 +70,13 @@
       <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;">
         <input type="radio" name="ai" value="local" bind:group={aiChoice} />
         <span><b>Локальная модель</b><br/>
-          <small style="color:var(--text-secondary,#6b7280);">Приватно, работает оффлайн. Файл модели (GGUF) нужно положить в <code>~/.local/share/ai-notes/models/model.gguf</code></small></span>
+          <small style="color:var(--text-secondary,#6b7280);">Приватно, работает оффлайн. GGUF-модель можно скачать прямо здесь.</small></span>
       </label>
+      {#if aiChoice === "local"}
+        <div style="margin:4px 0 4px 26px;">
+          <ModelDownloader />
+        </div>
+      {/if}
       <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;">
         <input type="radio" name="ai" value="cloud" bind:group={aiChoice} />
         <span><b>Облачный API</b><br/>

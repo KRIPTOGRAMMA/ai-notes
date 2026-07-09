@@ -32,7 +32,7 @@ impl WorkMode {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppSettings {
-    pub ai_provider: String,   // "local" | "openai" | "anthropic"
+    pub ai_provider: String,   // "none" | "local" | "openai" | "anthropic"
     pub openai_key: String,
     pub openai_model: String,
     pub anthropic_key: String,
@@ -46,6 +46,7 @@ pub struct AppSettings {
     pub idle_notify_min_mins: u64,   // минимальный простой (минуты) для notify_return
     pub pomodoro_work_mins: u64,     // длина рабочего блока помодоро
     pub pomodoro_break_mins: u64,    // длина перерыва помодоро
+    pub nudge_after_mins: u64,       // напоминание о перерыве после N мин непрерывной работы (0 — выкл)
     #[serde(default)]
     pub openai_in_keyring: bool,     // runtime-only: ключ хранится в keyring
     #[serde(default)]
@@ -69,6 +70,7 @@ impl Default for AppSettings {
             idle_notify_min_mins: 10,
             pomodoro_work_mins: 25,
             pomodoro_break_mins: 5,
+            nudge_after_mins: 90,
             openai_in_keyring: false,
             anthropic_in_keyring: false,
         }
@@ -147,6 +149,7 @@ pub async fn load_settings_raw(pool: &SqlitePool) -> AppResult<AppSettings> {
     if let Some(v) = get_setting(pool, "idle_notify_min_mins").await { if let Ok(n) = v.parse() { s.idle_notify_min_mins = n; } }
     if let Some(v) = get_setting(pool, "pomodoro_work_mins").await { if let Ok(n) = v.parse() { s.pomodoro_work_mins = n; } }
     if let Some(v) = get_setting(pool, "pomodoro_break_mins").await { if let Ok(n) = v.parse() { s.pomodoro_break_mins = n; } }
+    if let Some(v) = get_setting(pool, "nudge_after_mins").await { if let Ok(n) = v.parse() { s.nudge_after_mins = n; } }
     // Ключи: сначала keyring, затем legacy-значение из БД
     let openai_from_keyring = keyring_get("openai_key");
     let anthropic_from_keyring = keyring_get("anthropic_key");
@@ -186,6 +189,8 @@ pub async fn save_settings(
     set_setting(pool.inner(), "idle_notify_min_mins", &settings.idle_notify_min_mins.max(1).to_string()).await?;
     set_setting(pool.inner(), "pomodoro_work_mins", &settings.pomodoro_work_mins.clamp(1, 120).to_string()).await?;
     set_setting(pool.inner(), "pomodoro_break_mins", &settings.pomodoro_break_mins.clamp(1, 60).to_string()).await?;
+    // 0 = выключено; иначе минимум 20 минут, чтобы не спамить
+    set_setting(pool.inner(), "nudge_after_mins", &(if settings.nudge_after_mins == 0 { 0 } else { settings.nudge_after_mins.max(20) }).to_string()).await?;
 
     for (name, value) in [("openai_key", &settings.openai_key), ("anthropic_key", &settings.anthropic_key)] {
         match keyring_set(name, value) {

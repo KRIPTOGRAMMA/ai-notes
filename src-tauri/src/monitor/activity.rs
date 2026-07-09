@@ -58,6 +58,47 @@ impl ActivityTracker {
     }
 }
 
+// Результат одного тика конечного автомата простоя. Чистые данные — без БД,
+// уведомлений и блокировок, чтобы логику можно было покрыть юнит-тестами.
+#[derive(Debug, Clone, PartialEq)]
+pub struct IdleTick {
+    pub state: ActivityState,
+    pub idle_since: Option<chrono::DateTime<Utc>>,
+    // Some(минуты) — если это переход Idle→Active и стоит подумать об уведомлении
+    pub notify_return_mins: Option<i64>,
+}
+
+// Чистая логика одного тика: по предыдущему состоянию и таймингу считает новое
+// состояние, момент начала простоя и надо ли уведомить о возвращении.
+pub fn step_idle(
+    prev_state: &ActivityState,
+    idle_since: Option<chrono::DateTime<Utc>>,
+    now: chrono::DateTime<Utc>,
+    last_input: chrono::DateTime<Utc>,
+    idle_threshold_secs: u64,
+) -> IdleTick {
+    let elapsed = (now - last_input).num_seconds().max(0) as u64;
+    let new_state = if elapsed >= idle_threshold_secs {
+        ActivityState::Idle
+    } else {
+        ActivityState::Active
+    };
+
+    let mut new_idle_since = idle_since;
+    let mut notify_return_mins = None;
+
+    if *prev_state == ActivityState::Active && new_state == ActivityState::Idle {
+        new_idle_since = Some(last_input);
+    }
+    if *prev_state == ActivityState::Idle && new_state == ActivityState::Active {
+        let away = new_idle_since.map(|t| (now - t).num_minutes()).unwrap_or(0);
+        notify_return_mins = Some(away);
+        new_idle_since = None;
+    }
+
+    IdleTick { state: new_state, idle_since: new_idle_since, notify_return_mins }
+}
+
 pub fn start_activity_loop(
     app: tauri::AppHandle,
     tracker: Arc<ActivityTracker>,
@@ -77,27 +118,18 @@ pub fn start_activity_loop(
 
             let now = Utc::now();
             let last_input = *tracker.last_input.lock().unwrap();
-            let elapsed = (now - last_input).num_seconds() as u64;
 
-            // Обновляем состояние
-            let new_state = if elapsed >= idle_threshold_secs {
-                ActivityState::Idle
-            } else {
-                ActivityState::Active
-            };
+            let step = step_idle(&prev_state, idle_since, now, last_input, idle_threshold_secs);
+            let new_state = step.state.clone();
+            idle_since = step.idle_since;
 
             {
                 let mut state = tracker.state.lock().unwrap();
                 *state = new_state.clone();
             }
 
-            // Контекстные уведомления: ловим переходы между состояниями
-            if prev_state == ActivityState::Active && new_state == ActivityState::Idle {
-                idle_since = Some(last_input);
-            }
-            if prev_state == ActivityState::Idle && new_state == ActivityState::Active {
-                let away_mins = idle_since.map(|t| (now - t).num_minutes()).unwrap_or(0);
-                idle_since = None;
+            // Переход Idle→Active: уведомление о возвращении (кроме режима Focus)
+            if let Some(away_mins) = step.notify_return_mins {
                 // Копируем режим в локальную переменную: держать lock через .await нельзя
                 let focus = *work_mode.lock().unwrap() == crate::commands::settings::WorkMode::Focus;
                 if !focus {
@@ -118,8 +150,11 @@ pub fn start_activity_loop(
                 }
             }
 
-            // Логируем в БД каждые 60 секунд
-            let state_str = if elapsed >= idle_threshold_secs { "Idle" } else { "Active" };
+            // Логируем в БД каждый тик
+            let state_str = match new_state {
+                ActivityState::Idle => "Idle",
+                ActivityState::Active => "Active",
+            };
             let result = sqlx::query(
                 "INSERT INTO activity_log (timestamp, state, app_focused, input_events, duration_secs)
                  VALUES (?, ?, ?, ?, ?)"
@@ -182,4 +217,73 @@ pub struct ActivityDay {
 pub struct TaskCompletion {
     pub date: String,
     pub completed: i64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Duration as ChronoDuration;
+
+    fn at(now: chrono::DateTime<Utc>, secs_ago: i64) -> chrono::DateTime<Utc> {
+        now - ChronoDuration::seconds(secs_ago)
+    }
+
+    #[test]
+    fn active_stays_active_below_threshold() {
+        let now = Utc::now();
+        let step = step_idle(&ActivityState::Active, None, now, at(now, 100), 300);
+        assert_eq!(step.state, ActivityState::Active);
+        assert_eq!(step.idle_since, None);
+        assert_eq!(step.notify_return_mins, None);
+    }
+
+    #[test]
+    fn threshold_is_inclusive_boundary() {
+        let now = Utc::now();
+        // ровно порог → Idle (>=)
+        let step = step_idle(&ActivityState::Active, None, now, at(now, 300), 300);
+        assert_eq!(step.state, ActivityState::Idle);
+        // на секунду меньше порога → всё ещё Active
+        let step = step_idle(&ActivityState::Active, None, now, at(now, 299), 300);
+        assert_eq!(step.state, ActivityState::Active);
+    }
+
+    #[test]
+    fn active_to_idle_records_idle_since_and_does_not_notify() {
+        let now = Utc::now();
+        let last_input = at(now, 400);
+        let step = step_idle(&ActivityState::Active, None, now, last_input, 300);
+        assert_eq!(step.state, ActivityState::Idle);
+        assert_eq!(step.idle_since, Some(last_input));
+        assert_eq!(step.notify_return_mins, None);
+    }
+
+    #[test]
+    fn idle_stays_idle_keeps_idle_since() {
+        let now = Utc::now();
+        let idle_since = at(now, 600);
+        let step = step_idle(&ActivityState::Idle, Some(idle_since), now, at(now, 500), 300);
+        assert_eq!(step.state, ActivityState::Idle);
+        assert_eq!(step.idle_since, Some(idle_since));
+        assert_eq!(step.notify_return_mins, None);
+    }
+
+    #[test]
+    fn idle_to_active_notifies_with_away_minutes_and_clears_idle_since() {
+        let now = Utc::now();
+        // ушёл в простой 30 минут назад, только что вернулся (last_input = сейчас)
+        let idle_since = at(now, 30 * 60);
+        let step = step_idle(&ActivityState::Idle, Some(idle_since), now, now, 300);
+        assert_eq!(step.state, ActivityState::Active);
+        assert_eq!(step.idle_since, None);
+        assert_eq!(step.notify_return_mins, Some(30));
+    }
+
+    #[test]
+    fn idle_to_active_without_idle_since_reports_zero() {
+        let now = Utc::now();
+        // idle_since не выставлен (крайний случай) — away = 0, но уведомление рассматривается
+        let step = step_idle(&ActivityState::Idle, None, now, now, 300);
+        assert_eq!(step.notify_return_mins, Some(0));
+    }
 }

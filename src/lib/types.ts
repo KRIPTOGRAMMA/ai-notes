@@ -71,7 +71,7 @@ export interface UpdateNotePayload {
 }
 
 export interface AppSettings {
-  ai_provider: "local" | "openai" | "anthropic";
+  ai_provider: "none" | "local" | "openai" | "anthropic";
   openai_key: string;
   openai_model: string;
   anthropic_key: string;
@@ -85,6 +85,7 @@ export interface AppSettings {
   idle_notify_min_mins: number;
   pomodoro_work_mins: number;
   pomodoro_break_mins: number;
+  nudge_after_mins: number;
   openai_in_keyring: boolean;
   anthropic_in_keyring: boolean;
 }

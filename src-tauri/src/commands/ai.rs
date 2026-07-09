@@ -60,6 +60,8 @@ async fn ask_ai(app: &tauri::AppHandle, system: &str, user: &str) -> Result<Stri
         .map_err(|e| e.to_string())?;
 
     match settings.ai_provider.as_str() {
+        // Явно выключенный ИИ: не поднимаем локальную модель и не ходим в облако
+        "none" => Err("ИИ отключён в настройках".into()),
         "openai" if !settings.openai_key.is_empty() => {
             ask_openai(&settings.openai_key, &settings.openai_model, system, user).await
         }

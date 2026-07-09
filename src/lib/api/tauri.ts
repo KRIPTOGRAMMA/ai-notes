@@ -24,4 +24,7 @@ export const api = {
   isWayland: () => invoke<boolean>("is_wayland"),
   exportData: (path: string) => invoke<void>("export", { path }),
   importData: (path: string) => invoke<void>("import", { path }),
+  defaultModelUrl: () => invoke<string>("default_model_url"),
+  modelStatus: () => invoke<{ exists: boolean; size_bytes: number }>("model_status"),
+  downloadModel: (url: string) => invoke<void>("download_model", { url }),
 };

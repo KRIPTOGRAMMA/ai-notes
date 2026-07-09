@@ -81,7 +81,10 @@ pub fn run() {
                         commands::settings::get_settings,
                         commands::settings::save_settings,
                         commands::backup::export,
-                        commands::backup::import
+                        commands::backup::import,
+                        commands::model::default_model_url,
+                        commands::model::model_status,
+                        commands::model::download_model
                     ]
                 )
                 .setup(|app| {
@@ -221,6 +224,7 @@ pub fn run() {
             );
 
             notifier::scheduler::start_scheduler(app.app_handle().clone(), pool.clone(), work_mode.clone());
+            notifier::nudge::start_nudger(app.app_handle().clone(), pool.clone(), work_mode.clone());
             notifier::pomodoro::start_pomodoro(app.app_handle().clone(), work_mode, pool);
             app.run(|_, _| {});
         });
