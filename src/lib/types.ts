@@ -14,6 +14,14 @@ export type Recurrence =
   | "Weekly"
   | { Custom: [number, RecurrenceUnit] };
 
+export interface Subtask {
+  id: string;
+  task_id: string;
+  title: string;
+  done: boolean;
+  position: number;
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -28,6 +36,7 @@ export interface Task {
   completed_at: string | null;
   recurrence: Recurrence;
   hidden: boolean;
+  subtasks: Subtask[];
 }
 
 export interface CreateTaskPayload {

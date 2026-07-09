@@ -54,7 +54,9 @@ pub async fn get_tasks_impl(pool: &SqlitePool) -> Result<Vec<Task>, String> {
         .await
         .map_err(|e| e.to_string())?;
 
-    Ok(rows.into_iter().map(|r| r.into_task()).collect())
+    let mut tasks: Vec<Task> = rows.into_iter().map(|r| r.into_task()).collect();
+    crate::commands::subtasks::attach_subtasks(pool, &mut tasks).await?;
+    Ok(tasks)
 }
 
 #[tauri::command]
@@ -66,6 +68,13 @@ pub async fn delete_task(
 }
 
 pub async fn delete_task_impl(pool: &SqlitePool, id: String) -> Result<(), String> {
+  // Чистим подзадачи вручную — FK в SQLite по умолчанию не enforced
+  sqlx::query("DELETE FROM subtasks WHERE task_id = ?")
+    .bind(&id)
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
   sqlx::query("DELETE FROM tasks WHERE id = ?")
     .bind(id)
     .execute(pool)
@@ -243,7 +252,9 @@ pub async fn search_tasks_impl(pool: &SqlitePool, query: String) -> Result<Vec<T
   .await
   .map_err(|e| e.to_string())?;
 
-  Ok(rows.into_iter().map(|r| r.into_task()).collect())
+  let mut tasks: Vec<Task> = rows.into_iter().map(|r| r.into_task()).collect();
+  crate::commands::subtasks::attach_subtasks(pool, &mut tasks).await?;
+  Ok(tasks)
 }
 
 #[cfg(test)]

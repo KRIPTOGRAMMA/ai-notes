@@ -46,6 +46,17 @@ pub struct Task {
   pub completed_at: Option<DateTime<Utc>>,
   pub recurrence: Recurrence,
   pub hidden: bool,
+  #[serde(default)]
+  pub subtasks: Vec<Subtask>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, sqlx::FromRow)]
+pub struct Subtask {
+  pub id: String,
+  pub task_id: String,
+  pub title: String,
+  pub done: bool,
+  pub position: i64,
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -182,6 +193,7 @@ impl CreateTask {
             completed_at: None,
             recurrence: self.recurrence.unwrap_or(Recurrence::None),
             hidden: false,
+            subtasks: Vec::new(),
         }
     }
 }
@@ -222,6 +234,7 @@ impl TaskRow {
                 .map(|d| d.with_timezone(&Utc)),
             recurrence: Recurrence::from_db(&self.recurrence),
             hidden: self.hidden,
+            subtasks: Vec::new(),
         }
     }
 }

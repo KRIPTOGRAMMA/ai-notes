@@ -49,18 +49,42 @@
     await api.aiSubtasks(id, title);
   }
 
-  async function acceptSubtask(title: string) {
-    await taskStore.create({
-      title,
-      description: null,
-      status: "Todo",
-      priority: "Medium",
-      category: "Work",
-      deadline: null,
-      tags: [],
-      recurrence: "None",
-    });
+  // Добавить одну AI-подзадачу как чек-лист-пункт под родительскую задачу
+  async function acceptSubtask(parentId: string, title: string) {
+    await api.addSubtask(parentId, title);
+    await taskStore.load();
   }
+
+  // Принять все предложенные подзадачи разом
+  async function acceptAllSubtasks(parentId: string, items: string[]) {
+    for (const title of items) {
+      await api.addSubtask(parentId, title);
+    }
+    subtasksPreview = null;
+    await taskStore.load();
+  }
+
+  async function toggleSubtask(id: string) {
+    await api.toggleSubtask(id);
+    await taskStore.load();
+  }
+
+  async function removeSubtask(id: string) {
+    await api.deleteSubtask(id);
+    await taskStore.load();
+  }
+
+  let newSubtaskInput = $state<Record<string, string>>({});
+  async function addManualSubtask(parentId: string) {
+    const title = (newSubtaskInput[parentId] ?? "").trim();
+    if (!title) return;
+    await api.addSubtask(parentId, title);
+    newSubtaskInput[parentId] = "";
+    await taskStore.load();
+  }
+
+  let collapsed = $state<Record<string, boolean>>({});
+  const doneCount = (t: Task) => t.subtasks.filter((s) => s.done).length;
 
   async function classifyTask(id: string, title: string) {
     aiLoadingId = id;
@@ -265,15 +289,55 @@
           </div>
 
           {#if subtasksPreview && subtasksPreview.taskId === task.id}
-            <div style="margin-top:8px;padding:10px;background:#f9fafb;border-radius:6px;">
-              <p style="margin:0 0 8px 0;font-size:12px;font-weight:600;color:#374151;">Предлагаемые подзадачи:</p>
+            <div style="margin-top:8px;padding:10px;background:var(--bg-secondary,#f9fafb);border-radius:6px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                <span style="font-size:12px;font-weight:600;">ИИ предлагает подзадачи:</span>
+                <button onclick={() => acceptAllSubtasks(task.id, subtasksPreview!.items)}>Принять все</button>
+              </div>
               {#each subtasksPreview.items as subtask}
                 <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
                   <span style="font-size:13px;flex:1;">{subtask}</span>
-                  <button onclick={() => acceptSubtask(subtask)}>+ Добавить</button>
+                  <button onclick={() => acceptSubtask(task.id, subtask)}>+ Добавить</button>
                 </div>
               {/each}
               <button onclick={() => subtasksPreview = null} style="margin-top:4px;">Закрыть</button>
+            </div>
+          {/if}
+
+          <!-- Чек-лист подзадач: вложен в задачу, прогресс N/M -->
+          {#if task.subtasks.length > 0}
+            <div style="margin-top:8px;">
+              <button
+                onclick={() => collapsed[task.id] = !collapsed[task.id]}
+                style="display:flex;align-items:center;gap:8px;background:none;border:none;padding:0;cursor:pointer;font-size:13px;font-weight:600;color:var(--text,#374151);"
+              >
+                <span>{collapsed[task.id] ? "▸" : "▾"}</span>
+                Подзадачи
+                <span style="color:var(--text-secondary,#6b7280);font-weight:400;">
+                  {doneCount(task)}/{task.subtasks.length}
+                </span>
+              </button>
+              {#if !collapsed[task.id]}
+                <div style="margin:6px 0 0 18px;display:flex;flex-direction:column;gap:4px;">
+                  {#each task.subtasks as sub (sub.id)}
+                    <div style="display:flex;align-items:center;gap:8px;">
+                      <input type="checkbox" checked={sub.done} onchange={() => toggleSubtask(sub.id)} />
+                      <span style="font-size:13px;flex:1;{sub.done ? 'text-decoration:line-through;color:var(--text-secondary,#9ca3af);' : ''}">{sub.title}</span>
+                      <button onclick={() => removeSubtask(sub.id)} title="Удалить" style="font-size:12px;">✕</button>
+                    </div>
+                  {/each}
+                  <div style="display:flex;gap:6px;margin-top:2px;">
+                    <input
+                      type="text"
+                      placeholder="+ подзадача"
+                      bind:value={newSubtaskInput[task.id]}
+                      onkeydown={(e) => { if (e.key === 'Enter') addManualSubtask(task.id); }}
+                      style="flex:1;font-size:12px;padding:2px 6px;"
+                    />
+                    <button onclick={() => addManualSubtask(task.id)}>Добавить</button>
+                  </div>
+                </div>
+              {/if}
             </div>
           {/if}
         </li>

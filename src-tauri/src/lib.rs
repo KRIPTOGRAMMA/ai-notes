@@ -84,7 +84,11 @@ pub fn run() {
                         commands::backup::import,
                         commands::model::default_model_url,
                         commands::model::model_status,
-                        commands::model::download_model
+                        commands::model::download_model,
+                        commands::subtasks::get_subtasks,
+                        commands::subtasks::add_subtask,
+                        commands::subtasks::toggle_subtask,
+                        commands::subtasks::delete_subtask
                     ]
                 )
                 .setup(|app| {

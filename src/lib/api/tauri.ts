@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Task, CreateTaskPayload, UpdateTaskPayload, Note, CreateNotePayload, UpdateNotePayload, AppSettings } from "../types";
+import type { Task, Subtask, CreateTaskPayload, UpdateTaskPayload, Note, CreateNotePayload, UpdateNotePayload, AppSettings } from "../types";
 
 export const api = {
   getTasks: () => invoke<Task[]>("get_tasks"),
@@ -24,6 +24,10 @@ export const api = {
   isWayland: () => invoke<boolean>("is_wayland"),
   exportData: (path: string) => invoke<void>("export", { path }),
   importData: (path: string) => invoke<void>("import", { path }),
+  getSubtasks: (taskId: string) => invoke<Subtask[]>("get_subtasks", { taskId }),
+  addSubtask: (taskId: string, title: string) => invoke<Subtask>("add_subtask", { taskId, title }),
+  toggleSubtask: (id: string) => invoke<void>("toggle_subtask", { id }),
+  deleteSubtask: (id: string) => invoke<void>("delete_subtask", { id }),
   defaultModelUrl: () => invoke<string>("default_model_url"),
   modelStatus: () => invoke<{ exists: boolean; size_bytes: number }>("model_status"),
   downloadModel: (url: string) => invoke<void>("download_model", { url }),
