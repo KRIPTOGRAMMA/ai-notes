@@ -75,6 +75,13 @@ pub async fn delete_task_impl(pool: &SqlitePool, id: String) -> Result<(), Strin
     .await
     .map_err(|e| e.to_string())?;
 
+  // Обнуляем привязку заметок к удаляемой задаче (FK не enforced)
+  sqlx::query("UPDATE notes SET linked_task_id = NULL WHERE linked_task_id = ?")
+    .bind(&id)
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
   sqlx::query("DELETE FROM tasks WHERE id = ?")
     .bind(id)
     .execute(pool)
@@ -386,5 +393,25 @@ mod tests {
         let t = create_task_impl(&pool, new_task("на удаление")).await.unwrap();
         delete_task_impl(&pool, t.id).await.unwrap();
         assert!(get_tasks_impl(&pool).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn delete_task_unlinks_notes() {
+        use crate::commands::notes::{create_note_impl, get_notes_impl, CreateNote};
+        let pool = test_pool().await;
+        let t = create_task_impl(&pool, new_task("с заметкой")).await.unwrap();
+        create_note_impl(&pool, CreateNote {
+            title: "привязанная".into(),
+            content: "x".into(),
+            tags: vec![],
+            linked_task_id: Some(t.id.clone()),
+        }).await.unwrap();
+
+        delete_task_impl(&pool, t.id).await.unwrap();
+
+        // Заметка осталась, но привязка обнулена
+        let notes = get_notes_impl(&pool).await.unwrap();
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].linked_task_id, None);
     }
 }

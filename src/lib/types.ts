@@ -65,6 +65,8 @@ export interface Note {
   id: string;
   title: string;
   content: string;
+  tags: string[];
+  linked_task_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -72,11 +74,15 @@ export interface Note {
 export interface CreateNotePayload {
   title: string;
   content: string;
+  tags?: string[];
+  linked_task_id?: string | null;
 }
 
 export interface UpdateNotePayload {
   title?: string;
   content?: string;
+  tags?: string[];
+  linked_task_id?: string | null;
 }
 
 export interface AppSettings {
@@ -95,6 +101,11 @@ export interface AppSettings {
   pomodoro_work_mins: number;
   pomodoro_break_mins: number;
   nudge_after_mins: number;
+  theme_mode: "light" | "dark" | "system";
+  color_accent: string;
+  color_bg: string;
+  color_text: string;
+  color_border: string;
   openai_in_keyring: boolean;
   anthropic_in_keyring: boolean;
 }

@@ -48,6 +48,16 @@ pub struct AppSettings {
     pub pomodoro_break_mins: u64,    // длина перерыва помодоро
     pub nudge_after_mins: u64,       // напоминание о перерыве после N мин непрерывной работы (0 — выкл)
     #[serde(default)]
+    pub theme_mode: String,          // "light" | "dark" | "system"
+    #[serde(default)]
+    pub color_accent: String,        // оверрайды цветов; пусто = дефолт из CSS
+    #[serde(default)]
+    pub color_bg: String,
+    #[serde(default)]
+    pub color_text: String,
+    #[serde(default)]
+    pub color_border: String,
+    #[serde(default)]
     pub openai_in_keyring: bool,     // runtime-only: ключ хранится в keyring
     #[serde(default)]
     pub anthropic_in_keyring: bool,  // runtime-only: ключ хранится в keyring
@@ -71,6 +81,11 @@ impl Default for AppSettings {
             pomodoro_work_mins: 25,
             pomodoro_break_mins: 5,
             nudge_after_mins: 90,
+            theme_mode: "system".into(),
+            color_accent: String::new(),
+            color_bg: String::new(),
+            color_text: String::new(),
+            color_border: String::new(),
             openai_in_keyring: false,
             anthropic_in_keyring: false,
         }
@@ -150,6 +165,11 @@ pub async fn load_settings_raw(pool: &SqlitePool) -> AppResult<AppSettings> {
     if let Some(v) = get_setting(pool, "pomodoro_work_mins").await { if let Ok(n) = v.parse() { s.pomodoro_work_mins = n; } }
     if let Some(v) = get_setting(pool, "pomodoro_break_mins").await { if let Ok(n) = v.parse() { s.pomodoro_break_mins = n; } }
     if let Some(v) = get_setting(pool, "nudge_after_mins").await { if let Ok(n) = v.parse() { s.nudge_after_mins = n; } }
+    if let Some(v) = get_setting(pool, "theme_mode").await { s.theme_mode = v; }
+    if let Some(v) = get_setting(pool, "color_accent").await { s.color_accent = v; }
+    if let Some(v) = get_setting(pool, "color_bg").await { s.color_bg = v; }
+    if let Some(v) = get_setting(pool, "color_text").await { s.color_text = v; }
+    if let Some(v) = get_setting(pool, "color_border").await { s.color_border = v; }
     // Ключи: сначала keyring, затем legacy-значение из БД
     let openai_from_keyring = keyring_get("openai_key");
     let anthropic_from_keyring = keyring_get("anthropic_key");
@@ -191,6 +211,13 @@ pub async fn save_settings(
     set_setting(pool.inner(), "pomodoro_break_mins", &settings.pomodoro_break_mins.clamp(1, 60).to_string()).await?;
     // 0 = выключено; иначе минимум 20 минут, чтобы не спамить
     set_setting(pool.inner(), "nudge_after_mins", &(if settings.nudge_after_mins == 0 { 0 } else { settings.nudge_after_mins.max(20) }).to_string()).await?;
+    // Тема: режим + цветовые оверрайды (пустая строка = дефолт из CSS)
+    let theme_mode = match settings.theme_mode.as_str() { "light" | "dark" | "system" => settings.theme_mode.as_str(), _ => "system" };
+    set_setting(pool.inner(), "theme_mode", theme_mode).await?;
+    set_setting(pool.inner(), "color_accent", &settings.color_accent).await?;
+    set_setting(pool.inner(), "color_bg", &settings.color_bg).await?;
+    set_setting(pool.inner(), "color_text", &settings.color_text).await?;
+    set_setting(pool.inner(), "color_border", &settings.color_border).await?;
 
     for (name, value) in [("openai_key", &settings.openai_key), ("anthropic_key", &settings.anthropic_key)] {
         match keyring_set(name, value) {

@@ -3,7 +3,33 @@
   import { save as saveDialog, open as openDialog } from "@tauri-apps/plugin-dialog";
   import { api } from "../lib/api/tauri";
   import type { AppSettings } from "../lib/types";
+  import { applyTheme } from "../lib/theme";
   import ModelDownloader from "../lib/components/ModelDownloader.svelte";
+
+  const THEME_PRESETS: { name: string; accent: string }[] = [
+    { name: "Indigo", accent: "#6366f1" },
+    { name: "Emerald", accent: "#10b981" },
+    { name: "Rose", accent: "#f43f5e" },
+    { name: "Slate", accent: "#64748b" },
+  ];
+
+  // Применяем тему сразу при любом изменении — живое превью без нажатия «Сохранить».
+  function previewTheme() {
+    applyTheme(settings.theme_mode, settings);
+  }
+
+  function applyPreset(accent: string) {
+    settings.color_accent = accent;
+    previewTheme();
+  }
+
+  function resetColors() {
+    settings.color_accent = "";
+    settings.color_bg = "";
+    settings.color_text = "";
+    settings.color_border = "";
+    previewTheme();
+  }
 
   let settings: AppSettings = $state({
     ai_provider: "local",
@@ -21,6 +47,11 @@
     pomodoro_work_mins: 25,
     pomodoro_break_mins: 5,
     nudge_after_mins: 90,
+    theme_mode: "system",
+    color_accent: "",
+    color_bg: "",
+    color_text: "",
+    color_border: "",
     openai_in_keyring: false,
     anthropic_in_keyring: false,
   });
@@ -42,6 +73,7 @@
     error = null;
     try {
       await api.saveSettings(settings);
+      applyTheme(settings.theme_mode, settings);
       saved = true;
       setTimeout(() => saved = false, 2000);
     } catch (e) {
@@ -93,6 +125,46 @@
   {#if error}
     <div style="background:#fee2e2;color:#dc2626;padding:8px 12px;border-radius:6px;margin-bottom:12px;">{error}</div>
   {/if}
+
+  <section style="margin-bottom:24px;">
+    <h3 style="margin:0 0 10px 0;font-size:14px;text-transform:uppercase;color:var(--text-secondary,#6b7280);letter-spacing:.05em;">Внешний вид</h3>
+
+    <div style="display:flex;gap:16px;margin-bottom:12px;">
+      {#each [["light","Светлая"],["dark","Тёмная"],["system","Системная"]] as [val, label]}
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+          <input type="radio" name="theme_mode" value={val} bind:group={settings.theme_mode} onchange={previewTheme} />
+          {label}
+        </label>
+      {/each}
+    </div>
+
+    <div style="margin-bottom:10px;">
+      <div style="font-size:12px;color:var(--text-secondary,#6b7280);margin-bottom:6px;">Пресеты акцента</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        {#each THEME_PRESETS as p}
+          <button type="button" onclick={() => applyPreset(p.accent)}
+            style="display:flex;align-items:center;gap:6px;">
+            <span style="width:12px;height:12px;border-radius:50%;background:{p.accent};display:inline-block;"></span>
+            {p.name}
+          </button>
+        {/each}
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px 16px;max-width:420px;">
+      {#each [["color_accent","Акцент"],["color_bg","Фон"],["color_text","Текст"],["color_border","Границы"]] as [key, label]}
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;">
+          <input type="color"
+            value={(settings as any)[key] || "#6366f1"}
+            oninput={(e) => { (settings as any)[key] = e.currentTarget.value; previewTheme(); }}
+            style="width:34px;height:26px;padding:0;border-radius:4px;" />
+          {label}
+        </label>
+      {/each}
+    </div>
+
+    <button type="button" onclick={resetColors} style="margin-top:10px;">Сбросить к дефолту</button>
+  </section>
 
   <section style="margin-bottom:24px;">
     <h3 style="margin:0 0 10px 0;font-size:14px;text-transform:uppercase;color:var(--text-secondary,#6b7280);letter-spacing:.05em;">ИИ-провайдер</h3>

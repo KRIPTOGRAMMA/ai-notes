@@ -3,16 +3,20 @@
   import { noteStore } from "./lib/stores/notes.svelte";
   import { api } from "./lib/api/tauri";
   import { onMount } from "svelte";
+  import { listen } from "@tauri-apps/api/event";
   import type { AppSettings } from "./lib/types";
+  import { applyCachedTheme, applyTheme } from "./lib/theme";
   import Onboarding from "./views/Onboarding.svelte";
   import Tasks from "./views/Tasks.svelte";
   import Notes from "./views/Notes.svelte";
   import Settings from "./views/Settings.svelte";
   import Dashboard from "./views/Dashboard.svelte";
+  import SearchOverlay from "./lib/components/SearchOverlay.svelte";
   import "./app.css";
 
-  type View = "tasks" | "notes" | "settings" | "dashboard";
+  type View = "tasks" | "notes" | "dashboard" | "settings";
   let activeView: View = $state("tasks");
+  let showSearch = $state(false);
 
   // Онбординг: пока настройки не загружены — ничего не показываем,
   // чтобы главный экран не мелькал перед онбордингом
@@ -20,33 +24,28 @@
   let showOnboarding = $state(false);
   let isWayland = $state(false);
 
+  // Тема: сначала из кеша (анти-мигание), затем — источник истины из БД.
+  applyCachedTheme();
+
   onMount(async () => {
+    // Заметки нужны глобально для поиска (Ctrl+K), даже если раздел ещё не открывали.
+    noteStore.load();
+    // Заметка, созданная в окне быстрого ввода — подхватываем в список.
+    const unlistenNote = listen("note-created", () => noteStore.load());
+    void unlistenNote;
     try {
       isWayland = await api.isWayland();
       loadedSettings = await api.getSettings();
       showOnboarding = !loadedSettings.onboarding_complete;
+      applyTheme(loadedSettings.theme_mode, loadedSettings);
     } catch {
       loadedSettings = null;
       showOnboarding = false;
     }
   });
 
-  const savedTheme = localStorage.getItem("theme");
-  let isDark = $state(
-    savedTheme !== null
-      ? savedTheme === "dark"
-      : window.matchMedia("(prefers-color-scheme: dark)").matches
-  );
-
-  if (typeof document !== "undefined") {
-    document.documentElement.classList.toggle("dark", isDark);
-  }
-
-  function toggleTheme() {
-    isDark = !isDark;
-    document.documentElement.classList.toggle("dark", isDark);
-    localStorage.setItem("theme", isDark ? "dark" : "light");
-  }
+  // Ctrl+1..4 переключают разделы в порядке шапки.
+  const viewOrder: View[] = ["tasks", "notes", "dashboard", "settings"];
 
   let lastActivityPing = 0;
   function pingActivity() {
@@ -61,12 +60,34 @@
   onmousemove={pingActivity}
   onkeydown={(e) => {
     pingActivity();
-    if ((e.ctrlKey && e.code === "KeyK") || (e.ctrlKey && e.shiftKey && e.code === "KeyN")) {
+    if (!e.ctrlKey) return;
+    // Ctrl+Shift+N — быстрая задача, Ctrl+Shift+M — быстрая заметка
+    if (e.shiftKey && e.code === "KeyN") {
       e.preventDefault();
-      api.openQuickTask().catch(() => {});
+      api.openQuickCapture("task").catch(() => {});
+    } else if (e.shiftKey && e.code === "KeyM") {
+      e.preventDefault();
+      api.openQuickCapture("note").catch(() => {});
+    } else if (e.code === "KeyK") {
+      e.preventDefault();
+      showSearch = true;
+    } else if (!e.shiftKey && !e.altKey && e.code >= "Digit1" && e.code <= "Digit4") {
+      const idx = Number(e.code.slice(-1)) - 1;
+      if (idx >= 0 && idx < viewOrder.length) {
+        e.preventDefault();
+        activeView = viewOrder[idx];
+      }
     }
   }}
 />
+
+{#if showSearch}
+  <SearchOverlay
+    onClose={() => showSearch = false}
+    onSelectTask={(id) => { activeView = "tasks"; taskStore.requestFocus(id); showSearch = false; }}
+    onSelectNote={(id) => { activeView = "notes"; noteStore.requestFocus(id); showSearch = false; }}
+  />
+{/if}
 
 {#if showOnboarding && loadedSettings}
   <Onboarding
@@ -111,7 +132,7 @@
     style="font-weight:{activeView === 'dashboard' ? '600' : '400'};"
   >Дашборд</button>
   <span style="flex:1;"></span>
-  <button onclick={toggleTheme}>{isDark ? "Светлая" : "Тёмная"}</button>
+  <button onclick={() => showSearch = true} title="Поиск (Ctrl+K)">Поиск</button>
 </div>
 
 {#if activeView === "tasks"}
