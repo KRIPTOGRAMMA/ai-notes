@@ -3,6 +3,9 @@ import type { Note, CreateNotePayload, UpdateNotePayload } from "../types";
 
 let notes: Note[] = $state([]);
 let error: string | null = $state(null);
+// Сигнал «открыть эту заметку» — ставится из глобального поиска, Notes.svelte
+// реагирует через $effect и выбирает заметку в редакторе.
+let focusNoteId: string | null = $state(null);
 
 function describeError(e: unknown): string {
   if (typeof e === "string") return e;
@@ -14,6 +17,9 @@ export const noteStore = {
   get notes() { return notes; },
   get error() { return error; },
   clearError() { error = null; },
+  get focusNoteId() { return focusNoteId; },
+  requestFocus(id: string) { focusNoteId = id; },
+  clearFocus() { focusNoteId = null; },
 
   async load() {
     try {

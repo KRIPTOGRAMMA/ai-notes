@@ -20,6 +20,15 @@
   let aiError: string | null = $state(null);
   let subtasksPreview: { taskId: string; items: string[] } | null = $state(null);
 
+  // Открытие задачи по сигналу из глобального поиска (Ctrl+K).
+  $effect(() => {
+    const id = taskStore.focusTaskId;
+    if (!id) return;
+    const task = taskStore.tasks.find(t => t.id === id);
+    if (task) editingTask = task;
+    taskStore.clearFocus();
+  });
+
   async function handleCreate(data: CreateTaskPayload | UpdateTaskPayload) {
     await taskStore.create(data as CreateTaskPayload);
   }

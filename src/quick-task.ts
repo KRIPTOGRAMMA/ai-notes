@@ -1,4 +1,4 @@
 import { mount } from "svelte";
-import QuickTask from "./lib/components/QuickTask.svelte";
+import QuickCapture from "./lib/components/QuickCapture.svelte";
 
-mount(QuickTask, { target: document.getElementById("app")! });
+mount(QuickCapture, { target: document.getElementById("app")! });

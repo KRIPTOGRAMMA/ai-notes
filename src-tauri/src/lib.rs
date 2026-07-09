@@ -7,11 +7,14 @@ mod monitor;
 mod ai;
 
 use std::sync::{Arc, Mutex};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tauri::menu::{Menu, MenuItem, CheckMenuItem, Submenu};
 use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
 
 pub type ModeItems = Arc<Mutex<Vec<CheckMenuItem<tauri::Wry>>>>;
+// Начальный режим окна быстрого ввода: "task" | "note". Живёт как managed-state,
+// чтобы QuickCapture мог прочитать его при монтировании (гонка emit-до-mount).
+pub type QuickMode = Arc<Mutex<String>>;
 use crate::db::init_db;
 use crate::ai::sidecar::{SharedSidecar, SidecarState};
 
@@ -20,12 +23,33 @@ fn is_wayland() -> bool {
     std::env::var("WAYLAND_DISPLAY").is_ok()
 }
 
-#[tauri::command]
-fn open_quick_task(app: tauri::AppHandle) {
+fn normalize_quick_mode(mode: &str) -> &'static str {
+    if mode == "note" { "note" } else { "task" }
+}
+
+// Единый путь открытия окна быстрого ввода: фиксируем режим, оповещаем окно
+// (если уже смонтировано) и показываем его. Используется и командой из фронта,
+// и глобальными хоткеями.
+fn show_quick_capture(app: &tauri::AppHandle, mode: &str) {
+    let mode = normalize_quick_mode(mode);
+    if let Some(state) = app.try_state::<QuickMode>() {
+        *state.lock().unwrap() = mode.to_string();
+    }
+    let _ = app.emit_to("quick-task", "quick-mode", mode);
     if let Some(w) = app.get_webview_window("quick-task") {
         let _ = w.show();
         let _ = w.set_focus();
     }
+}
+
+#[tauri::command]
+fn open_quick_capture(app: tauri::AppHandle, mode: String) {
+    show_quick_capture(&app, &mode);
+}
+
+#[tauri::command]
+fn get_quick_mode(mode: tauri::State<'_, QuickMode>) -> String {
+    mode.lock().unwrap().clone()
 }
 
 
@@ -64,7 +88,8 @@ pub fn run() {
                         commands::tasks::update_task,
                         commands::tasks::complete_task,
                         commands::tasks::search_tasks,
-                        open_quick_task,
+                        open_quick_capture,
+                        get_quick_mode,
                         is_wayland,
                         commands::monitor::record_input,
                         commands::monitor::get_session_stats,
@@ -104,6 +129,10 @@ pub fn run() {
 
                     let mode_items: ModeItems = Arc::new(Mutex::new(vec![mode_light, mode_focus, mode_study]));
                     app.manage(mode_items);
+
+                    // Начальный режим окна быстрого ввода (по умолчанию — задача)
+                    let quick_mode: QuickMode = Arc::new(Mutex::new("task".to_string()));
+                    app.manage(quick_mode);
 
                     TrayIconBuilder::new()
                         .icon(app.default_window_icon().unwrap().clone())
@@ -164,28 +193,27 @@ pub fn run() {
 
                     // Парсинг аргументов CLI для поддержки системных хоткеев на Wayland
                     let args: Vec<String> = std::env::args().collect();
-                    if args.iter().any(|arg| arg == "--quick-task" || arg == "-q") {
+                    let quick_note = args.iter().any(|a| a == "--quick-note");
+                    let quick_task = args.iter().any(|a| a == "--quick-task" || a == "-q");
+                    if quick_note || quick_task {
                         if let Some(main_win) = app.get_webview_window("main") {
                             let _ = main_win.hide();
                         }
-                        if let Some(quick_win) = app.get_webview_window("quick-task") {
-                            let _ = quick_win.show();
-                            let _ = quick_win.set_focus();
-                        }
+                        show_quick_capture(&app.app_handle(), if quick_note { "note" } else { "task" });
                     }
 
-                    // Глобальные хоткеи
+                    // Глобальные хоткеи: Ctrl+Shift+N — задача, Ctrl+Shift+M — заметка
                     use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
-                    let new_task_shortcut = "Ctrl+Shift+N".parse::<Shortcut>().unwrap();
+                    let task_shortcut = "Ctrl+Shift+N".parse::<Shortcut>().unwrap();
+                    let note_shortcut = "Ctrl+Shift+M".parse::<Shortcut>().unwrap();
+                    let note_id = note_shortcut.id();
 
                     app.global_shortcut().on_shortcuts(
-                        [new_task_shortcut],
-                        move |app, _shortcut, event| {
+                        [task_shortcut, note_shortcut],
+                        move |app, shortcut, event| {
                             if event.state == ShortcutState::Pressed {
-                                if let Some(w) = app.get_webview_window("quick-task") {
-                                    let _ = w.show();
-                                    let _ = w.set_focus();
-                                }
+                                let mode = if shortcut.id() == note_id { "note" } else { "task" };
+                                show_quick_capture(app, mode);
                             }
                         }
                     )?;

@@ -3,6 +3,9 @@ import type { Task, CreateTaskPayload, UpdateTaskPayload } from "../types";
 
 let tasks: Task[] = $state([]);
 let error: string | null = $state(null);
+// Сигнал «открыть эту задачу» — ставится из глобального поиска, Tasks.svelte
+// реагирует через $effect и открывает TaskModal.
+let focusTaskId: string | null = $state(null);
 
 function describeError(e: unknown): string {
   if (typeof e === "string") return e;
@@ -16,6 +19,9 @@ export const taskStore = {
   get historyTasks() { return tasks.filter(t => t.hidden); },
   get error() { return error; },
   clearError() { error = null; },
+  get focusTaskId() { return focusTaskId; },
+  requestFocus(id: string) { focusTaskId = id; },
+  clearFocus() { focusTaskId = null; },
 
   async load() {
     try {
