@@ -41,6 +41,15 @@ pub struct AppSettings {
     pub log_interval_secs: u64,    // интервал тика activity-loop
     pub work_mode: WorkMode,   // Light | Study | Focus
     pub onboarding_complete: bool,
+    pub deadline_warn_hours: u64,    // за сколько часов до дедлайна первое уведомление
+    pub deadline_warn_minutes: u64,  // за сколько минут до дедлайна второе уведомление
+    pub idle_notify_min_mins: u64,   // минимальный простой (минуты) для notify_return
+    pub pomodoro_work_mins: u64,     // длина рабочего блока помодоро
+    pub pomodoro_break_mins: u64,    // длина перерыва помодоро
+    #[serde(default)]
+    pub openai_in_keyring: bool,     // runtime-only: ключ хранится в keyring
+    #[serde(default)]
+    pub anthropic_in_keyring: bool,  // runtime-only: ключ хранится в keyring
 }
 
 impl Default for AppSettings {
@@ -55,6 +64,13 @@ impl Default for AppSettings {
             log_interval_secs: 60,
             work_mode: WorkMode::Light,
             onboarding_complete: false,
+            deadline_warn_hours: 24,
+            deadline_warn_minutes: 60,
+            idle_notify_min_mins: 10,
+            pomodoro_work_mins: 25,
+            pomodoro_break_mins: 5,
+            openai_in_keyring: false,
+            anthropic_in_keyring: false,
         }
     }
 }
@@ -78,7 +94,7 @@ fn keyring_get(name: &str) -> Option<String> {
     keyring::Entry::new("ai-notes", name).ok()?.get_password().ok()
 }
 
-async fn get_setting(pool: &SqlitePool, key: &str) -> Option<String> {
+pub(crate) async fn get_setting(pool: &SqlitePool, key: &str) -> Option<String> {
     sqlx::query("SELECT value FROM settings WHERE key = ?")
         .bind(key)
         .fetch_optional(pool)
@@ -86,6 +102,13 @@ async fn get_setting(pool: &SqlitePool, key: &str) -> Option<String> {
         .ok()
         .flatten()
         .map(|r| r.get("value"))
+}
+
+// Единая точка чтения числовой настройки: используется фоновыми циклами
+// (scheduler / pomodoro / activity), чтобы не плодить копии одного и того же
+// запроса. Отсутствие ключа или мусор в значении → default.
+pub async fn get_u64_setting(pool: &SqlitePool, key: &str, default: u64) -> u64 {
+    get_setting(pool, key).await.and_then(|v| v.parse().ok()).unwrap_or(default)
 }
 
 async fn set_setting(pool: &SqlitePool, key: &str, value: &str) -> AppResult<()> {
@@ -119,11 +142,20 @@ pub async fn load_settings_raw(pool: &SqlitePool) -> AppResult<AppSettings> {
     if let Some(v) = get_setting(pool, "onboarding_complete").await {
         s.onboarding_complete = v == "true";
     }
+    if let Some(v) = get_setting(pool, "deadline_warn_hours").await { if let Ok(n) = v.parse() { s.deadline_warn_hours = n; } }
+    if let Some(v) = get_setting(pool, "deadline_warn_minutes").await { if let Ok(n) = v.parse() { s.deadline_warn_minutes = n; } }
+    if let Some(v) = get_setting(pool, "idle_notify_min_mins").await { if let Ok(n) = v.parse() { s.idle_notify_min_mins = n; } }
+    if let Some(v) = get_setting(pool, "pomodoro_work_mins").await { if let Ok(n) = v.parse() { s.pomodoro_work_mins = n; } }
+    if let Some(v) = get_setting(pool, "pomodoro_break_mins").await { if let Ok(n) = v.parse() { s.pomodoro_break_mins = n; } }
     // Ключи: сначала keyring, затем legacy-значение из БД
-    s.openai_key = keyring_get("openai_key")
+    let openai_from_keyring = keyring_get("openai_key");
+    let anthropic_from_keyring = keyring_get("anthropic_key");
+    s.openai_in_keyring = openai_from_keyring.is_some();
+    s.anthropic_in_keyring = anthropic_from_keyring.is_some();
+    s.openai_key = openai_from_keyring
         .or(get_setting(pool, "openai_key").await)
         .unwrap_or_default();
-    s.anthropic_key = keyring_get("anthropic_key")
+    s.anthropic_key = anthropic_from_keyring
         .or(get_setting(pool, "anthropic_key").await)
         .unwrap_or_default();
     Ok(s)
@@ -136,6 +168,7 @@ pub async fn get_settings(pool: State<'_, SqlitePool>) -> AppResult<AppSettings>
 
 #[tauri::command]
 pub async fn save_settings(
+    app: tauri::AppHandle,
     pool: State<'_, SqlitePool>,
     mode_state: State<'_, Arc<Mutex<WorkMode>>>,
     settings: AppSettings,
@@ -148,6 +181,11 @@ pub async fn save_settings(
     set_setting(pool.inner(), "log_interval_secs", &settings.log_interval_secs.clamp(10, 600).to_string()).await?;
     set_setting(pool.inner(), "work_mode", settings.work_mode.as_str()).await?;
     set_setting(pool.inner(), "onboarding_complete", if settings.onboarding_complete { "true" } else { "false" }).await?;
+    set_setting(pool.inner(), "deadline_warn_hours", &settings.deadline_warn_hours.max(1).to_string()).await?;
+    set_setting(pool.inner(), "deadline_warn_minutes", &settings.deadline_warn_minutes.clamp(1, 1440).to_string()).await?;
+    set_setting(pool.inner(), "idle_notify_min_mins", &settings.idle_notify_min_mins.max(1).to_string()).await?;
+    set_setting(pool.inner(), "pomodoro_work_mins", &settings.pomodoro_work_mins.clamp(1, 120).to_string()).await?;
+    set_setting(pool.inner(), "pomodoro_break_mins", &settings.pomodoro_break_mins.clamp(1, 60).to_string()).await?;
 
     for (name, value) in [("openai_key", &settings.openai_key), ("anthropic_key", &settings.anthropic_key)] {
         match keyring_set(name, value) {
@@ -163,6 +201,7 @@ pub async fn save_settings(
     }
 
     *mode_state.lock().unwrap() = settings.work_mode.clone();
+    crate::update_mode_checks(&app, &settings.work_mode);
     Ok(())
 }
 

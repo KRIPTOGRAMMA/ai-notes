@@ -14,6 +14,13 @@
     log_interval_secs: 60,
     work_mode: "Light",
     onboarding_complete: true,
+    deadline_warn_hours: 24,
+    deadline_warn_minutes: 60,
+    idle_notify_min_mins: 10,
+    pomodoro_work_mins: 25,
+    pomodoro_break_mins: 5,
+    openai_in_keyring: false,
+    anthropic_in_keyring: false,
   });
 
   let saving = $state(false);
@@ -104,6 +111,13 @@
       <div style="display:flex;flex-direction:column;gap:8px;">
         <label style="font-size:13px;">
           API Key
+          {#if settings.openai_key}
+            {#if settings.openai_in_keyring}
+              <span style="font-size:11px;color:#16a34a;margin-left:6px;">🔐 keyring</span>
+            {:else}
+              <span style="font-size:11px;color:#d97706;margin-left:6px;">⚠ БД (keyring недоступен)</span>
+            {/if}
+          {/if}
           <input
             type="password"
             bind:value={settings.openai_key}
@@ -129,6 +143,13 @@
       <div style="display:flex;flex-direction:column;gap:8px;">
         <label style="font-size:13px;">
           API Key
+          {#if settings.anthropic_key}
+            {#if settings.anthropic_in_keyring}
+              <span style="font-size:11px;color:#16a34a;margin-left:6px;">🔐 keyring</span>
+            {:else}
+              <span style="font-size:11px;color:#d97706;margin-left:6px;">⚠ БД (keyring недоступен)</span>
+            {/if}
+          {/if}
           <input
             type="password"
             bind:value={settings.anthropic_key}
@@ -197,6 +218,48 @@
       </p>
     </div>
   </section>
+
+  <section style="margin-bottom:24px;">
+    <h3 style="margin:0 0 10px 0;font-size:14px;text-transform:uppercase;color:var(--text-secondary,#6b7280);letter-spacing:.05em;">Уведомления о дедлайнах</h3>
+    <div style="display:flex;flex-direction:column;gap:8px;">
+      <label style="font-size:13px;">
+        Первое предупреждение (часов до дедлайна)
+        <input type="number" min="1" bind:value={settings.deadline_warn_hours}
+          style="display:block;width:100%;margin-top:4px;box-sizing:border-box;" />
+      </label>
+      <label style="font-size:13px;">
+        Второе предупреждение (минут до дедлайна)
+        <input type="number" min="1" max="1440" bind:value={settings.deadline_warn_minutes}
+          style="display:block;width:100%;margin-top:4px;box-sizing:border-box;" />
+      </label>
+      <label style="font-size:13px;">
+        Уведомление о возвращении после простоя (минут, мин. 1)
+        <input type="number" min="1" bind:value={settings.idle_notify_min_mins}
+          style="display:block;width:100%;margin-top:4px;box-sizing:border-box;" />
+      </label>
+    </div>
+  </section>
+
+  {#if settings.work_mode === "Study"}
+  <section style="margin-bottom:24px;">
+    <h3 style="margin:0 0 10px 0;font-size:14px;text-transform:uppercase;color:var(--text-secondary,#6b7280);letter-spacing:.05em;">Помодоро</h3>
+    <div style="display:flex;flex-direction:column;gap:8px;">
+      <label style="font-size:13px;">
+        Рабочий блок (минуты)
+        <input type="number" min="1" max="120" bind:value={settings.pomodoro_work_mins}
+          style="display:block;width:100%;margin-top:4px;box-sizing:border-box;" />
+      </label>
+      <label style="font-size:13px;">
+        Перерыв (минуты)
+        <input type="number" min="1" max="60" bind:value={settings.pomodoro_break_mins}
+          style="display:block;width:100%;margin-top:4px;box-sizing:border-box;" />
+      </label>
+    </div>
+    <p style="font-size:12px;color:var(--text-secondary,#6b7280);margin:6px 0 0 0;">
+      Применяется при следующем входе в режим Study.
+    </p>
+  </section>
+  {/if}
 
   <button onclick={save} disabled={saving}>
     {saving ? "Сохранение..." : saved ? "Сохранено ✓" : "Сохранить"}

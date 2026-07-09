@@ -80,4 +80,11 @@ export interface AppSettings {
   log_interval_secs: number;
   work_mode: "Light" | "Study" | "Focus";
   onboarding_complete: boolean;
+  deadline_warn_hours: number;
+  deadline_warn_minutes: number;
+  idle_notify_min_mins: number;
+  pomodoro_work_mins: number;
+  pomodoro_break_mins: number;
+  openai_in_keyring: boolean;
+  anthropic_in_keyring: boolean;
 }

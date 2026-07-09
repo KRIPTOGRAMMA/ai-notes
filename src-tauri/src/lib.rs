@@ -8,8 +8,10 @@ mod ai;
 
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
-use tauri::menu::{Menu, MenuItem, Submenu};
+use tauri::menu::{Menu, MenuItem, CheckMenuItem, Submenu};
 use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
+
+pub type ModeItems = Arc<Mutex<Vec<CheckMenuItem<tauri::Wry>>>>;
 use crate::db::init_db;
 use crate::ai::sidecar::{SharedSidecar, SidecarState};
 
@@ -26,6 +28,16 @@ fn open_quick_task(app: tauri::AppHandle) {
     }
 }
 
+
+fn update_mode_checks(app: &tauri::AppHandle, mode: &commands::settings::WorkMode) {
+    if let Some(items) = app.try_state::<ModeItems>() {
+        let items = items.lock().unwrap();
+        let mode_str = format!("mode_{}", mode.as_str());
+        for item in items.iter() {
+            let _ = item.set_checked(item.id().as_ref() == mode_str.as_str());
+        }
+    }
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -75,12 +87,16 @@ pub fn run() {
                 .setup(|app| {
                     // Трей
                     let open = MenuItem::with_id(app, "open", "Открыть", true, None::<&str>)?;
-                    let mode_light = MenuItem::with_id(app, "mode_Light", "Light", true, None::<&str>)?;
-                    let mode_focus = MenuItem::with_id(app, "mode_Focus", "Focus", true, None::<&str>)?;
-                    let mode_study = MenuItem::with_id(app, "mode_Study", "Study", true, None::<&str>)?;
+                    // checked=false на старте; правильная галочка выставляется после загрузки настроек
+                    let mode_light = CheckMenuItem::with_id(app, "mode_Light", "Light", true, false, None::<&str>)?;
+                    let mode_focus = CheckMenuItem::with_id(app, "mode_Focus", "Focus", true, false, None::<&str>)?;
+                    let mode_study = CheckMenuItem::with_id(app, "mode_Study", "Study", true, false, None::<&str>)?;
                     let mode_menu = Submenu::with_items(app, "Режим", true, &[&mode_light, &mode_focus, &mode_study])?;
                     let quit = MenuItem::with_id(app, "quit", "Выход", true, None::<&str>)?;
                     let menu = Menu::with_items(app, &[&open, &mode_menu, &quit])?;
+
+                    let mode_items: ModeItems = Arc::new(Mutex::new(vec![mode_light, mode_focus, mode_study]));
+                    app.manage(mode_items);
 
                     TrayIconBuilder::new()
                         .icon(app.default_window_icon().unwrap().clone())
@@ -95,9 +111,9 @@ pub fn run() {
                             "quit" => app.exit(0),
                             id if id.starts_with("mode_") => {
                                 let mode = commands::settings::WorkMode::from_str(&id["mode_".len()..]);
-                                // Живое состояние — сразу; в БД — асинхронно, чтобы
-                                // не блокировать поток событий меню
                                 *app.state::<Arc<Mutex<commands::settings::WorkMode>>>().lock().unwrap() = mode.clone();
+                                // Обновить галочки в трее
+                                update_mode_checks(app, &mode);
                                 let pool = app.state::<sqlx::SqlitePool>().inner().clone();
                                 tauri::async_runtime::spawn(async move {
                                     let _ = commands::settings::persist_work_mode(&pool, &mode).await;
@@ -189,6 +205,8 @@ pub fn run() {
             let settings = commands::settings::load_settings_raw(&pool)
                 .await
                 .unwrap_or_default();
+            // Выставить правильную галочку режима в трее
+            update_mode_checks(&app.app_handle(), &settings.work_mode);
             // Режим работы — живое разделяемое состояние: save_settings обновляет
             // его сразу, без перезапуска приложения.
             let work_mode = Arc::new(Mutex::new(settings.work_mode.clone()));
@@ -202,8 +220,8 @@ pub fn run() {
                 work_mode.clone(),
             );
 
-            notifier::scheduler::start_scheduler(app.app_handle().clone(), pool, work_mode.clone());
-            notifier::pomodoro::start_pomodoro(app.app_handle().clone(), work_mode);
+            notifier::scheduler::start_scheduler(app.app_handle().clone(), pool.clone(), work_mode.clone());
+            notifier::pomodoro::start_pomodoro(app.app_handle().clone(), work_mode, pool);
             app.run(|_, _| {});
         });
 }

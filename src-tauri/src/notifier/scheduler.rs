@@ -17,9 +17,21 @@ pub fn start_scheduler(app: tauri::AppHandle, pool: SqlitePool, work_mode: Arc<M
 }
 
 async fn check_deadlines(app: &tauri::AppHandle, pool: &SqlitePool, muted: bool) {
+    use crate::commands::settings::get_u64_setting;
     let now = Utc::now();
-    let in_1h = now + chrono::Duration::hours(1);
-    let in_24h = now + chrono::Duration::hours(24);
+    let warn_hours = get_u64_setting(pool, "deadline_warn_hours", 24).await as i64;
+    let warn_mins = get_u64_setting(pool, "deadline_warn_minutes", 60).await as i64;
+    let at_hours = now + chrono::Duration::hours(warn_hours);
+    let at_mins = now + chrono::Duration::minutes(warn_mins);
+    let msg_hours = format!("Дедлайн через {} ч", warn_hours);
+    let msg_mins = format!("Дедлайн через {} мин", warn_mins);
+    // Раннее предупреждение — то, что дальше от «сейчас». Не полагаемся на то,
+    // что «часы» всегда больше «минут»: пользователь мог задать 1ч и 90мин.
+    let (early_at, early_msg, late_at, late_msg) = if at_hours >= at_mins {
+        (at_hours, &msg_hours, at_mins, &msg_mins)
+    } else {
+        (at_mins, &msg_mins, at_hours, &msg_hours)
+    };
 
     let rows = match sqlx::query(
         "SELECT id, title, deadline, notified_24h, notified_1h, notified_deadline
@@ -43,14 +55,14 @@ async fn check_deadlines(app: &tauri::AppHandle, pool: &SqlitePool, muted: bool)
         let Ok(deadline) = chrono::DateTime::parse_from_rfc3339(&deadline_str) else { continue; };
         let deadline = deadline.with_timezone(&Utc);
 
-        if !notified_24h && deadline <= in_24h && deadline > in_1h {
-            if !muted { send_notification(app, &title, "Дедлайн через 24 часа"); }
+        if !notified_24h && deadline <= early_at && deadline > late_at {
+            if !muted { send_notification(app, &title, early_msg); }
             let _ = sqlx::query("UPDATE tasks SET notified_24h = 1 WHERE id = ?")
                 .bind(&id).execute(pool).await;
         }
 
-        if !notified_1h && deadline <= in_1h && deadline > now {
-            if !muted { send_notification(app, &title, "Дедлайн через 1 час"); }
+        if !notified_1h && deadline <= late_at && deadline > now {
+            if !muted { send_notification(app, &title, late_msg); }
             let _ = sqlx::query("UPDATE tasks SET notified_1h = 1 WHERE id = ?")
                 .bind(&id).execute(pool).await;
         }

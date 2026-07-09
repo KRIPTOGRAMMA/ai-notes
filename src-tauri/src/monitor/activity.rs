@@ -140,7 +140,8 @@ pub fn start_activity_loop(
 // Нотификация при возвращении после простоя: топ-задача = ближайший дедлайн,
 // затем наивысший приоритет. Не шлём, если пользователь отходил ненадолго.
 async fn notify_return(app: &tauri::AppHandle, pool: &SqlitePool, away_mins: i64) {
-    if away_mins < 10 {
+    let min_mins = crate::commands::settings::get_u64_setting(pool, "idle_notify_min_mins", 10).await;
+    if away_mins < min_mins as i64 {
         return;
     }
 

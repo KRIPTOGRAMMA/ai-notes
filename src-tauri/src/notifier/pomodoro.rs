@@ -1,19 +1,16 @@
 use std::sync::{Arc, Mutex};
+use sqlx::SqlitePool;
 use tokio::time::{sleep, Duration};
-use crate::commands::settings::WorkMode;
+use crate::commands::settings::{WorkMode, get_u64_setting};
 use crate::notifier::scheduler::send_notification;
 
-const WORK_SECS: u64 = 25 * 60;
-const BREAK_SECS: u64 = 5 * 60;
-
-// Помодоро-цикл для режима Study: 25 минут работы / 5 минут перерыва.
-// Живёт постоянно, но тикает только пока выбран Study; при выходе из
-// режима цикл сбрасывается и при возврате начинается заново с работы.
-pub fn start_pomodoro(app: tauri::AppHandle, work_mode: Arc<Mutex<WorkMode>>) {
+pub fn start_pomodoro(app: tauri::AppHandle, work_mode: Arc<Mutex<WorkMode>>, pool: SqlitePool) {
     tokio::spawn(async move {
         let mut in_study = false;
         let mut working = true;
-        let mut remaining = WORK_SECS;
+        let mut remaining: u64 = 25 * 60;
+        let mut work_secs: u64 = 25 * 60;
+        let mut break_secs: u64 = 5 * 60;
 
         loop {
             sleep(Duration::from_secs(1)).await;
@@ -27,8 +24,11 @@ pub fn start_pomodoro(app: tauri::AppHandle, work_mode: Arc<Mutex<WorkMode>>) {
             if !in_study {
                 in_study = true;
                 working = true;
-                remaining = WORK_SECS;
-                send_notification(&app, "Study", "Помодоро запущено: 25 минут работы");
+                // .max(1) — страховка от 0 в БД: иначе remaining -= 1 уйдёт в underflow
+                work_secs = get_u64_setting(&pool, "pomodoro_work_mins", 25).await.max(1) * 60;
+                break_secs = get_u64_setting(&pool, "pomodoro_break_mins", 5).await.max(1) * 60;
+                remaining = work_secs;
+                send_notification(&app, "Study", &format!("Помодоро запущено: {} минут работы", work_secs / 60));
                 continue;
             }
 
@@ -36,12 +36,12 @@ pub fn start_pomodoro(app: tauri::AppHandle, work_mode: Arc<Mutex<WorkMode>>) {
             if remaining == 0 {
                 if working {
                     working = false;
-                    remaining = BREAK_SECS;
-                    send_notification(&app, "Study", "Перерыв 5 минут — отдохни");
+                    remaining = break_secs;
+                    send_notification(&app, "Study", &format!("Перерыв {} минут — отдохни", break_secs / 60));
                 } else {
                     working = true;
-                    remaining = WORK_SECS;
-                    send_notification(&app, "Study", "Перерыв окончен: 25 минут работы");
+                    remaining = work_secs;
+                    send_notification(&app, "Study", &format!("Перерыв окончен: {} минут работы", work_secs / 60));
                 }
             }
         }
