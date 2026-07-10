@@ -58,10 +58,21 @@ pub struct AppSettings {
     #[serde(default)]
     pub color_border: String,
     #[serde(default)]
+    pub quiet_until: String,         // пауза уведомлений: RFC3339; пусто = выкл; QUIET_FOREVER = бессрочно
+    #[serde(default = "default_true")]
+    pub context_notifications: bool, // контекстные триггеры (просрочки, возврат с InProgress, пропуски дней)
+    #[serde(default)]
+    pub ai_fallback: bool,           // автопереключение ИИ-провайдера при ошибке/недоступности
+    #[serde(default)]
     pub openai_in_keyring: bool,     // runtime-only: ключ хранится в keyring
     #[serde(default)]
     pub anthropic_in_keyring: bool,  // runtime-only: ключ хранится в keyring
 }
+
+fn default_true() -> bool { true }
+
+// Сентинел «бессрочной» паузы уведомлений.
+pub const QUIET_FOREVER: &str = "9999-12-31T00:00:00+00:00";
 
 impl Default for AppSettings {
     fn default() -> Self {
@@ -86,6 +97,9 @@ impl Default for AppSettings {
             color_bg: String::new(),
             color_text: String::new(),
             color_border: String::new(),
+            quiet_until: String::new(),
+            context_notifications: true,
+            ai_fallback: false,
             openai_in_keyring: false,
             anthropic_in_keyring: false,
         }
@@ -128,7 +142,7 @@ pub async fn get_u64_setting(pool: &SqlitePool, key: &str, default: u64) -> u64 
     get_setting(pool, key).await.and_then(|v| v.parse().ok()).unwrap_or(default)
 }
 
-async fn set_setting(pool: &SqlitePool, key: &str, value: &str) -> AppResult<()> {
+pub(crate) async fn set_setting(pool: &SqlitePool, key: &str, value: &str) -> AppResult<()> {
     sqlx::query("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
         .bind(key)
         .bind(value)
@@ -140,6 +154,11 @@ async fn set_setting(pool: &SqlitePool, key: &str, value: &str) -> AppResult<()>
 // Для переключения режима из трея: пишем в БД мимо полного save_settings
 pub async fn persist_work_mode(pool: &SqlitePool, mode: &WorkMode) -> AppResult<()> {
     set_setting(pool, "work_mode", mode.as_str()).await
+}
+
+// Для паузы уведомлений из трея: пустая строка = пауза снята.
+pub async fn persist_quiet_until(pool: &SqlitePool, value: &str) -> AppResult<()> {
+    set_setting(pool, "quiet_until", value).await
 }
 
 pub async fn load_settings_raw(pool: &SqlitePool) -> AppResult<AppSettings> {
@@ -170,6 +189,9 @@ pub async fn load_settings_raw(pool: &SqlitePool) -> AppResult<AppSettings> {
     if let Some(v) = get_setting(pool, "color_bg").await { s.color_bg = v; }
     if let Some(v) = get_setting(pool, "color_text").await { s.color_text = v; }
     if let Some(v) = get_setting(pool, "color_border").await { s.color_border = v; }
+    if let Some(v) = get_setting(pool, "quiet_until").await { s.quiet_until = v; }
+    if let Some(v) = get_setting(pool, "context_notifications").await { s.context_notifications = v != "false"; }
+    if let Some(v) = get_setting(pool, "ai_fallback").await { s.ai_fallback = v == "true"; }
     // Ключи: сначала keyring, затем legacy-значение из БД
     let openai_from_keyring = keyring_get("openai_key");
     let anthropic_from_keyring = keyring_get("anthropic_key");
@@ -218,6 +240,17 @@ pub async fn save_settings(
     set_setting(pool.inner(), "color_bg", &settings.color_bg).await?;
     set_setting(pool.inner(), "color_text", &settings.color_text).await?;
     set_setting(pool.inner(), "color_border", &settings.color_border).await?;
+    // Пауза уведомлений: пусто = выкл; иначе только валидный RFC3339
+    let quiet = if settings.quiet_until.is_empty()
+        || chrono::DateTime::parse_from_rfc3339(&settings.quiet_until).is_ok()
+    {
+        settings.quiet_until.as_str()
+    } else {
+        ""
+    };
+    set_setting(pool.inner(), "quiet_until", quiet).await?;
+    set_setting(pool.inner(), "context_notifications", if settings.context_notifications { "true" } else { "false" }).await?;
+    set_setting(pool.inner(), "ai_fallback", if settings.ai_fallback { "true" } else { "false" }).await?;
 
     for (name, value) in [("openai_key", &settings.openai_key), ("anthropic_key", &settings.anthropic_key)] {
         match keyring_set(name, value) {

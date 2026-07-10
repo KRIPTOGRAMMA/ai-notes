@@ -27,6 +27,14 @@ fn models_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
+// Есть ли скачанная локальная модель. Без создания каталога — только проверка.
+pub(crate) fn local_model_available(app: &AppHandle) -> bool {
+    app.path()
+        .app_data_dir()
+        .map(|d| d.join("models").join("model.gguf").exists())
+        .unwrap_or(false)
+}
+
 #[tauri::command]
 pub fn default_model_url() -> String {
     DEFAULT_MODEL_URL.to_string()

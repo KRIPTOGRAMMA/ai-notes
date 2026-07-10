@@ -52,6 +52,9 @@
     color_bg: "",
     color_text: "",
     color_border: "",
+    quiet_until: "",
+    context_notifications: true,
+    ai_fallback: false,
     openai_in_keyring: false,
     anthropic_in_keyring: false,
   });
@@ -177,6 +180,13 @@
         </label>
       {/each}
     </div>
+
+    {#if settings.ai_provider !== "none"}
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;margin-top:10px;">
+        <input type="checkbox" bind:checked={settings.ai_fallback} />
+        Автопереключение: при ошибке или недоступности пробовать других доступных провайдеров
+      </label>
+    {/if}
   </section>
 
   {#if settings.ai_provider === "openai"}
@@ -317,6 +327,13 @@
         <input type="number" min="0" bind:value={settings.nudge_after_mins}
           style="display:block;width:100%;margin-top:4px;box-sizing:border-box;" />
       </label>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;">
+        <input type="checkbox" bind:checked={settings.context_notifications} />
+        Контекстные уведомления (накопились просрочки, возврат к задаче «в работе»)
+      </label>
+      <p style="font-size:12px;color:var(--text-secondary,#6b7280);margin:0;">
+        Пауза всех уведомлений — в меню трея: «Пауза уведомлений» (30 мин / 1 ч / 2 ч / бессрочно).
+      </p>
     </div>
   </section>
 

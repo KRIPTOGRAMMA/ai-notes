@@ -15,8 +15,8 @@ pub fn start_pomodoro(app: tauri::AppHandle, work_mode: Arc<Mutex<WorkMode>>, po
         loop {
             sleep(Duration::from_secs(1)).await;
 
-            let study = *work_mode.lock().unwrap() == WorkMode::Study;
-            if !study {
+            let mode = work_mode.lock().unwrap().clone();
+            if mode != WorkMode::Study {
                 in_study = false;
                 continue;
             }
@@ -28,20 +28,25 @@ pub fn start_pomodoro(app: tauri::AppHandle, work_mode: Arc<Mutex<WorkMode>>, po
                 work_secs = get_u64_setting(&pool, "pomodoro_work_mins", 25).await.max(1) * 60;
                 break_secs = get_u64_setting(&pool, "pomodoro_break_mins", 5).await.max(1) * 60;
                 remaining = work_secs;
-                send_notification(&app, "Study", &format!("Помодоро запущено: {} минут работы", work_secs / 60));
+                // Пауза уведомлений: таймер идёт, но молча. Проверяем только в момент
+                // отправки — не дёргаем БД каждый секундный тик.
+                if !crate::notifier::mute::muted_now(&pool, &mode).await {
+                    send_notification(&app, "Study", &format!("Помодоро запущено: {} минут работы", work_secs / 60));
+                }
                 continue;
             }
 
             remaining -= 1;
             if remaining == 0 {
+                let muted = crate::notifier::mute::muted_now(&pool, &mode).await;
                 if working {
                     working = false;
                     remaining = break_secs;
-                    send_notification(&app, "Study", &format!("Перерыв {} минут — отдохни", break_secs / 60));
+                    if !muted { send_notification(&app, "Study", &format!("Перерыв {} минут — отдохни", break_secs / 60)); }
                 } else {
                     working = true;
                     remaining = work_secs;
-                    send_notification(&app, "Study", &format!("Перерыв окончен: {} минут работы", work_secs / 60));
+                    if !muted { send_notification(&app, "Study", &format!("Перерыв окончен: {} минут работы", work_secs / 60)); }
                 }
             }
         }

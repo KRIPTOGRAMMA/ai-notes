@@ -11,10 +11,11 @@
   import Notes from "./views/Notes.svelte";
   import Settings from "./views/Settings.svelte";
   import Dashboard from "./views/Dashboard.svelte";
+  import Calendar from "./views/Calendar.svelte";
   import SearchOverlay from "./lib/components/SearchOverlay.svelte";
   import "./app.css";
 
-  type View = "tasks" | "notes" | "dashboard" | "settings";
+  type View = "tasks" | "notes" | "dashboard" | "calendar" | "settings";
   let activeView: View = $state("tasks");
   let showSearch = $state(false);
 
@@ -44,8 +45,8 @@
     }
   });
 
-  // Ctrl+1..4 переключают разделы в порядке шапки.
-  const viewOrder: View[] = ["tasks", "notes", "dashboard", "settings"];
+  // Ctrl+1..5 переключают разделы в порядке шапки.
+  const viewOrder: View[] = ["tasks", "notes", "dashboard", "calendar", "settings"];
 
   let lastActivityPing = 0;
   function pingActivity() {
@@ -71,7 +72,7 @@
     } else if (e.code === "KeyK") {
       e.preventDefault();
       showSearch = true;
-    } else if (!e.shiftKey && !e.altKey && e.code >= "Digit1" && e.code <= "Digit4") {
+    } else if (!e.shiftKey && !e.altKey && e.code >= "Digit1" && e.code <= "Digit5") {
       const idx = Number(e.code.slice(-1)) - 1;
       if (idx >= 0 && idx < viewOrder.length) {
         e.preventDefault();
@@ -124,13 +125,17 @@
     style="font-weight:{activeView === 'notes' ? '600' : '400'};"
   >Заметки</button>
   <button
-    onclick={() => activeView = "settings"}
-    style="font-weight:{activeView === 'settings' ? '600' : '400'};"
-  >Настройки</button>
-  <button
     onclick={() => activeView = "dashboard"}
     style="font-weight:{activeView === 'dashboard' ? '600' : '400'};"
   >Дашборд</button>
+  <button
+    onclick={() => activeView = "calendar"}
+    style="font-weight:{activeView === 'calendar' ? '600' : '400'};"
+  >Календарь</button>
+  <button
+    onclick={() => activeView = "settings"}
+    style="font-weight:{activeView === 'settings' ? '600' : '400'};"
+  >Настройки</button>
   <span style="flex:1;"></span>
   <button onclick={() => showSearch = true} title="Поиск (Ctrl+K)">Поиск</button>
 </div>
@@ -143,5 +148,7 @@
   <Settings />
 {:else if activeView === "dashboard"}
   <Dashboard />
+{:else if activeView === "calendar"}
+  <Calendar onOpenTask={(id) => { activeView = "tasks"; taskStore.requestFocus(id); }} />
 {/if}
 {/if}

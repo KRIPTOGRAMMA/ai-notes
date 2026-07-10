@@ -20,6 +20,12 @@ export const api = {
   deleteNote: (id: string) => invoke<void>("delete_note", { id }),
   getActivityByDay: () => invoke<{ date: string; minutes: number }[]>("get_activity_by_day"),
   getTaskCompletionsByDay: () => invoke<{ date: string; completed: number }[]>("get_task_completions_by_day"),
+  getCategoryDistribution: () => invoke<{ category: string; count: number }[]>("get_category_distribution"),
+  getActiveIdleRatio: () =>
+    invoke<{ today_active: number; today_idle: number; week_active: number; week_idle: number }>("get_active_idle_ratio"),
+  dashboardInsight: () => invoke<void>("dashboard_insight"),
+  summarizeDay: () => invoke<void>("summarize_day"),
+  summarizeWeek: () => invoke<void>("summarize_week"),
   getSettings: () => invoke<AppSettings>("get_settings"),
   saveSettings: (settings: AppSettings) => invoke<void>("save_settings", { settings }),
   isWayland: () => invoke<boolean>("is_wayland"),

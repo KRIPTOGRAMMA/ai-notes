@@ -32,7 +32,8 @@ pub fn start_nudger(app: tauri::AppHandle, pool: SqlitePool, work_mode: Arc<Mute
         loop {
             sleep(Duration::from_secs(CHECK_EVERY_SECS)).await;
 
-            if *work_mode.lock().unwrap() != WorkMode::Light {
+            let mode = work_mode.lock().unwrap().clone();
+            if mode != WorkMode::Light || crate::notifier::mute::muted_now(&pool, &mode).await {
                 continue;
             }
 

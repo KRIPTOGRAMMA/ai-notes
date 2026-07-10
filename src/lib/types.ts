@@ -106,6 +106,9 @@ export interface AppSettings {
   color_bg: string;
   color_text: string;
   color_border: string;
+  quiet_until: string; // RFC3339; пусто = выкл; далёкая дата = бессрочно
+  context_notifications: boolean;
+  ai_fallback: boolean;
   openai_in_keyring: boolean;
   anthropic_in_keyring: boolean;
 }

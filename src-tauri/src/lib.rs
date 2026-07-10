@@ -12,6 +12,7 @@ use tauri::menu::{Menu, MenuItem, CheckMenuItem, Submenu};
 use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
 
 pub type ModeItems = Arc<Mutex<Vec<CheckMenuItem<tauri::Wry>>>>;
+pub type QuietItems = Arc<Mutex<Vec<CheckMenuItem<tauri::Wry>>>>;
 // Начальный режим окна быстрого ввода: "task" | "note". Живёт как managed-state,
 // чтобы QuickCapture мог прочитать его при монтировании (гонка emit-до-mount).
 pub type QuickMode = Arc<Mutex<String>>;
@@ -63,6 +64,29 @@ fn update_mode_checks(app: &tauri::AppHandle, mode: &commands::settings::WorkMod
     }
 }
 
+// Галочка на активном пункте паузы уведомлений. active_id — id пункта меню
+// ("quiet_off" | "quiet_30" | ... | "quiet_inf"); чужой id снимает все галочки.
+fn update_quiet_checks(app: &tauri::AppHandle, active_id: &str) {
+    if let Some(items) = app.try_state::<QuietItems>() {
+        let items = items.lock().unwrap();
+        for item in items.iter() {
+            let _ = item.set_checked(item.id().as_ref() == active_id);
+        }
+    }
+}
+
+// Какой пункт меню паузы должен быть отмечен для данного quiet_until.
+// Таймерную паузу (30м/1ч/2ч) после перезапуска не различить — не отмечаем ничего.
+fn quiet_check_id(quiet_until: &str) -> &'static str {
+    if quiet_until == commands::settings::QUIET_FOREVER {
+        return "quiet_inf";
+    }
+    match chrono::DateTime::parse_from_rfc3339(quiet_until) {
+        Ok(t) if chrono::Utc::now() < t.with_timezone(&chrono::Utc) => "quiet_timed",
+        _ => "quiet_off",
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tokio::runtime::Builder::new_multi_thread()
@@ -96,9 +120,14 @@ pub fn run() {
                         commands::monitor::get_activity_state,
                         commands::monitor::get_activity_by_day,
                         commands::monitor::get_task_completions_by_day,
+                        commands::monitor::get_category_distribution,
+                        commands::monitor::get_active_idle_ratio,
                         commands::ai::ai_rewrite,
                         commands::ai::ai_subtasks,
                         commands::ai::ai_classify,
+                        commands::ai::dashboard_insight,
+                        commands::ai::summarize_day,
+                        commands::ai::summarize_week,
                         commands::notes::get_notes,
                         commands::notes::create_note,
                         commands::notes::update_note,
@@ -124,11 +153,26 @@ pub fn run() {
                     let mode_focus = CheckMenuItem::with_id(app, "mode_Focus", "Focus", true, false, None::<&str>)?;
                     let mode_study = CheckMenuItem::with_id(app, "mode_Study", "Study", true, false, None::<&str>)?;
                     let mode_menu = Submenu::with_items(app, "Режим", true, &[&mode_light, &mode_focus, &mode_study])?;
+                    // Пауза уведомлений: галочка выставляется после загрузки настроек
+                    let quiet_30 = CheckMenuItem::with_id(app, "quiet_30", "30 минут", true, false, None::<&str>)?;
+                    let quiet_60 = CheckMenuItem::with_id(app, "quiet_60", "1 час", true, false, None::<&str>)?;
+                    let quiet_120 = CheckMenuItem::with_id(app, "quiet_120", "2 часа", true, false, None::<&str>)?;
+                    let quiet_inf = CheckMenuItem::with_id(app, "quiet_inf", "Бессрочно", true, false, None::<&str>)?;
+                    let quiet_off = CheckMenuItem::with_id(app, "quiet_off", "Выкл", true, false, None::<&str>)?;
+                    let quiet_menu = Submenu::with_items(
+                        app,
+                        "Пауза уведомлений",
+                        true,
+                        &[&quiet_30, &quiet_60, &quiet_120, &quiet_inf, &quiet_off],
+                    )?;
                     let quit = MenuItem::with_id(app, "quit", "Выход", true, None::<&str>)?;
-                    let menu = Menu::with_items(app, &[&open, &mode_menu, &quit])?;
+                    let menu = Menu::with_items(app, &[&open, &mode_menu, &quiet_menu, &quit])?;
 
                     let mode_items: ModeItems = Arc::new(Mutex::new(vec![mode_light, mode_focus, mode_study]));
                     app.manage(mode_items);
+                    let quiet_items: QuietItems =
+                        Arc::new(Mutex::new(vec![quiet_30, quiet_60, quiet_120, quiet_inf, quiet_off]));
+                    app.manage(quiet_items);
 
                     // Начальный режим окна быстрого ввода (по умолчанию — задача)
                     let quick_mode: QuickMode = Arc::new(Mutex::new("task".to_string()));
@@ -145,6 +189,22 @@ pub fn run() {
                                 }
                             }
                             "quit" => app.exit(0),
+                            id if id.starts_with("quiet_") => {
+                                use commands::settings::QUIET_FOREVER;
+                                let value = match id {
+                                    "quiet_off" => String::new(),
+                                    "quiet_inf" => QUIET_FOREVER.to_string(),
+                                    "quiet_30" => (chrono::Utc::now() + chrono::Duration::minutes(30)).to_rfc3339(),
+                                    "quiet_60" => (chrono::Utc::now() + chrono::Duration::minutes(60)).to_rfc3339(),
+                                    "quiet_120" => (chrono::Utc::now() + chrono::Duration::minutes(120)).to_rfc3339(),
+                                    _ => return,
+                                };
+                                update_quiet_checks(app, id);
+                                let pool = app.state::<sqlx::SqlitePool>().inner().clone();
+                                tauri::async_runtime::spawn(async move {
+                                    let _ = commands::settings::persist_quiet_until(&pool, &value).await;
+                                });
+                            }
                             id if id.starts_with("mode_") => {
                                 let mode = commands::settings::WorkMode::from_str(&id["mode_".len()..]);
                                 *app.state::<Arc<Mutex<commands::settings::WorkMode>>>().lock().unwrap() = mode.clone();
@@ -240,8 +300,30 @@ pub fn run() {
             let settings = commands::settings::load_settings_raw(&pool)
                 .await
                 .unwrap_or_default();
-            // Выставить правильную галочку режима в трее
+            // Выставить правильные галочки режима и паузы в трее
             update_mode_checks(&app.app_handle(), &settings.work_mode);
+            update_quiet_checks(&app.app_handle(), quiet_check_id(&settings.quiet_until));
+
+            // Вотчер истечения паузы: когда quiet_until проходит, снимаем галочку
+            // с пресета и отмечаем «Выкл». Пока пауза активна — галочки не трогаем.
+            {
+                let app_handle = app.app_handle().clone();
+                let pool_watch = pool.clone();
+                let mut last_id = quiet_check_id(&settings.quiet_until);
+                tokio::spawn(async move {
+                    loop {
+                        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                        let value = commands::settings::get_setting(&pool_watch, "quiet_until")
+                            .await
+                            .unwrap_or_default();
+                        let id = quiet_check_id(&value);
+                        if id != last_id && id != "quiet_timed" {
+                            update_quiet_checks(&app_handle, id);
+                        }
+                        last_id = id;
+                    }
+                });
+            }
             // Режим работы — живое разделяемое состояние: save_settings обновляет
             // его сразу, без перезапуска приложения.
             let work_mode = Arc::new(Mutex::new(settings.work_mode.clone()));
@@ -257,6 +339,7 @@ pub fn run() {
 
             notifier::scheduler::start_scheduler(app.app_handle().clone(), pool.clone(), work_mode.clone());
             notifier::nudge::start_nudger(app.app_handle().clone(), pool.clone(), work_mode.clone());
+            notifier::triggers::start_triggers(app.app_handle().clone(), pool.clone(), work_mode.clone());
             notifier::pomodoro::start_pomodoro(app.app_handle().clone(), work_mode, pool);
             app.run(|_, _| {});
         });

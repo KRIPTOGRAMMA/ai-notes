@@ -7,9 +7,10 @@ use crate::commands::settings::WorkMode;
 pub fn start_scheduler(app: tauri::AppHandle, pool: SqlitePool, work_mode: Arc<Mutex<WorkMode>>) {
     tokio::spawn(async move {
         loop {
-            // В режиме Focus дедлайны всё равно проверяем и помечаем, но не шлём:
-            // иначе после выхода из Focus прилетит пачка устаревших уведомлений.
-            let muted = *work_mode.lock().unwrap() == WorkMode::Focus;
+            // При Focus или активной паузе дедлайны всё равно проверяем и помечаем,
+            // но не шлём: иначе после снятия глушилки прилетит пачка устаревших уведомлений.
+            let mode = work_mode.lock().unwrap().clone();
+            let muted = crate::notifier::mute::muted_now(&pool, &mode).await;
             check_deadlines(&app, &pool, muted).await;
             tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
         }

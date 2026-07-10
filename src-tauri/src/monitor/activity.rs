@@ -128,11 +128,11 @@ pub fn start_activity_loop(
                 *state = new_state.clone();
             }
 
-            // Переход Idle→Active: уведомление о возвращении (кроме режима Focus)
+            // Переход Idle→Active: уведомление о возвращении (кроме Focus/паузы)
             if let Some(away_mins) = step.notify_return_mins {
                 // Копируем режим в локальную переменную: держать lock через .await нельзя
-                let focus = *work_mode.lock().unwrap() == crate::commands::settings::WorkMode::Focus;
-                if !focus {
+                let mode = work_mode.lock().unwrap().clone();
+                if !crate::notifier::mute::muted_now(&pool, &mode).await {
                     notify_return(&app, &pool, away_mins).await;
                 }
             }
@@ -181,8 +181,8 @@ async fn notify_return(app: &tauri::AppHandle, pool: &SqlitePool, away_mins: i64
     }
 
     use sqlx::Row;
-    let top_task: Option<String> = sqlx::query(
-        "SELECT title FROM tasks
+    let top_task: Option<(String, String)> = sqlx::query(
+        "SELECT title, status FROM tasks
          WHERE status IN ('Todo', 'InProgress') AND hidden = 0
          ORDER BY deadline IS NULL, deadline ASC,
                   CASE priority
@@ -197,15 +197,29 @@ async fn notify_return(app: &tauri::AppHandle, pool: &SqlitePool, away_mins: i64
     .await
     .ok()
     .flatten()
-    .map(|row| row.get("title"));
+    .map(|row| (row.get("title"), row.get("status")));
+
+    let context_on = crate::commands::settings::get_setting(pool, "context_notifications")
+        .await
+        .as_deref()
+        != Some("false");
 
     let body = match top_task {
-        Some(title) => format!("Вы отсутствовали {} мин. Ближайшая задача: {}", away_mins, title),
+        // Контекстный триггер: долго отсутствовал, а задача была «в работе»
+        Some((title, status))
+            if context_on && away_mins >= CONTEXT_RETURN_MINS && status == "InProgress" =>
+        {
+            format!("Вы отсутствовали {} мин. Продолжим задачу «{}» или сделаем перерыв?", away_mins, title)
+        }
+        Some((title, _)) => format!("Вы отсутствовали {} мин. Ближайшая задача: {}", away_mins, title),
         None => format!("Вы отсутствовали {} мин. С возвращением!", away_mins),
     };
 
     crate::notifier::scheduler::send_notification(app, "AI Notes", &body);
 }
+
+// Порог «долгого» отсутствия для контекстного сообщения про InProgress-задачу.
+const CONTEXT_RETURN_MINS: i64 = 40;
 
 #[derive(serde::Serialize)]
 pub struct ActivityDay {
@@ -217,6 +231,20 @@ pub struct ActivityDay {
 pub struct TaskCompletion {
     pub date: String,
     pub completed: i64,
+}
+
+#[derive(serde::Serialize)]
+pub struct CategoryCount {
+    pub category: String,
+    pub count: i64,
+}
+
+#[derive(serde::Serialize)]
+pub struct ActiveIdleRatio {
+    pub today_active: i64,
+    pub today_idle: i64,
+    pub week_active: i64,
+    pub week_idle: i64,
 }
 
 #[cfg(test)]
