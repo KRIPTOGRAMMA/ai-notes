@@ -106,10 +106,12 @@
 
 <div class="container">
   <div class="tabs">
-    <button class:active={mode === "task"} onclick={() => mode = "task"}>Задача</button>
-    <button class:active={mode === "note"} onclick={() => mode = "note"}>Заметка</button>
+    <div class="seg">
+      <button class:active={mode === "task"} onclick={() => mode = "task"}>Задача</button>
+      <button class:active={mode === "note"} onclick={() => mode = "note"}>Заметка</button>
+    </div>
     <span style="flex:1;"></span>
-    <span class="hint">Ctrl+Tab</span>
+    <kbd>Ctrl Tab</kbd>
   </div>
 
   {#if errorMsg}
@@ -144,8 +146,8 @@
     {/if}
 
     <div class="buttons">
-      <button onclick={createTask} disabled={!title.trim()}>Создать</button>
-      <button onclick={cancel}>Отмена</button>
+      <button class="btn-ghost" onclick={cancel}>Отмена</button>
+      <button class="btn-primary" onclick={createTask} disabled={!title.trim()}>Создать</button>
     </div>
   {:else}
     <!-- svelte-ignore a11y_autofocus -->
@@ -153,8 +155,8 @@
     <textarea bind:value={noteContent} placeholder="Текст заметки... (Ctrl+Enter — сохранить)" rows="3"></textarea>
 
     <div class="buttons">
-      <button onclick={createNote} disabled={!noteTitle.trim() && !noteContent.trim()}>Создать</button>
-      <button onclick={cancel}>Отмена</button>
+      <button class="btn-ghost" onclick={cancel}>Отмена</button>
+      <button class="btn-primary" onclick={createNote} disabled={!noteTitle.trim() && !noteContent.trim()}>Создать</button>
     </div>
   {/if}
 </div>
@@ -173,19 +175,6 @@
     display: flex;
     align-items: center;
     gap: 6px;
-  }
-  .tabs button {
-    font-size: 13px;
-    padding: 4px 10px;
-  }
-  .tabs button.active {
-    border-color: var(--accent);
-    color: var(--accent);
-    font-weight: 600;
-  }
-  .hint {
-    font-size: 11px;
-    color: var(--text-secondary);
   }
   .error {
     font-size: 12px;

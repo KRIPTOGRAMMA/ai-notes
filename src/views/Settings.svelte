@@ -122,59 +122,56 @@
   }
 </script>
 
-<div style="max-width:520px;padding:4px;">
-  <h2 style="margin-top:0;">Настройки</h2>
+<div class="settings">
+  <h2 class="page-title" style="margin-bottom:14px;">Настройки</h2>
 
   {#if error}
-    <div style="background:#fee2e2;color:#dc2626;padding:8px 12px;border-radius:6px;margin-bottom:12px;">{error}</div>
+    <div class="alert">{error}</div>
   {/if}
 
-  <section style="margin-bottom:24px;">
-    <h3 style="margin:0 0 10px 0;font-size:14px;text-transform:uppercase;color:var(--text-secondary,#6b7280);letter-spacing:.05em;">Внешний вид</h3>
+  <section class="card panel">
+    <h3 class="section-title">Внешний вид</h3>
 
-    <div style="display:flex;gap:16px;margin-bottom:12px;">
+    <div class="radio-row">
       {#each [["light","Светлая"],["dark","Тёмная"],["system","Системная"]] as [val, label]}
-        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+        <label class="check">
           <input type="radio" name="theme_mode" value={val} bind:group={settings.theme_mode} onchange={previewTheme} />
           {label}
         </label>
       {/each}
     </div>
 
-    <div style="margin-bottom:10px;">
-      <div style="font-size:12px;color:var(--text-secondary,#6b7280);margin-bottom:6px;">Пресеты акцента</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;">
-        {#each THEME_PRESETS as p}
-          <button type="button" onclick={() => applyPreset(p.accent)}
-            style="display:flex;align-items:center;gap:6px;">
-            <span style="width:12px;height:12px;border-radius:50%;background:{p.accent};display:inline-block;"></span>
-            {p.name}
-          </button>
-        {/each}
-      </div>
+    <div class="sub-label">Пресеты акцента</div>
+    <div class="preset-row">
+      {#each THEME_PRESETS as p}
+        <button type="button" class="btn-sm" onclick={() => applyPreset(p.accent)}>
+          <span class="swatch" style="background:{p.accent};"></span>
+          {p.name}
+        </button>
+      {/each}
     </div>
 
-    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px 16px;max-width:420px;">
+    <div class="color-grid">
       {#each [["color_accent","Акцент"],["color_bg","Фон"],["color_text","Текст"],["color_border","Границы"]] as [key, label]}
-        <label style="display:flex;align-items:center;gap:8px;font-size:13px;">
+        <label class="check">
           <input type="color"
             value={(settings as any)[key] || "#6366f1"}
             oninput={(e) => { (settings as any)[key] = e.currentTarget.value; previewTheme(); }}
-            style="width:34px;height:26px;padding:0;border-radius:4px;" />
+            class="color-input" />
           {label}
         </label>
       {/each}
     </div>
 
-    <button type="button" onclick={resetColors} style="margin-top:10px;">Сбросить к дефолту</button>
+    <button type="button" class="btn-sm" style="margin-top:10px;" onclick={resetColors}>Сбросить к дефолту</button>
   </section>
 
-  <section style="margin-bottom:24px;">
-    <h3 style="margin:0 0 10px 0;font-size:14px;text-transform:uppercase;color:var(--text-secondary,#6b7280);letter-spacing:.05em;">ИИ-провайдер</h3>
+  <section class="card panel">
+    <h3 class="section-title">ИИ-провайдер</h3>
 
-    <div style="display:flex;flex-direction:column;gap:8px;">
+    <div class="stack">
       {#each [["none","Без ИИ (функции отключены)"],["local","Локальная модель (llamafile)"],["openai","OpenAI"],["anthropic","Anthropic"]] as [val, label]}
-        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+        <label class="check">
           <input type="radio" name="provider" value={val} bind:group={settings.ai_provider} />
           {label}
         </label>
@@ -182,194 +179,255 @@
     </div>
 
     {#if settings.ai_provider !== "none"}
-      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;margin-top:10px;">
+      <label class="check" style="margin-top:10px;">
         <input type="checkbox" bind:checked={settings.ai_fallback} />
         Автопереключение: при ошибке или недоступности пробовать других доступных провайдеров
       </label>
     {/if}
-  </section>
 
-  {#if settings.ai_provider === "openai"}
-    <section style="margin-bottom:24px;">
-      <h3 style="margin:0 0 10px 0;font-size:14px;text-transform:uppercase;color:var(--text-secondary,#6b7280);letter-spacing:.05em;">OpenAI</h3>
-      <div style="display:flex;flex-direction:column;gap:8px;">
-        <label style="font-size:13px;">
-          API Key
-          {#if settings.openai_key}
-            {#if settings.openai_in_keyring}
-              <span style="font-size:11px;color:#16a34a;margin-left:6px;">🔐 keyring</span>
-            {:else}
-              <span style="font-size:11px;color:#d97706;margin-left:6px;">⚠ БД (keyring недоступен)</span>
+    {#if settings.ai_provider === "openai"}
+      <div class="stack" style="margin-top:12px;">
+        <label class="field">
+          <span class="label">API Key
+            {#if settings.openai_key}
+              {#if settings.openai_in_keyring}
+                <span class="key-ok">🔐 keyring</span>
+              {:else}
+                <span class="key-warn">⚠ БД (keyring недоступен)</span>
+              {/if}
             {/if}
-          {/if}
-          <input
-            type="password"
-            bind:value={settings.openai_key}
-            placeholder="sk-..."
-            style="display:block;width:100%;margin-top:4px;box-sizing:border-box;"
-          />
+          </span>
+          <input type="password" bind:value={settings.openai_key} placeholder="sk-..." />
         </label>
-        <label style="font-size:13px;">
-          Модель
-          <select bind:value={settings.openai_model} style="display:block;width:100%;margin-top:4px;">
+        <label class="field">
+          <span class="label">Модель</span>
+          <select bind:value={settings.openai_model}>
             <option value="gpt-4o-mini">gpt-4o-mini (быстрый, дешёвый)</option>
             <option value="gpt-4o">gpt-4o</option>
             <option value="gpt-4-turbo">gpt-4-turbo</option>
           </select>
         </label>
       </div>
-    </section>
-  {/if}
+    {/if}
 
-  {#if settings.ai_provider === "anthropic"}
-    <section style="margin-bottom:24px;">
-      <h3 style="margin:0 0 10px 0;font-size:14px;text-transform:uppercase;color:var(--text-secondary,#6b7280);letter-spacing:.05em;">Anthropic</h3>
-      <div style="display:flex;flex-direction:column;gap:8px;">
-        <label style="font-size:13px;">
-          API Key
-          {#if settings.anthropic_key}
-            {#if settings.anthropic_in_keyring}
-              <span style="font-size:11px;color:#16a34a;margin-left:6px;">🔐 keyring</span>
-            {:else}
-              <span style="font-size:11px;color:#d97706;margin-left:6px;">⚠ БД (keyring недоступен)</span>
+    {#if settings.ai_provider === "anthropic"}
+      <div class="stack" style="margin-top:12px;">
+        <label class="field">
+          <span class="label">API Key
+            {#if settings.anthropic_key}
+              {#if settings.anthropic_in_keyring}
+                <span class="key-ok">🔐 keyring</span>
+              {:else}
+                <span class="key-warn">⚠ БД (keyring недоступен)</span>
+              {/if}
             {/if}
-          {/if}
-          <input
-            type="password"
-            bind:value={settings.anthropic_key}
-            placeholder="sk-ant-..."
-            style="display:block;width:100%;margin-top:4px;box-sizing:border-box;"
-          />
+          </span>
+          <input type="password" bind:value={settings.anthropic_key} placeholder="sk-ant-..." />
         </label>
-        <label style="font-size:13px;">
-          Модель
-          <select bind:value={settings.anthropic_model} style="display:block;width:100%;margin-top:4px;">
+        <label class="field">
+          <span class="label">Модель</span>
+          <select bind:value={settings.anthropic_model}>
             <option value="claude-haiku-4-5-20251001">claude-haiku-4-5 (быстрый, дешёвый)</option>
             <option value="claude-sonnet-4-6">claude-sonnet-4-6</option>
           </select>
         </label>
       </div>
-    </section>
-  {/if}
+    {/if}
 
-  {#if settings.ai_provider === "local"}
-    <section style="margin-bottom:24px;">
-      <p style="font-size:13px;color:var(--text-secondary,#6b7280);margin:0 0 10px 0;">
-        Локальная модель хранится в<br/>
-        <code>~/.local/share/ai-notes/models/model.gguf</code>
-      </p>
-      <ModelDownloader />
-    </section>
-  {/if}
+    {#if settings.ai_provider === "local"}
+      <div style="margin-top:12px;">
+        <p class="muted" style="font-size:12px;margin:0 0 10px 0;">
+          Локальная модель хранится в <code>~/.local/share/ai-notes/models/model.gguf</code>
+        </p>
+        <ModelDownloader />
+      </div>
+    {/if}
+  </section>
 
-  <section style="margin-bottom:24px;">
-    <h3 style="margin:0 0 10px 0;font-size:14px;text-transform:uppercase;color:var(--text-secondary,#6b7280);letter-spacing:.05em;">Режим работы</h3>
-    <label style="font-size:13px;">
-      <select bind:value={settings.work_mode} style="display:block;width:100%;margin-top:4px;">
-        <option value="Light">Light — обычный режим</option>
-        <option value="Focus">Focus — без уведомлений</option>
-        <option value="Study">Study — помодоро-сессии (25/5)</option>
-      </select>
+  <section class="card panel">
+    <h3 class="section-title">Режим работы</h3>
+    <select bind:value={settings.work_mode} style="width:100%;">
+      <option value="Light">Light — обычный режим</option>
+      <option value="Focus">Focus — без уведомлений</option>
+      <option value="Study">Study — помодоро-сессии (25/5)</option>
+    </select>
+    <p class="hint">Применяется сразу после сохранения.</p>
+
+    {#if settings.work_mode === "Study"}
+      <div class="pair" style="margin-top:10px;">
+        <label class="field">
+          <span class="label">Рабочий блок (мин)</span>
+          <input type="number" min="1" max="120" bind:value={settings.pomodoro_work_mins} />
+        </label>
+        <label class="field">
+          <span class="label">Перерыв (мин)</span>
+          <input type="number" min="1" max="60" bind:value={settings.pomodoro_break_mins} />
+        </label>
+      </div>
+      <p class="hint">Применяется при следующем входе в режим Study.</p>
+    {/if}
+  </section>
+
+  <section class="card panel">
+    <h3 class="section-title">Мониторинг</h3>
+    <div class="pair">
+      <label class="field">
+        <span class="label">Порог простоя (сек, мин. 60)</span>
+        <input type="number" min="60" bind:value={settings.idle_threshold_secs} />
+      </label>
+      <label class="field">
+        <span class="label">Интервал логирования (сек, 10–600)</span>
+        <input type="number" min="10" max="600" bind:value={settings.log_interval_secs} />
+      </label>
+    </div>
+    <p class="hint">Применяется после перезапуска приложения.</p>
+  </section>
+
+  <section class="card panel">
+    <h3 class="section-title">Уведомления</h3>
+    <div class="pair">
+      <label class="field">
+        <span class="label">Первое предупреждение (часов до дедлайна)</span>
+        <input type="number" min="1" bind:value={settings.deadline_warn_hours} />
+      </label>
+      <label class="field">
+        <span class="label">Второе предупреждение (минут до дедлайна)</span>
+        <input type="number" min="1" max="1440" bind:value={settings.deadline_warn_minutes} />
+      </label>
+      <label class="field">
+        <span class="label">Возврат после простоя (мин, мин. 1)</span>
+        <input type="number" min="1" bind:value={settings.idle_notify_min_mins} />
+      </label>
+      <label class="field">
+        <span class="label">Перерыв после N минут работы (0 — выкл)</span>
+        <input type="number" min="0" bind:value={settings.nudge_after_mins} />
+      </label>
+    </div>
+    <label class="check" style="margin-top:10px;">
+      <input type="checkbox" bind:checked={settings.context_notifications} />
+      Контекстные уведомления (накопились просрочки, возврат к задаче «в работе»)
     </label>
-    <p style="font-size:12px;color:var(--text-secondary,#6b7280);margin:6px 0 0 0;">
-      Применяется сразу после сохранения.
+    <p class="hint">
+      Пауза всех уведомлений — в меню трея: «Пауза уведомлений» (30 мин / 1 ч / 2 ч / бессрочно).
     </p>
   </section>
 
-  <section style="margin-bottom:24px;">
-    <h3 style="margin:0 0 10px 0;font-size:14px;text-transform:uppercase;color:var(--text-secondary,#6b7280);letter-spacing:.05em;">Мониторинг</h3>
-    <div style="display:flex;flex-direction:column;gap:8px;">
-      <label style="font-size:13px;">
-        Порог простоя (секунды, мин. 60)
-        <input
-          type="number"
-          min="60"
-          bind:value={settings.idle_threshold_secs}
-          style="display:block;width:100%;margin-top:4px;box-sizing:border-box;"
-        />
-      </label>
-      <label style="font-size:13px;">
-        Интервал логирования (секунды, 10–600)
-        <input
-          type="number"
-          min="10"
-          max="600"
-          bind:value={settings.log_interval_secs}
-          style="display:block;width:100%;margin-top:4px;box-sizing:border-box;"
-        />
-      </label>
-      <p style="font-size:12px;color:var(--text-secondary,#6b7280);margin:0;">
-        Применяется после перезапуска приложения.
-      </p>
-    </div>
-  </section>
-
-  <section style="margin-bottom:24px;">
-    <h3 style="margin:0 0 10px 0;font-size:14px;text-transform:uppercase;color:var(--text-secondary,#6b7280);letter-spacing:.05em;">Уведомления о дедлайнах</h3>
-    <div style="display:flex;flex-direction:column;gap:8px;">
-      <label style="font-size:13px;">
-        Первое предупреждение (часов до дедлайна)
-        <input type="number" min="1" bind:value={settings.deadline_warn_hours}
-          style="display:block;width:100%;margin-top:4px;box-sizing:border-box;" />
-      </label>
-      <label style="font-size:13px;">
-        Второе предупреждение (минут до дедлайна)
-        <input type="number" min="1" max="1440" bind:value={settings.deadline_warn_minutes}
-          style="display:block;width:100%;margin-top:4px;box-sizing:border-box;" />
-      </label>
-      <label style="font-size:13px;">
-        Уведомление о возвращении после простоя (минут, мин. 1)
-        <input type="number" min="1" bind:value={settings.idle_notify_min_mins}
-          style="display:block;width:100%;margin-top:4px;box-sizing:border-box;" />
-      </label>
-      <label style="font-size:13px;">
-        Напоминание о перерыве после N минут непрерывной работы (0 — выкл, только режим Light)
-        <input type="number" min="0" bind:value={settings.nudge_after_mins}
-          style="display:block;width:100%;margin-top:4px;box-sizing:border-box;" />
-      </label>
-      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;">
-        <input type="checkbox" bind:checked={settings.context_notifications} />
-        Контекстные уведомления (накопились просрочки, возврат к задаче «в работе»)
-      </label>
-      <p style="font-size:12px;color:var(--text-secondary,#6b7280);margin:0;">
-        Пауза всех уведомлений — в меню трея: «Пауза уведомлений» (30 мин / 1 ч / 2 ч / бессрочно).
-      </p>
-    </div>
-  </section>
-
-  {#if settings.work_mode === "Study"}
-  <section style="margin-bottom:24px;">
-    <h3 style="margin:0 0 10px 0;font-size:14px;text-transform:uppercase;color:var(--text-secondary,#6b7280);letter-spacing:.05em;">Помодоро</h3>
-    <div style="display:flex;flex-direction:column;gap:8px;">
-      <label style="font-size:13px;">
-        Рабочий блок (минуты)
-        <input type="number" min="1" max="120" bind:value={settings.pomodoro_work_mins}
-          style="display:block;width:100%;margin-top:4px;box-sizing:border-box;" />
-      </label>
-      <label style="font-size:13px;">
-        Перерыв (минуты)
-        <input type="number" min="1" max="60" bind:value={settings.pomodoro_break_mins}
-          style="display:block;width:100%;margin-top:4px;box-sizing:border-box;" />
-      </label>
-    </div>
-    <p style="font-size:12px;color:var(--text-secondary,#6b7280);margin:6px 0 0 0;">
-      Применяется при следующем входе в режим Study.
-    </p>
-  </section>
-  {/if}
-
-  <button onclick={save} disabled={saving}>
-    {saving ? "Сохранение..." : saved ? "Сохранено ✓" : "Сохранить"}
-  </button>
-
-  <section style="margin-top:32px;">
-    <h3 style="margin:0 0 10px 0;font-size:14px;text-transform:uppercase;color:var(--text-secondary,#6b7280);letter-spacing:.05em;">Данные</h3>
-    <div style="display:flex;gap:8px;align-items:center;">
-      <button onclick={exportData}>Экспорт (ZIP)</button>
-      <button onclick={importData}>Импорт (ZIP)</button>
+  <section class="card panel">
+    <h3 class="section-title">Данные</h3>
+    <div class="preset-row">
+      <button class="btn-sm" onclick={exportData}>Экспорт (ZIP)</button>
+      <button class="btn-sm" onclick={importData}>Импорт (ZIP)</button>
       {#if backupMsg}
-        <span style="font-size:12px;color:var(--text-secondary,#6b7280);">{backupMsg}</span>
+        <span class="muted" style="font-size:12px;">{backupMsg}</span>
       {/if}
     </div>
   </section>
+
+  <button class="btn-primary" onclick={save} disabled={saving}>
+    {saving ? "Сохранение..." : saved ? "Сохранено ✓" : "Сохранить"}
+  </button>
 </div>
+
+<style>
+  .settings {
+    max-width: 560px;
+    padding-bottom: 24px;
+  }
+
+  .panel {
+    padding: 14px 16px;
+    margin-bottom: 12px;
+  }
+
+  .stack {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .pair {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px 14px;
+  }
+
+  .check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+
+  .radio-row {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 12px;
+  }
+
+  .sub-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+  }
+
+  .preset-row {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .swatch {
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 4px;
+    vertical-align: -1px;
+  }
+
+  .color-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px 16px;
+    max-width: 380px;
+    margin-top: 12px;
+  }
+
+  .color-input {
+    width: 34px;
+    height: 26px;
+    padding: 0;
+    border-radius: 4px;
+  }
+
+  .hint {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin: 8px 0 0 0;
+  }
+
+  .key-ok {
+    font-size: 11px;
+    color: var(--success);
+    margin-left: 6px;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+
+  .key-warn {
+    font-size: 11px;
+    color: var(--cat-home);
+    margin-left: 6px;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+
+  code {
+    background: var(--bg-secondary);
+    padding: 1px 4px;
+    border-radius: 4px;
+    font-size: 0.95em;
+  }
+</style>

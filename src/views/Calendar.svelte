@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { taskStore } from "../lib/stores/tasks.svelte";
-  import type { Task } from "../lib/types";
+  import TaskModal from "../lib/components/TaskModal.svelte";
+  import type { Task, CreateTaskPayload } from "../lib/types";
 
   let { onOpenTask }: { onOpenTask: (id: string) => void } = $props();
 
@@ -78,72 +79,183 @@
     month = today.getMonth();
   }
 
-  function chipStyle(t: Task): string {
-    const done = t.status === "Done" || t.status === "Archived";
-    if (done) {
-      return "background:transparent;border:1px solid var(--border,#e5e7eb);color:var(--text-secondary,#6b7280);text-decoration:line-through;";
-    }
-    if (t.deadline && new Date(t.deadline) < new Date()) {
-      return "background:#dc2626;color:white;";
-    }
-    return "background:var(--accent,#6366f1);color:white;";
+  function chipClass(t: Task): string {
+    if (t.status === "Done" || t.status === "Archived") return "done";
+    if (t.deadline && new Date(t.deadline) < new Date()) return "overdue";
+    return "";
   }
 
   const MAX_CHIPS = 3;
+
+  // Клик по дню — создание задачи с дедлайном на этот день (ключ ячейки).
+  let createFor = $state<string | null>(null);
+
+  async function handleCreate(data: unknown) {
+    await taskStore.create(data as CreateTaskPayload);
+  }
 </script>
 
-<div style="padding:4px;">
-  <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
-    <h2 style="margin:0;">Календарь</h2>
+<div class="cal">
+  <div class="page-head">
+    <h2 class="page-title">Календарь</h2>
     <span style="flex:1;"></span>
-    <button onclick={() => shiftMonth(-1)} title="Предыдущий месяц">←</button>
-    <span style="min-width:140px;text-align:center;font-weight:600;">{MONTHS[month]} {year}</span>
-    <button onclick={() => shiftMonth(1)} title="Следующий месяц">→</button>
-    <button onclick={goToday}>Сегодня</button>
+    <button class="btn-icon" onclick={() => shiftMonth(-1)} title="Предыдущий месяц">←</button>
+    <span class="month-label">{MONTHS[month]} {year}</span>
+    <button class="btn-icon" onclick={() => shiftMonth(1)} title="Следующий месяц">→</button>
+    <button class="btn-sm" onclick={goToday}>Сегодня</button>
   </div>
 
-  <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;">
+  <div class="month-grid">
     {#each WEEKDAYS as wd}
-      <div style="text-align:center;font-size:12px;color:var(--text-secondary,#6b7280);padding:4px 0;">{wd}</div>
+      <div class="weekday">{wd}</div>
     {/each}
 
     {#each grid as cell (cell.key)}
-      <div style="
-        min-height:86px;
-        border:1px solid {cell.isToday ? 'var(--accent,#6366f1)' : 'var(--border,#e5e7eb)'};
-        border-radius:6px;
-        padding:4px;
-        opacity:{cell.inMonth ? 1 : 0.45};
-        background:var(--bg-card,transparent);
-      ">
-        <div style="font-size:12px;font-weight:{cell.isToday ? '700' : '400'};
-          color:{cell.isToday ? 'var(--accent,#6366f1)' : 'var(--text-secondary,#6b7280)'};margin-bottom:4px;">
-          {cell.day}
-        </div>
-        <div style="display:flex;flex-direction:column;gap:2px;">
+      <div
+        class="day card"
+        class:today={cell.isToday}
+        class:out={!cell.inMonth}
+        onclick={() => createFor = cell.key}
+        onkeydown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget) createFor = cell.key; }}
+        role="button"
+        tabindex="0"
+        title="Создать задачу на этот день"
+      >
+        <div class="day-num" class:today={cell.isToday}>{cell.day}</div>
+        <div class="day-tasks">
           {#each cell.tasks.slice(0, MAX_CHIPS) as t (t.id)}
-            <button
-              onclick={() => onOpenTask(t.id)}
-              title={t.title}
-              style="
-                display:block;width:100%;text-align:left;
-                font-size:11px;padding:2px 5px;border-radius:4px;border:none;cursor:pointer;
-                white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-                {chipStyle(t)}
-              "
-            >{t.title}</button>
+            <button class="task-chip {chipClass(t)}" onclick={(e) => { e.stopPropagation(); onOpenTask(t.id); }} title={t.title}>
+              {t.title}
+            </button>
           {/each}
           {#if cell.tasks.length > MAX_CHIPS}
-            <span style="font-size:11px;color:var(--text-secondary,#6b7280);padding-left:5px;">
-              +{cell.tasks.length - MAX_CHIPS} ещё
-            </span>
+            <span class="more">+{cell.tasks.length - MAX_CHIPS} ещё</span>
           {/if}
         </div>
       </div>
     {/each}
   </div>
 
-  <p style="font-size:12px;color:var(--text-secondary,#6b7280);margin-top:10px;">
-    Задачи разложены по дате дедлайна. Красные — просроченные, зачёркнутые — выполненные. Клик открывает задачу.
+  <p class="muted" style="font-size:12px;margin-top:10px;">
+    Задачи разложены по дате дедлайна. Красные — просроченные, зачёркнутые — выполненные.
+    Клик по задаче открывает её, клик по дню — создаёт задачу с дедлайном на этот день.
   </p>
 </div>
+
+{#if createFor}
+  <TaskModal
+    initialDeadline={`${createFor}T09:00`}
+    onSave={handleCreate}
+    onClose={() => createFor = null}
+  />
+{/if}
+
+<style>
+  .page-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 12px;
+  }
+
+  .month-label {
+    min-width: 130px;
+    text-align: center;
+    font-weight: 600;
+    font-size: 13px;
+  }
+
+  .month-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 4px;
+  }
+
+  .weekday {
+    text-align: center;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: var(--text-secondary);
+    padding: 2px 0 4px;
+  }
+
+  .day {
+    min-height: 86px;
+    padding: 4px;
+    min-width: 0;
+    cursor: pointer;
+  }
+
+  .day:hover {
+    background: var(--bg-hover);
+  }
+
+  .day.today {
+    border-color: var(--accent);
+  }
+
+  .day.out {
+    opacity: 0.45;
+  }
+
+  .day-num {
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-bottom: 3px;
+    padding-left: 2px;
+  }
+
+  .day-num.today {
+    color: var(--accent);
+    font-weight: 700;
+  }
+
+  .day-tasks {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .task-chip {
+    display: block;
+    width: 100%;
+    text-align: left;
+    font-size: 11px;
+    padding: 2px 5px;
+    border-radius: 4px;
+    border: none;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+    color: var(--accent);
+  }
+
+  .task-chip:hover {
+    background: color-mix(in srgb, var(--accent) 24%, transparent);
+  }
+
+  .task-chip.overdue {
+    background: color-mix(in srgb, var(--danger) 14%, transparent);
+    color: var(--danger);
+  }
+
+  .task-chip.overdue:hover {
+    background: color-mix(in srgb, var(--danger) 24%, transparent);
+  }
+
+  .task-chip.done {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    text-decoration: line-through;
+    padding: 1px 4px;
+  }
+
+  .more {
+    font-size: 11px;
+    color: var(--text-secondary);
+    padding-left: 5px;
+  }
+</style>

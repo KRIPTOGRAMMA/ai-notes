@@ -76,14 +76,64 @@ fn update_quiet_checks(app: &tauri::AppHandle, active_id: &str) {
 }
 
 // Какой пункт меню паузы должен быть отмечен для данного quiet_until.
-// Таймерную паузу (30м/1ч/2ч) после перезапуска не различить — не отмечаем ничего.
-fn quiet_check_id(quiet_until: &str) -> &'static str {
+// preset — сохранённый id пресета (quiet_preset в settings): по нему таймерная
+// пауза восстанавливает галочку после перезапуска. Легаси-значение без пресета
+// при активной таймерной паузе — "quiet_timed" (ни один пункт не отмечен).
+fn quiet_check_id(quiet_until: &str, preset: &str, now: chrono::DateTime<chrono::Utc>) -> &'static str {
     if quiet_until == commands::settings::QUIET_FOREVER {
         return "quiet_inf";
     }
     match chrono::DateTime::parse_from_rfc3339(quiet_until) {
-        Ok(t) if chrono::Utc::now() < t.with_timezone(&chrono::Utc) => "quiet_timed",
+        Ok(t) if now < t.with_timezone(&chrono::Utc) => match preset {
+            "quiet_30" => "quiet_30",
+            "quiet_60" => "quiet_60",
+            "quiet_120" => "quiet_120",
+            _ => "quiet_timed",
+        },
         _ => "quiet_off",
+    }
+}
+
+// Остаток активной таймерной паузы в минутах (округление вверх);
+// None — пауза не активна или бессрочная.
+fn quiet_remaining_mins(quiet_until: &str, now: chrono::DateTime<chrono::Utc>) -> Option<i64> {
+    if quiet_until == commands::settings::QUIET_FOREVER {
+        return None;
+    }
+    let t = chrono::DateTime::parse_from_rfc3339(quiet_until)
+        .ok()?
+        .with_timezone(&chrono::Utc);
+    let secs = (t - now).num_seconds();
+    if secs <= 0 {
+        return None;
+    }
+    Some((secs + 59) / 60)
+}
+
+fn quiet_base_label(id: &str) -> &'static str {
+    match id {
+        "quiet_30" => "30 минут",
+        "quiet_60" => "1 час",
+        "quiet_120" => "2 часа",
+        "quiet_inf" => "Бессрочно",
+        _ => "Выкл",
+    }
+}
+
+// Подписи пунктов паузы: активный таймерный пресет показывает остаток
+// («1 час — осталось 42 мин»), остальные — базовую подпись.
+fn update_quiet_labels(app: &tauri::AppHandle, active_id: &str, remaining_mins: Option<i64>) {
+    if let Some(items) = app.try_state::<QuietItems>() {
+        let items = items.lock().unwrap();
+        for item in items.iter() {
+            let id = item.id().as_ref();
+            let base = quiet_base_label(id);
+            let text = match remaining_mins {
+                Some(m) if id == active_id => format!("{base} — осталось {m} мин"),
+                _ => base.to_string(),
+            };
+            let _ = item.set_text(text);
+        }
     }
 }
 
@@ -154,11 +204,11 @@ pub fn run() {
                     let mode_study = CheckMenuItem::with_id(app, "mode_Study", "Study", true, false, None::<&str>)?;
                     let mode_menu = Submenu::with_items(app, "Режим", true, &[&mode_light, &mode_focus, &mode_study])?;
                     // Пауза уведомлений: галочка выставляется после загрузки настроек
-                    let quiet_30 = CheckMenuItem::with_id(app, "quiet_30", "30 минут", true, false, None::<&str>)?;
-                    let quiet_60 = CheckMenuItem::with_id(app, "quiet_60", "1 час", true, false, None::<&str>)?;
-                    let quiet_120 = CheckMenuItem::with_id(app, "quiet_120", "2 часа", true, false, None::<&str>)?;
-                    let quiet_inf = CheckMenuItem::with_id(app, "quiet_inf", "Бессрочно", true, false, None::<&str>)?;
-                    let quiet_off = CheckMenuItem::with_id(app, "quiet_off", "Выкл", true, false, None::<&str>)?;
+                    let quiet_30 = CheckMenuItem::with_id(app, "quiet_30", quiet_base_label("quiet_30"), true, false, None::<&str>)?;
+                    let quiet_60 = CheckMenuItem::with_id(app, "quiet_60", quiet_base_label("quiet_60"), true, false, None::<&str>)?;
+                    let quiet_120 = CheckMenuItem::with_id(app, "quiet_120", quiet_base_label("quiet_120"), true, false, None::<&str>)?;
+                    let quiet_inf = CheckMenuItem::with_id(app, "quiet_inf", quiet_base_label("quiet_inf"), true, false, None::<&str>)?;
+                    let quiet_off = CheckMenuItem::with_id(app, "quiet_off", quiet_base_label("quiet_off"), true, false, None::<&str>)?;
                     let quiet_menu = Submenu::with_items(
                         app,
                         "Пауза уведомлений",
@@ -200,9 +250,12 @@ pub fn run() {
                                     _ => return,
                                 };
                                 update_quiet_checks(app, id);
+                                update_quiet_labels(app, id, quiet_remaining_mins(&value, chrono::Utc::now()));
                                 let pool = app.state::<sqlx::SqlitePool>().inner().clone();
+                                let preset = id.to_string();
                                 tauri::async_runtime::spawn(async move {
                                     let _ = commands::settings::persist_quiet_until(&pool, &value).await;
+                                    let _ = commands::settings::persist_quiet_preset(&pool, &preset).await;
                                 });
                             }
                             id if id.starts_with("mode_") => {
@@ -300,27 +353,45 @@ pub fn run() {
             let settings = commands::settings::load_settings_raw(&pool)
                 .await
                 .unwrap_or_default();
-            // Выставить правильные галочки режима и паузы в трее
+            // Выставить правильные галочки режима и паузы в трее.
+            // Пресет паузы хранится отдельно (quiet_preset) — таймерная пауза
+            // после перезапуска восстанавливает и галочку, и подпись с остатком.
             update_mode_checks(&app.app_handle(), &settings.work_mode);
-            update_quiet_checks(&app.app_handle(), quiet_check_id(&settings.quiet_until));
+            let quiet_preset = commands::settings::get_setting(&pool, "quiet_preset")
+                .await
+                .unwrap_or_default();
+            let now = chrono::Utc::now();
+            let quiet_id = quiet_check_id(&settings.quiet_until, &quiet_preset, now);
+            update_quiet_checks(&app.app_handle(), quiet_id);
+            update_quiet_labels(
+                &app.app_handle(),
+                quiet_id,
+                quiet_remaining_mins(&settings.quiet_until, now),
+            );
 
-            // Вотчер истечения паузы: когда quiet_until проходит, снимаем галочку
-            // с пресета и отмечаем «Выкл». Пока пауза активна — галочки не трогаем.
+            // Вотчер паузы: когда quiet_until проходит, снимаем галочку с пресета
+            // и отмечаем «Выкл»; пока таймерная пауза активна — раз в минуту
+            // обновляем остаток в подписи пункта.
             {
                 let app_handle = app.app_handle().clone();
                 let pool_watch = pool.clone();
-                let mut last_id = quiet_check_id(&settings.quiet_until);
+                let mut last_id = quiet_id;
                 tokio::spawn(async move {
                     loop {
                         tokio::time::sleep(std::time::Duration::from_secs(60)).await;
                         let value = commands::settings::get_setting(&pool_watch, "quiet_until")
                             .await
                             .unwrap_or_default();
-                        let id = quiet_check_id(&value);
+                        let preset = commands::settings::get_setting(&pool_watch, "quiet_preset")
+                            .await
+                            .unwrap_or_default();
+                        let now = chrono::Utc::now();
+                        let id = quiet_check_id(&value, &preset, now);
                         if id != last_id && id != "quiet_timed" {
                             update_quiet_checks(&app_handle, id);
                         }
                         last_id = id;
+                        update_quiet_labels(&app_handle, id, quiet_remaining_mins(&value, now));
                     }
                 });
             }
@@ -343,4 +414,51 @@ pub fn run() {
             notifier::pomodoro::start_pomodoro(app.app_handle().clone(), work_mode, pool);
             app.run(|_, _| {});
         });
+}
+#[cfg(test)]
+mod tests {
+    use super::{quiet_check_id, quiet_remaining_mins};
+    use chrono::{TimeZone, Utc};
+
+    fn now() -> chrono::DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 7, 14, 12, 0, 0).unwrap()
+    }
+
+    #[test]
+    fn check_id_forever_and_off() {
+        assert_eq!(quiet_check_id(crate::commands::settings::QUIET_FOREVER, "", now()), "quiet_inf");
+        assert_eq!(quiet_check_id("", "", now()), "quiet_off");
+        assert_eq!(quiet_check_id("мусор", "quiet_30", now()), "quiet_off");
+        // истёкшая пауза — «Выкл», даже если пресет сохранён
+        assert_eq!(quiet_check_id("2026-07-14T11:00:00+00:00", "quiet_60", now()), "quiet_off");
+    }
+
+    #[test]
+    fn check_id_restores_preset_for_active_timed_pause() {
+        let until = "2026-07-14T12:30:00+00:00";
+        assert_eq!(quiet_check_id(until, "quiet_30", now()), "quiet_30");
+        assert_eq!(quiet_check_id(until, "quiet_60", now()), "quiet_60");
+        assert_eq!(quiet_check_id(until, "quiet_120", now()), "quiet_120");
+        // легаси-значение без пресета (или с мусором) — галочки нет
+        assert_eq!(quiet_check_id(until, "", now()), "quiet_timed");
+        assert_eq!(quiet_check_id(until, "quiet_off", now()), "quiet_timed");
+    }
+
+    #[test]
+    fn remaining_mins_none_when_inactive() {
+        assert_eq!(quiet_remaining_mins("", now()), None);
+        assert_eq!(quiet_remaining_mins(crate::commands::settings::QUIET_FOREVER, now()), None);
+        assert_eq!(quiet_remaining_mins("2026-07-14T11:59:00+00:00", now()), None);
+        assert_eq!(quiet_remaining_mins("2026-07-14T12:00:00+00:00", now()), None);
+    }
+
+    #[test]
+    fn remaining_mins_rounds_up() {
+        // ровно 30 минут — сразу после клика по пресету
+        assert_eq!(quiet_remaining_mins("2026-07-14T12:30:00+00:00", now()), Some(30));
+        // 90 секунд — округляем вверх до 2 минут
+        assert_eq!(quiet_remaining_mins("2026-07-14T12:01:30+00:00", now()), Some(2));
+        // последняя минута
+        assert_eq!(quiet_remaining_mins("2026-07-14T12:00:30+00:00", now()), Some(1));
+    }
 }

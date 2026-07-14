@@ -146,8 +146,6 @@
   taskStore.load();
 
   onMount(() => {
-    const unlistenTask = listen("task-created", () => taskStore.load());
-
     const unlistenAi = listen<AiResult>("ai-result", async ({ payload }) => {
       if (payload.error) {
         aiLoadingId = null;
@@ -173,7 +171,6 @@
     });
 
     return () => {
-      unlistenTask.then(fn => fn());
       unlistenAi.then(fn => fn());
     };
   });

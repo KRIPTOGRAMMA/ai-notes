@@ -31,9 +31,12 @@
   onMount(async () => {
     // Заметки нужны глобально для поиска (Ctrl+K), даже если раздел ещё не открывали.
     noteStore.load();
-    // Заметка, созданная в окне быстрого ввода — подхватываем в список.
+    // Создание в окне быстрого ввода — подхватываем глобально: раздел задач
+    // может быть не смонтирован (открыт Календарь/Дашборд), а store общий.
     const unlistenNote = listen("note-created", () => noteStore.load());
+    const unlistenTask = listen("task-created", () => taskStore.load());
     void unlistenNote;
+    void unlistenTask;
     try {
       isWayland = await api.isWayland();
       loadedSettings = await api.getSettings();

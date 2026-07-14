@@ -180,10 +180,40 @@ async fn notify_return(app: &tauri::AppHandle, pool: &SqlitePool, away_mins: i64
         return;
     }
 
+    let context_on = crate::commands::settings::get_setting(pool, "context_notifications")
+        .await
+        .as_deref()
+        != Some("false");
+
+    // Контекстный триггер (§5.4): долго отсутствовал и есть задача «в работе» —
+    // любая InProgress, не обязательно топовая по дедлайну.
+    let in_progress = if context_on && away_mins >= CONTEXT_RETURN_MINS {
+        nearest_task(pool, &["InProgress"]).await
+    } else {
+        None
+    };
+
+    let body = match in_progress {
+        Some(title) => {
+            format!("Вы отсутствовали {} мин. Продолжим задачу «{}» или сделаем перерыв?", away_mins, title)
+        }
+        None => match nearest_task(pool, &["Todo", "InProgress"]).await {
+            Some(title) => format!("Вы отсутствовали {} мин. Ближайшая задача: {}", away_mins, title),
+            None => format!("Вы отсутствовали {} мин. С возвращением!", away_mins),
+        },
+    };
+
+    crate::notifier::scheduler::send_notification(app, "AI Notes", &body);
+}
+
+// Ближайшая (по дедлайну, затем по приоритету) видимая задача с одним из
+// заданных статусов. Статусы — фиксированные строки из кода, не ввод пользователя.
+pub async fn nearest_task(pool: &SqlitePool, statuses: &[&str]) -> Option<String> {
     use sqlx::Row;
-    let top_task: Option<(String, String)> = sqlx::query(
-        "SELECT title, status FROM tasks
-         WHERE status IN ('Todo', 'InProgress') AND hidden = 0
+    let placeholders = vec!["?"; statuses.len()].join(", ");
+    let sql = format!(
+        "SELECT title FROM tasks
+         WHERE status IN ({placeholders}) AND hidden = 0
          ORDER BY deadline IS NULL, deadline ASC,
                   CASE priority
                       WHEN 'Critical' THEN 0
@@ -192,30 +222,17 @@ async fn notify_return(app: &tauri::AppHandle, pool: &SqlitePool, away_mins: i64
                       ELSE 3
                   END
          LIMIT 1"
-    )
-    .fetch_optional(pool)
-    .await
-    .ok()
-    .flatten()
-    .map(|row| (row.get("title"), row.get("status")));
-
-    let context_on = crate::commands::settings::get_setting(pool, "context_notifications")
+    );
+    let mut query = sqlx::query(&sql);
+    for s in statuses {
+        query = query.bind(*s);
+    }
+    query
+        .fetch_optional(pool)
         .await
-        .as_deref()
-        != Some("false");
-
-    let body = match top_task {
-        // Контекстный триггер: долго отсутствовал, а задача была «в работе»
-        Some((title, status))
-            if context_on && away_mins >= CONTEXT_RETURN_MINS && status == "InProgress" =>
-        {
-            format!("Вы отсутствовали {} мин. Продолжим задачу «{}» или сделаем перерыв?", away_mins, title)
-        }
-        Some((title, _)) => format!("Вы отсутствовали {} мин. Ближайшая задача: {}", away_mins, title),
-        None => format!("Вы отсутствовали {} мин. С возвращением!", away_mins),
-    };
-
-    crate::notifier::scheduler::send_notification(app, "AI Notes", &body);
+        .ok()
+        .flatten()
+        .map(|row| row.get("title"))
 }
 
 // Порог «долгого» отсутствия для контекстного сообщения про InProgress-задачу.
@@ -313,5 +330,47 @@ mod tests {
         // idle_since не выставлен (крайний случай) — away = 0, но уведомление рассматривается
         let step = step_idle(&ActivityState::Idle, None, now, now, 300);
         assert_eq!(step.notify_return_mins, Some(0));
+    }
+
+    async fn test_pool() -> sqlx::SqlitePool {
+        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./src/db/migrations").run(&pool).await.unwrap();
+        pool
+    }
+
+    async fn insert_task(pool: &sqlx::SqlitePool, title: &str, status: &str, deadline: Option<&str>) {
+        sqlx::query(
+            "INSERT INTO tasks (id, title, status, priority, category, deadline, recurrence, tags, hidden, created_at, updated_at)
+             VALUES (?, ?, ?, 'Medium', 'Work', ?, 'None', '[]', 0, '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')")
+            .bind(uuid::Uuid::new_v4().to_string())
+            .bind(title).bind(status).bind(deadline)
+            .execute(pool).await.unwrap();
+    }
+
+    // Регресс: контекстный триггер должен находить задачу «в работе», даже если
+    // топовая по дедлайну — Todo (раньше проверялся только статус топовой).
+    #[tokio::test]
+    async fn nearest_task_finds_in_progress_behind_todo_with_nearer_deadline() {
+        let pool = test_pool().await;
+        insert_task(&pool, "срочная todo", "Todo", Some("2026-07-15T00:00:00+00:00")).await;
+        insert_task(&pool, "в работе без дедлайна", "InProgress", None).await;
+
+        // топовая среди всех — Todo с ближайшим дедлайном
+        assert_eq!(
+            nearest_task(&pool, &["Todo", "InProgress"]).await.as_deref(),
+            Some("срочная todo")
+        );
+        // но InProgress-задача находится отдельным запросом
+        assert_eq!(
+            nearest_task(&pool, &["InProgress"]).await.as_deref(),
+            Some("в работе без дедлайна")
+        );
+    }
+
+    #[tokio::test]
+    async fn nearest_task_none_when_no_matching_status() {
+        let pool = test_pool().await;
+        insert_task(&pool, "выполнена", "Done", None).await;
+        assert_eq!(nearest_task(&pool, &["InProgress"]).await, None);
     }
 }

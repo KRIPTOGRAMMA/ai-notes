@@ -156,34 +156,25 @@
   function maxMinutes(days: ActivityDay[]) {
     return Math.max(...days.map(d => d.minutes), 1);
   }
-
-  function barColor(minutes: number, max: number) {
-    const ratio = minutes / max;
-    if (ratio > 0.66) return "#22c55e";
-    if (ratio > 0.33) return "#f59e0b";
-    return "#94a3b8";
-  }
 </script>
 
-<div class="dashboard-viz" style="padding:4px;max-width:720px;">
-  <h2 style="margin-top:0;">Дашборд</h2>
+<div class="dash">
+  <h2 class="page-title" style="margin-bottom:14px;">Дашборд</h2>
 
   {#if error}
-    <div style="background:#fee2e2;color:#dc2626;padding:8px 12px;border-radius:6px;margin-bottom:12px;">{error}</div>
+    <div class="alert">{error}</div>
   {/if}
 
-  <!-- Донат по категориям + актив/простой -->
-  <div style="display:flex;gap:32px;flex-wrap:wrap;margin-bottom:32px;">
-    <section style="flex:1;min-width:260px;">
-      <h3 style="font-size:14px;text-transform:uppercase;color:var(--text-secondary,#6b7280);letter-spacing:.05em;margin:0 0 12px 0;">
-        Выполнено по категориям
-      </h3>
+  <div class="grid">
+    <!-- Донат по категориям -->
+    <section class="card panel">
+      <h3 class="section-title">Выполнено по категориям</h3>
 
       {#if donutData.length === 0}
-        <p style="color:var(--text-secondary,#6b7280);font-size:13px;">Нет выполненных задач</p>
+        <div class="empty">Нет выполненных задач</div>
       {:else}
-        <div style="display:flex;align-items:center;gap:20px;">
-          <svg viewBox="0 0 120 120" width="140" height="140" role="img" aria-label="Выполненные задачи по категориям">
+        <div class="donut-row">
+          <svg viewBox="0 0 120 120" width="132" height="132" role="img" aria-label="Выполненные задачи по категориям">
             <g transform="rotate(-90 60 60)">
               {#each donutSegments as seg (seg.category)}
                 <circle
@@ -198,16 +189,16 @@
                 </circle>
               {/each}
             </g>
-            <text x="60" y="57" text-anchor="middle" style="font-size:22px;font-weight:600;fill:var(--text-primary,#111827);">{donutTotal}</text>
-            <text x="60" y="74" text-anchor="middle" style="font-size:10px;fill:var(--text-secondary,#6b7280);">всего</text>
+            <text x="60" y="57" text-anchor="middle" class="donut-total">{donutTotal}</text>
+            <text x="60" y="74" text-anchor="middle" class="donut-caption">всего</text>
           </svg>
 
-          <ul style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;font-size:13px;">
+          <ul class="legend">
             {#each donutSegments as seg (seg.category)}
-              <li style="display:flex;align-items:center;gap:8px;">
-                <span style="width:12px;height:12px;border-radius:3px;background:var(--cat-{seg.category.toLowerCase()});flex-shrink:0;"></span>
+              <li>
+                <span class="swatch" style="background:var(--cat-{seg.category.toLowerCase()});"></span>
                 <span>{seg.label}</span>
-                <span style="color:var(--text-secondary,#6b7280);">{seg.count} · {seg.percent}%</span>
+                <span class="muted">{seg.count} · {seg.percent}%</span>
               </li>
             {/each}
           </ul>
@@ -215,20 +206,19 @@
       {/if}
     </section>
 
-    <section style="flex:1;min-width:260px;">
-      <h3 style="font-size:14px;text-transform:uppercase;color:var(--text-secondary,#6b7280);letter-spacing:.05em;margin:0 0 12px 0;">
-        Активное время
-      </h3>
+    <!-- Актив/простой -->
+    <section class="card panel">
+      <h3 class="section-title">Активное время</h3>
 
       {#if ratio}
         {#each [
           { label: "Сегодня", value: pct(ratio.today_active, ratio.today_idle), active: ratio.today_active },
           { label: "Неделя", value: pct(ratio.week_active, ratio.week_idle), active: ratio.week_active },
         ] as row (row.label)}
-          <div style="margin-bottom:14px;">
-            <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;">
+          <div class="ratio-row">
+            <div class="ratio-head">
               <span>{row.label}</span>
-              <span style="color:var(--text-secondary,#6b7280);">
+              <span class="muted">
                 {#if row.value === null}
                   нет данных
                 {:else}
@@ -236,138 +226,262 @@
                 {/if}
               </span>
             </div>
-            <div style="background:var(--border,#e5e7eb);border-radius:3px;height:8px;">
-              <div style="width:{row.value ?? 0}%;height:100%;background:var(--accent,#6366f1);border-radius:3px;"></div>
+            <div class="track">
+              <div class="fill" style="width:{row.value ?? 0}%;"></div>
             </div>
           </div>
         {/each}
       {:else}
-        <p style="color:var(--text-secondary,#6b7280);font-size:13px;">Нет данных</p>
+        <div class="empty">Нет данных</div>
+      {/if}
+    </section>
+
+    <!-- ИИ-инсайт -->
+    <section class="card panel">
+      <h3 class="section-title">ИИ-инсайт</h3>
+
+      {#if settings && settings.ai_provider === "none"}
+        <p class="muted" style="margin:0;">ИИ отключён — включите провайдера в Настройках, чтобы получать инсайты.</p>
+      {:else}
+        <div class="ai-row">
+          <button onclick={refreshInsight} disabled={insightPending}>
+            {insightPending ? "Думаю…" : "Обновить"}
+          </button>
+          <div class="ai-text">
+            {#if insightError}
+              <span style="color:var(--danger);">{insightError}</span>
+            {:else if insightText}
+              {insightText}
+            {:else if !insightPending}
+              <span class="muted">Нажмите «Обновить», чтобы получить короткий разбор вашей продуктивности.</span>
+            {/if}
+          </div>
+        </div>
+      {/if}
+    </section>
+
+    <!-- Резюме дня/недели -->
+    <section class="card panel">
+      <h3 class="section-title">Резюме</h3>
+
+      {#if settings && settings.ai_provider === "none"}
+        <p class="muted" style="margin:0;">ИИ отключён — резюме недоступно.</p>
+      {:else}
+        <div class="ai-row">
+          <div class="btn-group">
+            <button onclick={() => refreshSummary("day")} disabled={summaryPending !== null}>
+              {summaryPending === "day" ? "Думаю…" : "День"}
+            </button>
+            <button onclick={() => refreshSummary("week")} disabled={summaryPending !== null}>
+              {summaryPending === "week" ? "Думаю…" : "Неделя"}
+            </button>
+          </div>
+          <div class="ai-text">
+            {#if summaryError}
+              <span style="color:var(--danger);">{summaryError}</span>
+            {:else if summaryText}
+              <span class="muted" style="font-size:11px;display:block;margin-bottom:2px;">
+                {summaryKind === "day" ? "За день" : "За неделю"}
+              </span>
+              {summaryText}
+            {:else if summaryPending === null}
+              <span class="muted">Резюме дня или недели: что сделано и сколько времени было активным.</span>
+            {/if}
+          </div>
+        </div>
+      {/if}
+    </section>
+
+    <!-- Активность по дням -->
+    <section class="card panel wide">
+      <h3 class="section-title">Активность по дням (мин)</h3>
+
+      {#if activityDays.length === 0}
+        <div class="empty">Нет данных</div>
+      {:else}
+        {@const max = maxMinutes(activityDays)}
+        <div class="rows">
+          {#each activityDays.slice(-30) as day (day.date)}
+            <div class="bar-row">
+              <span class="bar-date">{day.date}</span>
+              <div class="track tall">
+                <div class="fill" style="width:{Math.round((day.minutes / max) * 100)}%;"></div>
+              </div>
+              <span class="bar-val">{day.minutes} мин</span>
+            </div>
+          {/each}
+        </div>
+      {/if}
+    </section>
+
+    <!-- Выполненные задачи по дням -->
+    <section class="card panel wide">
+      <h3 class="section-title">Выполненные задачи по дням</h3>
+
+      {#if taskCompletions.length === 0}
+        <div class="empty">Нет данных</div>
+      {:else}
+        <div class="rows">
+          {#each taskCompletions.slice(-30) as day (day.date)}
+            <div class="bar-row">
+              <span class="bar-date">{day.date}</span>
+              <div class="dots">
+                {#each Array(day.completed) as _}
+                  <span class="dot"></span>
+                {/each}
+              </div>
+              <span class="muted">{day.completed}</span>
+            </div>
+          {/each}
+        </div>
       {/if}
     </section>
   </div>
-
-  <!-- ИИ-инсайт -->
-  <section style="margin-bottom:32px;">
-    <h3 style="font-size:14px;text-transform:uppercase;color:var(--text-secondary,#6b7280);letter-spacing:.05em;margin:0 0 12px 0;">
-      ИИ-инсайт
-    </h3>
-
-    {#if settings && settings.ai_provider === "none"}
-      <p style="color:var(--text-secondary,#6b7280);font-size:13px;">
-        ИИ отключён — включите провайдера в Настройках, чтобы получать инсайты.
-      </p>
-    {:else}
-      <div style="display:flex;align-items:flex-start;gap:12px;">
-        <button onclick={refreshInsight} disabled={insightPending}
-          style="padding:6px 14px;border-radius:6px;border:1px solid var(--border,#e5e7eb);background:var(--bg-secondary,#f5f5f5);cursor:pointer;font-size:13px;flex-shrink:0;">
-          {insightPending ? "Думаю…" : "Обновить"}
-        </button>
-        <div style="font-size:14px;line-height:1.5;">
-          {#if insightError}
-            <span style="color:#dc2626;">{insightError}</span>
-          {:else if insightText}
-            {insightText}
-          {:else if !insightPending}
-            <span style="color:var(--text-secondary,#6b7280);">Нажмите «Обновить», чтобы получить короткий разбор вашей продуктивности.</span>
-          {/if}
-        </div>
-      </div>
-    {/if}
-  </section>
-
-  <!-- Резюме дня/недели -->
-  <section style="margin-bottom:32px;">
-    <h3 style="font-size:14px;text-transform:uppercase;color:var(--text-secondary,#6b7280);letter-spacing:.05em;margin:0 0 12px 0;">
-      Резюме
-    </h3>
-
-    {#if settings && settings.ai_provider === "none"}
-      <p style="color:var(--text-secondary,#6b7280);font-size:13px;">
-        ИИ отключён — резюме недоступно.
-      </p>
-    {:else}
-      <div style="display:flex;align-items:flex-start;gap:12px;">
-        <div style="display:flex;gap:8px;flex-shrink:0;">
-          <button onclick={() => refreshSummary("day")} disabled={summaryPending !== null}
-            style="padding:6px 14px;border-radius:6px;border:1px solid var(--border,#e5e7eb);background:var(--bg-secondary,#f5f5f5);cursor:pointer;font-size:13px;">
-            {summaryPending === "day" ? "Думаю…" : "День"}
-          </button>
-          <button onclick={() => refreshSummary("week")} disabled={summaryPending !== null}
-            style="padding:6px 14px;border-radius:6px;border:1px solid var(--border,#e5e7eb);background:var(--bg-secondary,#f5f5f5);cursor:pointer;font-size:13px;">
-            {summaryPending === "week" ? "Думаю…" : "Неделя"}
-          </button>
-        </div>
-        <div style="font-size:14px;line-height:1.5;">
-          {#if summaryError}
-            <span style="color:#dc2626;">{summaryError}</span>
-          {:else if summaryText}
-            <span style="color:var(--text-secondary,#6b7280);font-size:12px;display:block;margin-bottom:2px;">
-              {summaryKind === "day" ? "За день" : "За неделю"}
-            </span>
-            {summaryText}
-          {:else if summaryPending === null}
-            <span style="color:var(--text-secondary,#6b7280);">Резюме дня или недели: что сделано и сколько времени было активным.</span>
-          {/if}
-        </div>
-      </div>
-    {/if}
-  </section>
-
-  <!-- Activity heatmap -->
-  <section style="margin-bottom:32px;">
-    <h3 style="font-size:14px;text-transform:uppercase;color:var(--text-secondary,#6b7280);letter-spacing:.05em;margin:0 0 12px 0;">
-      Активность по дням (мин)
-    </h3>
-
-    {#if activityDays.length === 0}
-      <p style="color:var(--text-secondary,#6b7280);font-size:13px;">Нет данных</p>
-    {:else}
-      {@const max = maxMinutes(activityDays)}
-      <div style="display:flex;flex-direction:column;gap:4px;">
-        {#each activityDays.slice(-30) as day (day.date)}
-          <div style="display:flex;align-items:center;gap:8px;font-size:12px;">
-            <span style="width:80px;color:var(--text-secondary,#6b7280);flex-shrink:0;">{day.date}</span>
-            <div style="flex:1;background:var(--border,#e5e7eb);border-radius:3px;height:16px;position:relative;">
-              <div style="
-                width:{Math.round((day.minutes / max) * 100)}%;
-                height:100%;
-                background:{barColor(day.minutes, max)};
-                border-radius:3px;
-              "></div>
-            </div>
-            <span style="width:48px;text-align:right;color:var(--text-secondary,#6b7280);">{day.minutes} мин</span>
-          </div>
-        {/each}
-      </div>
-    {/if}
-  </section>
-
-  <!-- Task completions -->
-  <section>
-    <h3 style="font-size:14px;text-transform:uppercase;color:var(--text-secondary,#6b7280);letter-spacing:.05em;margin:0 0 12px 0;">
-      Выполненные задачи по дням
-    </h3>
-
-    {#if taskCompletions.length === 0}
-      <p style="color:var(--text-secondary,#6b7280);font-size:13px;">Нет данных</p>
-    {:else}
-      <div style="display:flex;flex-direction:column;gap:4px;">
-        {#each taskCompletions.slice(-30) as day (day.date)}
-          <div style="display:flex;align-items:center;gap:8px;font-size:12px;">
-            <span style="width:80px;color:var(--text-secondary,#6b7280);flex-shrink:0;">{day.date}</span>
-            <div style="display:flex;gap:4px;flex-wrap:wrap;">
-              {#each Array(day.completed) as _}
-                <span style="width:14px;height:14px;background:#6366f1;border-radius:3px;display:inline-block;"></span>
-              {/each}
-            </div>
-            <span style="color:var(--text-secondary,#6b7280);">{day.completed}</span>
-          </div>
-        {/each}
-      </div>
-    {/if}
-  </section>
 </div>
 
-<!-- Палитра категорий (--cat-*) задана глобально в app.css и разделяется
-     с чипами категорий в списке задач. -->
+<style>
+  .dash {
+    max-width: 860px;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  .panel {
+    padding: 14px 16px;
+    min-width: 0;
+  }
+
+  .panel.wide {
+    grid-column: 1 / -1;
+  }
+
+  @media (max-width: 720px) {
+    .grid { grid-template-columns: 1fr; }
+  }
+
+  .donut-row {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+  }
+
+  .donut-total {
+    font-size: 22px;
+    font-weight: 600;
+    fill: var(--text-primary);
+  }
+
+  .donut-caption {
+    font-size: 10px;
+    fill: var(--text-secondary);
+  }
+
+  .legend {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    font-size: 13px;
+  }
+
+  .legend li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .swatch {
+    width: 11px;
+    height: 11px;
+    border-radius: 3px;
+    flex-shrink: 0;
+  }
+
+  .ratio-row { margin-bottom: 12px; }
+  .ratio-row:last-child { margin-bottom: 0; }
+
+  .ratio-head {
+    display: flex;
+    justify-content: space-between;
+    font-size: 13px;
+    margin-bottom: 4px;
+  }
+
+  .track {
+    background: var(--bg-secondary);
+    border-radius: 3px;
+    height: 7px;
+    overflow: hidden;
+  }
+
+  .track.tall { height: 14px; flex: 1; }
+
+  .fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 3px;
+  }
+
+  .ai-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .btn-group {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+
+  .ai-text {
+    font-size: 13px;
+    line-height: 1.55;
+    padding-top: 4px;
+  }
+
+  .rows {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .bar-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+  }
+
+  .bar-date {
+    width: 78px;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+  }
+
+  .bar-val {
+    width: 52px;
+    text-align: right;
+    color: var(--text-secondary);
+  }
+
+  .dots {
+    display: flex;
+    gap: 3px;
+    flex-wrap: wrap;
+  }
+
+  .dot {
+    width: 12px;
+    height: 12px;
+    background: var(--accent);
+    border-radius: 3px;
+    display: inline-block;
+  }
+</style>

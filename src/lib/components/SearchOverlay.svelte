@@ -43,63 +43,43 @@
 <div
   role="button"
   tabindex="-1"
+  class="overlay backdrop"
   onclick={(e) => { if (e.target === e.currentTarget) onClose(); }}
   onkeydown={() => {}}
-  style="position:fixed;inset:0;background:rgba(0,0,0,0.4);display:flex;
-    align-items:flex-start;justify-content:center;padding-top:12vh;z-index:1000;"
 >
-  <div style="width:min(560px,92vw);max-height:70vh;display:flex;flex-direction:column;
-    background:var(--bg-card,#fff);border:1px solid var(--border,#e5e7eb);border-radius:10px;
-    overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,0.3);">
+  <div class="modal panel">
     <input
+      class="search-input"
       bind:this={inputEl}
       bind:value={query}
       oninput={runSearch}
       placeholder="Поиск задач и заметок..."
-      style="border:none;border-bottom:1px solid var(--border,#e5e7eb);border-radius:0;
-        padding:14px 16px;font-size:15px;background:transparent;outline:none;"
     />
 
-    <div style="overflow-y:auto;">
+    <div class="results">
       {#if !query.trim()}
-        <p style="padding:16px;color:var(--text-secondary,#6b7280);font-size:13px;">
-          Начните вводить запрос
-        </p>
+        <p class="empty" style="padding:16px;">Начните вводить запрос</p>
       {:else if taskResults.length === 0 && noteResults.length === 0}
-        <p style="padding:16px;color:var(--text-secondary,#6b7280);font-size:13px;">
-          Ничего не найдено
-        </p>
+        <p class="empty" style="padding:16px;">Ничего не найдено</p>
       {:else}
         {#if taskResults.length > 0}
-          <div style="padding:8px 16px 4px;font-size:11px;text-transform:uppercase;
-            letter-spacing:.05em;color:var(--text-secondary,#6b7280);">Задачи</div>
+          <div class="group-title">Задачи</div>
           {#each taskResults as t (t.id)}
-            <button
-              onclick={() => onSelectTask(t.id)}
-              style="display:block;width:100%;text-align:left;border:none;border-radius:0;
-                background:transparent;padding:8px 16px;font:inherit;color:inherit;cursor:pointer;"
-            >
-              <div style="font-size:14px;">{t.title}</div>
+            <button class="result" onclick={() => onSelectTask(t.id)}>
+              <div class="result-title">{t.title}</div>
               {#if t.description}
-                <div style="font-size:12px;color:var(--text-secondary,#6b7280);
-                  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{t.description}</div>
+                <div class="result-sub">{t.description}</div>
               {/if}
             </button>
           {/each}
         {/if}
 
         {#if noteResults.length > 0}
-          <div style="padding:8px 16px 4px;font-size:11px;text-transform:uppercase;
-            letter-spacing:.05em;color:var(--text-secondary,#6b7280);">Заметки</div>
+          <div class="group-title">Заметки</div>
           {#each noteResults as n (n.id)}
-            <button
-              onclick={() => onSelectNote(n.id)}
-              style="display:block;width:100%;text-align:left;border:none;border-radius:0;
-                background:transparent;padding:8px 16px;font:inherit;color:inherit;cursor:pointer;"
-            >
-              <div style="font-size:14px;">{n.title}</div>
-              <div style="font-size:12px;color:var(--text-secondary,#6b7280);
-                white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{n.content}</div>
+            <button class="result" onclick={() => onSelectNote(n.id)}>
+              <div class="result-title">{n.title}</div>
+              <div class="result-sub">{n.content}</div>
             </button>
           {/each}
         {/if}
@@ -107,3 +87,73 @@
     </div>
   </div>
 </div>
+
+<style>
+  .backdrop {
+    align-items: flex-start;
+    padding-top: 12vh;
+    z-index: 1000;
+  }
+
+  .panel {
+    width: min(560px, 92vw);
+    max-height: 70vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .search-input {
+    border: none;
+    border-bottom: 1px solid var(--border);
+    border-radius: 0;
+    padding: 12px 16px;
+    font-size: 14px;
+    background: transparent;
+  }
+  .search-input:focus {
+    outline: none;
+    border-color: transparent;
+    border-bottom-color: var(--accent);
+  }
+
+  .results {
+    overflow-y: auto;
+    padding: 4px;
+  }
+
+  .group-title {
+    padding: 8px 12px 4px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    color: var(--text-secondary);
+    font-weight: 600;
+  }
+
+  .result {
+    display: block;
+    width: 100%;
+    text-align: left;
+    border: none;
+    border-radius: var(--radius);
+    background: transparent;
+    padding: 6px 12px;
+  }
+
+  .result:hover {
+    background: var(--bg-hover);
+  }
+
+  .result-title {
+    font-size: 13px;
+  }
+
+  .result-sub {
+    font-size: 12px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+</style>

@@ -161,6 +161,12 @@ pub async fn persist_quiet_until(pool: &SqlitePool, value: &str) -> AppResult<()
     set_setting(pool, "quiet_until", value).await
 }
 
+// Какой пресет паузы выбран (id пункта трея: quiet_30/quiet_60/...) — чтобы
+// после перезапуска восстановить галочку таймерной паузы в трее.
+pub async fn persist_quiet_preset(pool: &SqlitePool, id: &str) -> AppResult<()> {
+    set_setting(pool, "quiet_preset", id).await
+}
+
 pub async fn load_settings_raw(pool: &SqlitePool) -> AppResult<AppSettings> {
     let mut s = AppSettings::default();
     if let Some(v) = get_setting(pool, "ai_provider").await { s.ai_provider = v; }

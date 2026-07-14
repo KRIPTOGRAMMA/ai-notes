@@ -3,11 +3,12 @@
 
   type Props = {
     task?: Task | null;
+    initialDeadline?: string | null; // префилл дедлайна при создании (формат datetime-local)
     onSave: (data: CreateTaskPayload | UpdateTaskPayload) => Promise<void>;
     onClose: () => void;
   };
 
-  let { task = null, onSave, onClose }: Props = $props();
+  let { task = null, initialDeadline = null, onSave, onClose }: Props = $props();
 
   const isEdit = !!task;
 
@@ -17,7 +18,16 @@
   let priority = $state<Priority>(task?.priority ?? "Medium");
   let category = $state<Category>(task?.category ?? "Work");
   let tagsInput = $state((task?.tags ?? []).join(", "));
-  let deadline = $state(task?.deadline ? new Date(task.deadline).toISOString().slice(0, 16) : "");
+
+  // datetime-local работает в локальном времени. toISOString() дал бы UTC —
+  // тогда каждое открытие+сохранение сдвигало бы дедлайн на смещение пояса.
+  function toLocalInput(iso: string): string {
+    const d = new Date(iso);
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
+
+  let deadline = $state(task?.deadline ? toLocalInput(task.deadline) : (initialDeadline ?? ""));
 
   type RecurrenceKey = "None" | "Hourly" | "Daily" | "Weekly" | "Custom";
 
@@ -117,149 +127,145 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<!-- Backdrop -->
-<div
-  role="dialog"
-  aria-modal="true"
-  onclick={handleBackdropClick}
-  style="
-    position:fixed;inset:0;z-index:100;
-    background:rgba(0,0,0,0.5);
-    display:flex;align-items:center;justify-content:center;
-    padding:16px;
-  "
->
-  <div style="
-    background:var(--bg, #fff);
-    border-radius:10px;
-    padding:24px;
-    width:100%;max-width:520px;
-    max-height:90vh;overflow-y:auto;
-    box-shadow:0 20px 60px rgba(0,0,0,0.3);
-    display:flex;flex-direction:column;gap:14px;
-  ">
-    <h2 style="margin:0;font-size:18px;">{isEdit ? "Редактировать задачу" : "Новая задача"}</h2>
+<div role="dialog" aria-modal="true" class="overlay backdrop" onclick={handleBackdropClick}>
+  <div class="modal dialog">
+    <h2 class="dialog-title">{isEdit ? "Редактировать задачу" : "Новая задача"}</h2>
 
     {#if error}
-      <div style="background:#fee2e2;color:#dc2626;padding:8px 10px;border-radius:6px;font-size:13px;">{error}</div>
+      <div class="alert" style="margin:0;">{error}</div>
     {/if}
 
-    <!-- Title -->
-    <div style="display:flex;flex-direction:column;gap:4px;">
-      <span style="font-size:12px;font-weight:600;color:var(--text-secondary,#6b7280);">НАЗВАНИЕ *</span>
-      <input
-        bind:value={title}
-        placeholder="Название задачи"
-        autofocus
-        style="padding:8px 10px;border:1px solid var(--border,#e5e7eb);border-radius:6px;font-size:14px;"
-      />
-    </div>
+    <label class="field">
+      <span class="label">Название *</span>
+      <!-- svelte-ignore a11y_autofocus -->
+      <input bind:value={title} placeholder="Название задачи" autofocus />
+    </label>
 
-    <!-- Description -->
-    <div style="display:flex;flex-direction:column;gap:4px;">
-      <span style="font-size:12px;font-weight:600;color:var(--text-secondary,#6b7280);">ОПИСАНИЕ</span>
-      <textarea
-        bind:value={description}
-        placeholder="Описание (необязательно)"
-        rows="3"
-        style="padding:8px 10px;border:1px solid var(--border,#e5e7eb);border-radius:6px;font-size:14px;resize:vertical;"
-      ></textarea>
-    </div>
+    <label class="field">
+      <span class="label">Описание</span>
+      <textarea bind:value={description} placeholder="Описание (необязательно)" rows="3" style="resize:vertical;"></textarea>
+    </label>
 
-    <!-- Priority + Category -->
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-      <div style="display:flex;flex-direction:column;gap:4px;">
-        <span style="font-size:12px;font-weight:600;color:var(--text-secondary,#6b7280);">ПРИОРИТЕТ</span>
-        <select bind:value={priority} style="padding:8px 10px;border:1px solid var(--border,#e5e7eb);border-radius:6px;font-size:14px;">
+    <div class="pair">
+      <label class="field">
+        <span class="label">Приоритет</span>
+        <select bind:value={priority}>
           <option value="Low">Низкий</option>
           <option value="Medium">Средний</option>
           <option value="High">Высокий</option>
           <option value="Critical">Критический</option>
         </select>
-      </div>
-      <div style="display:flex;flex-direction:column;gap:4px;">
-        <span style="font-size:12px;font-weight:600;color:var(--text-secondary,#6b7280);">КАТЕГОРИЯ</span>
-        <select bind:value={category} style="padding:8px 10px;border:1px solid var(--border,#e5e7eb);border-radius:6px;font-size:14px;">
+      </label>
+      <label class="field">
+        <span class="label">Категория</span>
+        <select bind:value={category}>
           <option value="Work">Работа</option>
           <option value="Study">Учёба</option>
           <option value="Home">Дом</option>
           <option value="Health">Здоровье</option>
           <option value="Other">Другое</option>
         </select>
-      </div>
+      </label>
     </div>
 
-    <!-- Status (edit only) -->
     {#if isEdit}
-      <div style="display:flex;flex-direction:column;gap:4px;">
-        <span style="font-size:12px;font-weight:600;color:var(--text-secondary,#6b7280);">СТАТУС</span>
-        <select bind:value={status} style="padding:8px 10px;border:1px solid var(--border,#e5e7eb);border-radius:6px;font-size:14px;">
+      <label class="field">
+        <span class="label">Статус</span>
+        <select bind:value={status}>
           <option value="Todo">К выполнению</option>
           <option value="InProgress">В процессе</option>
           <option value="Done">Выполнено</option>
           <option value="Archived">Архив</option>
         </select>
+      </label>
+    {/if}
+
+    <div class="pair">
+      <label class="field">
+        <span class="label">Дедлайн</span>
+        <input type="datetime-local" bind:value={deadline} disabled={recurrenceKey !== "None"} />
+      </label>
+      <label class="field">
+        <span class="label">Повтор</span>
+        <select bind:value={recurrenceKey}>
+          <option value="None">Без повтора</option>
+          <option value="Hourly">Каждый час</option>
+          <option value="Daily">Каждый день</option>
+          <option value="Weekly">Каждую неделю</option>
+          <option value="Custom">Свой интервал</option>
+        </select>
+      </label>
+    </div>
+
+    {#if recurrenceKey === "Custom"}
+      <div class="custom-row">
+        <span>Каждые</span>
+        <input type="number" bind:value={customN} min="1" style="width:64px;" />
+        <select bind:value={customUnit}>
+          <option value="Minutes">минут</option>
+          <option value="Hours">часов</option>
+          <option value="Days">дней</option>
+          <option value="Weeks">недель</option>
+        </select>
       </div>
     {/if}
 
-    <!-- Deadline -->
-    <div style="display:flex;flex-direction:column;gap:4px;">
-      <span style="font-size:12px;font-weight:600;color:var(--text-secondary,#6b7280);">ДЕДЛАЙН</span>
-      <input
-        type="datetime-local"
-        bind:value={deadline}
-        disabled={recurrenceKey !== "None"}
-        style="padding:8px 10px;border:1px solid var(--border,#e5e7eb);border-radius:6px;font-size:14px;"
-      />
-    </div>
+    <label class="field">
+      <span class="label">Теги (через запятую)</span>
+      <input bind:value={tagsInput} placeholder="работа, важное, срочное" />
+    </label>
 
-    <!-- Recurrence -->
-    <div style="display:flex;flex-direction:column;gap:6px;">
-      <span style="font-size:12px;font-weight:600;color:var(--text-secondary,#6b7280);">ПОВТОР</span>
-      <select bind:value={recurrenceKey} style="padding:8px 10px;border:1px solid var(--border,#e5e7eb);border-radius:6px;font-size:14px;">
-        <option value="None">Без повтора</option>
-        <option value="Hourly">Каждый час</option>
-        <option value="Daily">Каждый день</option>
-        <option value="Weekly">Каждую неделю</option>
-        <option value="Custom">Свой интервал</option>
-      </select>
-      {#if recurrenceKey === "Custom"}
-        <div style="display:flex;gap:8px;align-items:center;">
-          <span style="font-size:13px;">Каждые</span>
-          <input type="number" bind:value={customN} min="1" style="width:60px;padding:6px 8px;border:1px solid var(--border,#e5e7eb);border-radius:6px;" />
-          <select bind:value={customUnit} style="padding:6px 8px;border:1px solid var(--border,#e5e7eb);border-radius:6px;">
-            <option value="Minutes">минут</option>
-            <option value="Hours">часов</option>
-            <option value="Days">дней</option>
-            <option value="Weeks">недель</option>
-          </select>
-        </div>
-      {/if}
+    <div class="actions">
+      <span class="muted" style="font-size:11px;margin-right:auto;"><kbd>Ctrl Enter</kbd> сохранить · <kbd>Esc</kbd> закрыть</span>
+      <button class="btn-ghost" onclick={onClose}>Отмена</button>
+      <button class="btn-primary" onclick={handleSave} disabled={saving || !title.trim()}>
+        {saving ? "Сохранение..." : isEdit ? "Сохранить" : "Создать"}
+      </button>
     </div>
-
-    <!-- Tags -->
-    <div style="display:flex;flex-direction:column;gap:4px;">
-      <span style="font-size:12px;font-weight:600;color:var(--text-secondary,#6b7280);">ТЕГИ (через запятую)</span>
-      <input
-        bind:value={tagsInput}
-        placeholder="работа, важное, срочное"
-        style="padding:8px 10px;border:1px solid var(--border,#e5e7eb);border-radius:6px;font-size:14px;"
-      />
-    </div>
-
-    <!-- Actions -->
-    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:4px;">
-      <button
-        onclick={onClose}
-        style="padding:8px 16px;border:1px solid var(--border,#e5e7eb);border-radius:6px;background:transparent;cursor:pointer;"
-      >Отмена</button>
-      <button
-        onclick={handleSave}
-        disabled={saving || !title.trim()}
-        style="padding:8px 16px;border:none;border-radius:6px;background:#2563eb;color:white;cursor:pointer;font-weight:500;"
-      >{saving ? "Сохранение..." : isEdit ? "Сохранить" : "Создать"}</button>
-    </div>
-
-    <p style="margin:0;font-size:11px;color:var(--text-secondary,#9ca3af);text-align:right;">Ctrl+Enter — сохранить · Esc — закрыть</p>
   </div>
 </div>
+
+<style>
+  .backdrop {
+    align-items: center;
+    padding: 16px;
+  }
+
+  .dialog {
+    width: 100%;
+    max-width: 500px;
+    max-height: 90vh;
+    overflow-y: auto;
+    padding: 18px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .dialog-title {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 700;
+  }
+
+  .pair {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  .custom-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    font-size: 13px;
+  }
+
+  .actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    justify-content: flex-end;
+    margin-top: 4px;
+  }
+</style>
