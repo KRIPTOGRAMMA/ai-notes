@@ -45,8 +45,16 @@
     }
   });
 
-  // Ctrl+1..5 переключают разделы в порядке шапки.
+  // Ctrl+1..5 переключают разделы в порядке сайдбара.
   const viewOrder: View[] = ["tasks", "notes", "dashboard", "calendar", "settings"];
+
+  const NAV: { view: View; label: string; icon: string }[] = [
+    { view: "tasks",     label: "Задачи",    icon: "M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z M9 12l2 2 4-4" },
+    { view: "notes",     label: "Заметки",   icon: "M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z M14 3v6h6 M8 14h8 M8 17h5" },
+    { view: "dashboard", label: "Дашборд",   icon: "M6 20v-4 M12 20V10 M18 20V4" },
+    { view: "calendar",  label: "Календарь", icon: "M5 5h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z M16 3v4 M8 3v4 M3 11h18" },
+    { view: "settings",  label: "Настройки", icon: "M21 5h-7 M10 5H3 M21 12h-9 M8 12H3 M21 19h-5 M12 19H3 M14 3v4 M8 10v4 M16 17v4" },
+  ];
 
   let lastActivityPing = 0;
   function pingActivity() {
@@ -97,58 +105,148 @@
     onDone={() => showOnboarding = false}
   />
 {:else}
-{#if taskStore.error}
-  <div style="background:var(--danger);color:white;padding:8px 12px;border-radius:6px;
-    margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;gap:12px;">
-    <span>{taskStore.error}</span>
-    <button onclick={() => taskStore.clearError()}
-      style="background:transparent;border:none;color:white;padding:2px 6px;">✕</button>
-  </div>
-{/if}
+<div class="shell">
+  <aside class="sidebar">
+    <div class="brand">AI Notes</div>
 
-{#if noteStore.error}
-  <div style="background:var(--danger);color:white;padding:8px 12px;border-radius:6px;
-    margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;gap:12px;">
-    <span>{noteStore.error}</span>
-    <button onclick={() => noteStore.clearError()}
-      style="background:transparent;border:none;color:white;padding:2px 6px;">✕</button>
-  </div>
-{/if}
+    <nav class="nav">
+      {#each NAV as item, i (item.view)}
+        <button
+          class="nav-item"
+          class:active={activeView === item.view}
+          onclick={() => activeView = item.view}
+          title="{item.label} (Ctrl+{i + 1})"
+        >
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none"
+            stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d={item.icon} />
+          </svg>
+          <span>{item.label}</span>
+        </button>
+      {/each}
+    </nav>
 
-<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;border-bottom:1px solid var(--border,#e5e7eb);padding-bottom:8px;">
-  <button
-    onclick={() => activeView = "tasks"}
-    style="font-weight:{activeView === 'tasks' ? '600' : '400'};"
-  >Задачи</button>
-  <button
-    onclick={() => activeView = "notes"}
-    style="font-weight:{activeView === 'notes' ? '600' : '400'};"
-  >Заметки</button>
-  <button
-    onclick={() => activeView = "dashboard"}
-    style="font-weight:{activeView === 'dashboard' ? '600' : '400'};"
-  >Дашборд</button>
-  <button
-    onclick={() => activeView = "calendar"}
-    style="font-weight:{activeView === 'calendar' ? '600' : '400'};"
-  >Календарь</button>
-  <button
-    onclick={() => activeView = "settings"}
-    style="font-weight:{activeView === 'settings' ? '600' : '400'};"
-  >Настройки</button>
-  <span style="flex:1;"></span>
-  <button onclick={() => showSearch = true} title="Поиск (Ctrl+K)">Поиск</button>
+    <button class="nav-item search-item" onclick={() => showSearch = true} title="Поиск (Ctrl+K)">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none"
+        stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z M21 21l-4.35-4.35" />
+      </svg>
+      <span>Поиск</span>
+      <kbd>Ctrl K</kbd>
+    </button>
+  </aside>
+
+  <main class="content">
+    {#if taskStore.error}
+      <div class="banner">
+        <span>{taskStore.error}</span>
+        <button class="btn-icon" onclick={() => taskStore.clearError()} style="color:white;">✕</button>
+      </div>
+    {/if}
+
+    {#if noteStore.error}
+      <div class="banner">
+        <span>{noteStore.error}</span>
+        <button class="btn-icon" onclick={() => noteStore.clearError()} style="color:white;">✕</button>
+      </div>
+    {/if}
+
+    {#if activeView === "tasks"}
+      <Tasks />
+    {:else if activeView === "notes"}
+      <Notes />
+    {:else if activeView === "settings"}
+      <Settings />
+    {:else if activeView === "dashboard"}
+      <Dashboard />
+    {:else if activeView === "calendar"}
+      <Calendar onOpenTask={(id) => { activeView = "tasks"; taskStore.requestFocus(id); }} />
+    {/if}
+  </main>
 </div>
+{/if}
 
-{#if activeView === "tasks"}
-  <Tasks />
-{:else if activeView === "notes"}
-  <Notes />
-{:else if activeView === "settings"}
-  <Settings />
-{:else if activeView === "dashboard"}
-  <Dashboard />
-{:else if activeView === "calendar"}
-  <Calendar onOpenTask={(id) => { activeView = "tasks"; taskStore.requestFocus(id); }} />
-{/if}
-{/if}
+<style>
+  .shell {
+    display: flex;
+    height: 100vh;
+  }
+
+  .sidebar {
+    width: 176px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 10px 8px;
+    background: var(--bg-secondary);
+    border-right: 1px solid var(--border);
+  }
+
+  .brand {
+    font-size: 13px;
+    font-weight: 700;
+    padding: 4px 10px 12px 10px;
+    letter-spacing: .02em;
+  }
+
+  .nav {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+  }
+
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    width: 100%;
+    padding: 6px 10px;
+    border: none;
+    border-radius: var(--radius);
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 13px;
+    text-align: left;
+  }
+
+  .nav-item:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  .nav-item.active {
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  .search-item kbd {
+    margin-left: auto;
+    font-size: 10px;
+    font-family: inherit;
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0 4px;
+  }
+
+  .content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 20px;
+  }
+
+  .banner {
+    background: var(--danger);
+    color: white;
+    padding: 8px 12px;
+    border-radius: var(--radius);
+    margin-bottom: 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+  }
+</style>

@@ -92,7 +92,7 @@
     await taskStore.load();
   }
 
-  let collapsed = $state<Record<string, boolean>>({});
+  let expanded = $state<Record<string, boolean>>({});
   const doneCount = (t: Task) => t.subtasks.filter((s) => s.done).length;
 
   async function classifyTask(id: string, title: string) {
@@ -101,23 +101,13 @@
     await api.aiClassify(id, title);
   }
 
-  function priorityLabel(p: string) {
-    const map: Record<string, string> = {
-      Low: "Низкий", Medium: "Средний", High: "Высокий", Critical: "Критический",
-    };
-    return map[p] ?? p;
-  }
-
-  const PRIORITY_COLORS: Record<string, { bg: string; fg: string }> = {
-    Low:      { bg: "#e5e7eb", fg: "#4b5563" },
-    Medium:   { bg: "#dbeafe", fg: "#2563eb" },
-    High:     { bg: "#ffedd5", fg: "#ea580c" },
-    Critical: { bg: "#fee2e2", fg: "#dc2626" },
+  const CATEGORY_LABELS: Record<string, string> = {
+    Work: "Работа", Study: "Учёба", Home: "Дом", Health: "Здоровье", Other: "Другое",
   };
 
-  function priorityColors(p: string) {
-    return PRIORITY_COLORS[p] ?? { bg: "#f3f4f6", fg: "#1f2937" };
-  }
+  const PRIORITY_LABELS: Record<string, string> = {
+    Low: "Низкий", Medium: "Средний", High: "Высокий", Critical: "Критический",
+  };
 
   function recurrenceLabel(r: unknown): string | null {
     if (!r || r === "None") return null;
@@ -133,6 +123,24 @@
       return `раз в ${n} ${unitLabel}`;
     }
     return null;
+  }
+
+  // Компактный дедлайн: «сегодня 18:00», «завтра», «3 дн», «просрочено 2 дн»
+  function deadlineInfo(iso: string): { label: string; overdue: boolean } {
+    const d = new Date(iso);
+    const now = new Date();
+    const startOfDay = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+    const dayDiff = Math.round((startOfDay(d) - startOfDay(now)) / 864e5);
+
+    if (d.getTime() < now.getTime()) {
+      return { label: dayDiff === 0 ? "просрочено" : `просрочено ${-dayDiff} дн`, overdue: true };
+    }
+    if (dayDiff === 0) {
+      return { label: `сегодня ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`, overdue: false };
+    }
+    if (dayDiff === 1) return { label: "завтра", overdue: false };
+    if (dayDiff < 7) return { label: `${dayDiff} дн`, overdue: false };
+    return { label: d.toLocaleDateString([], { day: "numeric", month: "short" }), overdue: false };
   }
 
   taskStore.load();
@@ -171,29 +179,103 @@
   });
 </script>
 
-{#snippet taskMeta(task: Task)}
-  {@const colors = priorityColors(task.priority)}
-  <span style="font-size:11px;padding:2px 6px;border-radius:4px;margin-left:6px;font-weight:500;
-    background-color:{colors.bg};color:{colors.fg};">
-    {priorityLabel(task.priority)}
-  </span>
-  <span style="font-size:11px;padding:2px 6px;border-radius:4px;margin-left:6px;background:#f3f4f6;color:#6b7280;">
-    {task.category}
-  </span>
-  {#if task.tags.length > 0}
-    {#each task.tags as tag}
-      <span style="font-size:11px;padding:2px 6px;border-radius:4px;margin-left:4px;background:#e0f2fe;color:#0369a1;">#{tag}</span>
-    {/each}
+{#snippet taskRow(task: Task)}
+  {@const busy = aiLoadingId === task.id}
+  <li class="task-row" style="--prio: var(--prio-{task.priority.toLowerCase()});">
+    <button
+      class="task-check"
+      onclick={() => taskStore.complete(task.id)}
+      title="Выполнить"
+      aria-label="Выполнить задачу"
+    ></button>
+
+    <div
+      class="task-main"
+      onclick={() => editingTask = task}
+      onkeydown={(e) => { if (e.key === "Enter") editingTask = task; }}
+      role="button"
+      tabindex="0"
+    >
+      <div class="task-title">
+        <span class="prio-dot" title="Приоритет: {PRIORITY_LABELS[task.priority]}"></span>
+        {task.title}
+        {#if recurrenceLabel(task.recurrence)}
+          <span class="muted" title={recurrenceLabel(task.recurrence)}>↻</span>
+        {/if}
+      </div>
+      {#if task.description}
+        <div class="task-desc">{task.description}</div>
+      {/if}
+    </div>
+
+    <div class="task-meta">
+      {#if task.subtasks.length > 0}
+        <button
+          class="chip chip-sub"
+          onclick={() => expanded[task.id] = !expanded[task.id]}
+          title="Подзадачи"
+        >{expanded[task.id] ? "▾" : "▸"} {doneCount(task)}/{task.subtasks.length}</button>
+      {/if}
+      {#each task.tags as tag}
+        <span class="chip chip-tag">#{tag}</span>
+      {/each}
+      <span class="chip chip-cat cat-{task.category.toLowerCase()}">{CATEGORY_LABELS[task.category] ?? task.category}</span>
+      {#if task.deadline}
+        {@const dl = deadlineInfo(task.deadline)}
+        <span class="chip" class:chip-danger={dl.overdue}>⚑ {dl.label}</span>
+      {/if}
+    </div>
+
+    <div class="task-actions">
+      <button class="btn-icon" disabled={busy} title="Переформулировать в SMART"
+        onclick={() => rewriteTask(task.id, task.title)}>{busy ? "…" : "✨"}</button>
+      <button class="btn-icon" disabled={busy} title="Разбить на подзадачи"
+        onclick={() => generateSubtasks(task.id, task.title)}>{busy ? "…" : "🔀"}</button>
+      <button class="btn-icon" disabled={busy} title="Авто-категория"
+        onclick={() => classifyTask(task.id, task.title)}>{busy ? "…" : "🏷"}</button>
+      <button class="btn-icon btn-danger" title="Удалить"
+        onclick={() => taskStore.remove(task.id)}>✕</button>
+    </div>
+  </li>
+
+  {#if subtasksPreview && subtasksPreview.taskId === task.id}
+    <li class="task-sub-panel">
+      <div class="sub-preview-head">
+        <span class="section-title" style="margin:0;">ИИ предлагает подзадачи</span>
+        <div style="display:flex;gap:6px;">
+          <button class="btn-sm btn-primary" onclick={() => acceptAllSubtasks(task.id, subtasksPreview!.items)}>Принять все</button>
+          <button class="btn-sm" onclick={() => subtasksPreview = null}>Закрыть</button>
+        </div>
+      </div>
+      {#each subtasksPreview.items as subtask}
+        <div class="sub-line">
+          <span style="flex:1;">{subtask}</span>
+          <button class="btn-sm" onclick={() => acceptSubtask(task.id, subtask)}>+ Добавить</button>
+        </div>
+      {/each}
+    </li>
   {/if}
-  {#if task.deadline}
-    <span style="color:var(--text-secondary,#6b7280);margin-left:6px;font-size:12px;">
-      Дедлайн: {new Date(task.deadline).toLocaleString()}
-    </span>
-  {/if}
-  {#if recurrenceLabel(task.recurrence)}
-    <span style="color:#7c3aed;margin-left:6px;font-size:12px;font-weight:500;">
-      ↻ {recurrenceLabel(task.recurrence)}
-    </span>
+
+  {#if task.subtasks.length > 0 && expanded[task.id]}
+    <li class="task-sub-panel">
+      {#each task.subtasks as sub (sub.id)}
+        <div class="sub-line">
+          <input type="checkbox" checked={sub.done} onchange={() => toggleSubtask(sub.id)} />
+          <span style="flex:1;" class:sub-done={sub.done}>{sub.title}</span>
+          <button class="btn-icon btn-danger" title="Удалить" onclick={() => removeSubtask(sub.id)}>✕</button>
+        </div>
+      {/each}
+      <div class="sub-line">
+        <input
+          type="text"
+          placeholder="+ подзадача"
+          bind:value={newSubtaskInput[task.id]}
+          onkeydown={(e) => { if (e.key === 'Enter') addManualSubtask(task.id); }}
+          class="sub-input"
+        />
+        <button class="btn-sm" onclick={() => addManualSubtask(task.id)}>Добавить</button>
+      </div>
+    </li>
   {/if}
 {/snippet}
 
@@ -213,164 +295,279 @@
   />
 {/if}
 
-<div>
-  {#if aiError}
-    <div style="background:#ef4444;color:white;padding:6px 10px;border-radius:6px;margin-bottom:8px;display:flex;justify-content:space-between;">
-      <span>{aiError}</span>
-      <button onclick={() => aiError = null} style="background:transparent;border:none;color:white;cursor:pointer;">✕</button>
-    </div>
-  {/if}
-
-  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
-    <button onclick={() => showCreateModal = true}>+ Новая задача</button>
-    <button onclick={() => taskStore.load()}>Обновить</button>
-    <button onclick={() => showHistory = !showHistory}>
-      {showHistory ? "Скрыть историю" : "История"}
-    </button>
+<div class="page">
+  <div class="page-head">
+    <h1 class="page-title">Задачи</h1>
+    <span class="muted count">
+      {taskStore.activeTasks.length} актив. · {taskStore.historyTasks.length} в истории
+    </span>
+    <span style="flex:1;"></span>
     <input
       bind:value={searchQuery}
       oninput={handleSearch}
-      placeholder="Поиск задач..."
-      style="flex:1;min-width:150px;"
+      placeholder="Поиск задач…"
+      class="head-search"
     />
+    <button class:active-toggle={showHistory} onclick={() => showHistory = !showHistory}>История</button>
+    <button class="btn-primary" onclick={() => showCreateModal = true}>+ Новая</button>
   </div>
 
+  {#if aiError}
+    <div class="ai-error">
+      <span>{aiError}</span>
+      <button class="btn-icon" style="color:white;" onclick={() => aiError = null}>✕</button>
+    </div>
+  {/if}
+
   {#if searchQuery.trim()}
-    <h2>Результаты поиска</h2>
+    <div class="section-title">Результаты поиска</div>
     {#if isSearching}
-      <p>Поиск...</p>
+      <div class="empty">Поиск…</div>
     {:else if searchResults.length === 0}
-      <p>Ничего не найдено</p>
+      <div class="empty">Ничего не найдено</div>
     {:else}
-      <ul>
+      <ul class="task-list card">
         {#each searchResults as task (task.id)}
-          <li style="margin-bottom:10px;">
-            <strong>{task.title}</strong>
-            {@render taskMeta(task)}
-            {#if task.description}
-              <p style="margin:4px 0 0 0;font-size:13px;color:var(--text-secondary,#6b7280);">{task.description}</p>
-            {/if}
-            <div style="margin-top:4px;display:flex;gap:4px;">
-              <button onclick={() => taskStore.complete(task.id)}>Выполнить</button>
-              <button onclick={() => taskStore.remove(task.id)}>Удалить</button>
-            </div>
-          </li>
+          {@render taskRow(task)}
         {/each}
       </ul>
     {/if}
-  {/if}
-
-  <h2>Активные задачи</h2>
-  {#if taskStore.activeTasks.length === 0}
-    <p>Нет активных задач</p>
   {:else}
-    <ul style="list-style:none;padding:0;margin:0;">
-      {#each taskStore.activeTasks as task (task.id)}
-        <li style="margin-bottom:14px;padding:10px;border:1px solid var(--border,#e5e7eb);border-radius:8px;">
-          <div style="display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;">
-            <strong style="font-size:15px;">{task.title}</strong>
-            {@render taskMeta(task)}
-          </div>
-
-          {#if task.description}
-            <p style="margin:6px 0 0 0;font-size:13px;color:var(--text-secondary,#6b7280);">{task.description}</p>
-          {/if}
-
-          <div style="margin-top:8px;display:flex;gap:4px;flex-wrap:wrap;">
-            <button onclick={() => editingTask = task}>Изменить</button>
-            <button
-              onclick={() => rewriteTask(task.id, task.title)}
-              disabled={aiLoadingId === task.id}
-              title="Переформулировать в SMART"
-            >{aiLoadingId === task.id ? "..." : "✨ SMART"}</button>
-            <button
-              onclick={() => generateSubtasks(task.id, task.title)}
-              disabled={aiLoadingId === task.id}
-              title="Разбить на подзадачи"
-            >{aiLoadingId === task.id ? "..." : "🔀 Подзадачи"}</button>
-            <button
-              onclick={() => classifyTask(task.id, task.title)}
-              disabled={aiLoadingId === task.id}
-              title="Авто-категория"
-            >{aiLoadingId === task.id ? "..." : "🏷 Категория"}</button>
-            <button onclick={() => taskStore.complete(task.id)}>Выполнить</button>
-            <button onclick={() => taskStore.remove(task.id)}>Удалить</button>
-          </div>
-
-          {#if subtasksPreview && subtasksPreview.taskId === task.id}
-            <div style="margin-top:8px;padding:10px;background:var(--bg-secondary,#f9fafb);border-radius:6px;">
-              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-                <span style="font-size:12px;font-weight:600;">ИИ предлагает подзадачи:</span>
-                <button onclick={() => acceptAllSubtasks(task.id, subtasksPreview!.items)}>Принять все</button>
-              </div>
-              {#each subtasksPreview.items as subtask}
-                <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
-                  <span style="font-size:13px;flex:1;">{subtask}</span>
-                  <button onclick={() => acceptSubtask(task.id, subtask)}>+ Добавить</button>
-                </div>
-              {/each}
-              <button onclick={() => subtasksPreview = null} style="margin-top:4px;">Закрыть</button>
-            </div>
-          {/if}
-
-          <!-- Чек-лист подзадач: вложен в задачу, прогресс N/M -->
-          {#if task.subtasks.length > 0}
-            <div style="margin-top:8px;">
-              <button
-                onclick={() => collapsed[task.id] = !collapsed[task.id]}
-                style="display:flex;align-items:center;gap:8px;background:none;border:none;padding:0;cursor:pointer;font-size:13px;font-weight:600;color:var(--text,#374151);"
-              >
-                <span>{collapsed[task.id] ? "▸" : "▾"}</span>
-                Подзадачи
-                <span style="color:var(--text-secondary,#6b7280);font-weight:400;">
-                  {doneCount(task)}/{task.subtasks.length}
-                </span>
-              </button>
-              {#if !collapsed[task.id]}
-                <div style="margin:6px 0 0 18px;display:flex;flex-direction:column;gap:4px;">
-                  {#each task.subtasks as sub (sub.id)}
-                    <div style="display:flex;align-items:center;gap:8px;">
-                      <input type="checkbox" checked={sub.done} onchange={() => toggleSubtask(sub.id)} />
-                      <span style="font-size:13px;flex:1;{sub.done ? 'text-decoration:line-through;color:var(--text-secondary,#9ca3af);' : ''}">{sub.title}</span>
-                      <button onclick={() => removeSubtask(sub.id)} title="Удалить" style="font-size:12px;">✕</button>
-                    </div>
-                  {/each}
-                  <div style="display:flex;gap:6px;margin-top:2px;">
-                    <input
-                      type="text"
-                      placeholder="+ подзадача"
-                      bind:value={newSubtaskInput[task.id]}
-                      onkeydown={(e) => { if (e.key === 'Enter') addManualSubtask(task.id); }}
-                      style="flex:1;font-size:12px;padding:2px 6px;"
-                    />
-                    <button onclick={() => addManualSubtask(task.id)}>Добавить</button>
-                  </div>
-                </div>
-              {/if}
-            </div>
-          {/if}
-        </li>
-      {/each}
-    </ul>
-  {/if}
-
-  {#if showHistory}
-    <h2>История</h2>
-    {#if taskStore.historyTasks.length === 0}
-      <p>История пуста</p>
+    {#if taskStore.activeTasks.length === 0}
+      <div class="empty card">
+        Нет активных задач.<br />
+        <span class="muted">Создайте первую: «+ Новая» или Ctrl+Shift+N</span>
+      </div>
     {:else}
-      <ul style="list-style:none;padding:0;margin:0;">
-        {#each taskStore.historyTasks as task (task.id)}
-          <li style="margin-bottom:8px;padding:8px;border:1px solid var(--border,#e5e7eb);border-radius:6px;opacity:0.7;">
-            <strong>{task.title}</strong>
-            <span style="margin-left:6px;font-size:12px;color:var(--text-secondary,#6b7280);">{task.status}</span>
-            {#if task.description}
-              <p style="margin:2px 0 0 0;font-size:13px;color:var(--text-secondary,#6b7280);">{task.description}</p>
-            {/if}
-            <button onclick={() => taskStore.remove(task.id)} style="margin-top:4px;">Удалить</button>
-          </li>
+      <ul class="task-list card">
+        {#each taskStore.activeTasks as task (task.id)}
+          {@render taskRow(task)}
         {/each}
       </ul>
+    {/if}
+
+    {#if showHistory}
+      <div class="section-title" style="margin-top:20px;">История</div>
+      {#if taskStore.historyTasks.length === 0}
+        <div class="empty">История пуста</div>
+      {:else}
+        <ul class="task-list card history">
+          {#each taskStore.historyTasks as task (task.id)}
+            <li class="task-row">
+              <span class="task-check done">✓</span>
+              <div class="task-main">
+                <div class="task-title done-title">{task.title}</div>
+                {#if task.description}
+                  <div class="task-desc">{task.description}</div>
+                {/if}
+              </div>
+              <div class="task-meta">
+                <span class="chip">{task.status === "Done" ? "Выполнена" : task.status}</span>
+              </div>
+              <div class="task-actions">
+                <button class="btn-icon btn-danger" title="Удалить" onclick={() => taskStore.remove(task.id)}>✕</button>
+              </div>
+            </li>
+          {/each}
+        </ul>
+      {/if}
     {/if}
   {/if}
 </div>
+
+<style>
+  .page {
+    max-width: 860px;
+    margin: 0 auto;
+  }
+
+  .page-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+  }
+
+  .count { font-size: 12px; }
+
+  .head-search {
+    width: 200px;
+  }
+
+  .active-toggle {
+    background: var(--bg-hover);
+    font-weight: 600;
+  }
+
+  .ai-error {
+    background: var(--danger);
+    color: white;
+    padding: 6px 10px;
+    border-radius: var(--radius);
+    margin-bottom: 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .task-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+  }
+
+  .task-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .task-list > .task-row:last-child,
+  .task-list > .task-sub-panel:last-child {
+    border-bottom: none;
+  }
+
+  .task-row:hover {
+    background: var(--bg-hover);
+  }
+
+  /* Круглый чекбокс выполнения */
+  .task-check {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    padding: 0;
+    border-radius: 50%;
+    border: 1.5px solid var(--text-secondary);
+    background: transparent;
+    color: transparent;
+    font-size: 10px;
+    line-height: 1;
+  }
+
+  .task-check:hover {
+    border-color: var(--success);
+    background: color-mix(in srgb, var(--success) 15%, transparent);
+    color: var(--success);
+  }
+
+  .task-check.done {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-color: var(--success);
+    color: var(--success);
+    cursor: default;
+  }
+
+  .task-main {
+    flex: 1;
+    min-width: 0;
+    cursor: pointer;
+  }
+
+  .task-title {
+    font-size: 13px;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .done-title {
+    color: var(--text-secondary);
+    text-decoration: line-through;
+    font-weight: 400;
+  }
+
+  .prio-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: var(--prio, var(--prio-low));
+  }
+
+  .task-desc {
+    font-size: 12px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 1px;
+  }
+
+  .task-meta {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-shrink: 0;
+  }
+
+  .chip-sub {
+    cursor: pointer;
+    border: none;
+    font-family: inherit;
+  }
+  .chip-sub:hover { background: var(--bg-hover); }
+
+  /* Действия видны только при наведении на строку */
+  .task-actions {
+    display: flex;
+    gap: 1px;
+    flex-shrink: 0;
+    opacity: 0;
+    transition: opacity 0.12s;
+  }
+
+  .task-row:hover .task-actions {
+    opacity: 1;
+  }
+
+  /* Панель подзадач / ИИ-превью под строкой */
+  .task-sub-panel {
+    list-style: none;
+    padding: 6px 12px 8px 38px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .sub-preview-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+  }
+
+  .sub-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+  }
+
+  .sub-done {
+    text-decoration: line-through;
+    color: var(--text-secondary);
+  }
+
+  .sub-input {
+    flex: 1;
+    font-size: 12px;
+    padding: 2px 8px;
+  }
+
+  .history .task-row {
+    opacity: 0.75;
+  }
+</style>

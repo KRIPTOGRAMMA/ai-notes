@@ -1,8 +1,9 @@
-/* Системная тема через prefers-color-scheme */
+/* ===== Дизайн-токены ===== */
 :root {
     --bg-primary: #ffffff;
     --bg-secondary: #f5f5f5;
     --bg-card: #ffffff;
+    --bg-hover: #ededed;
     --text-primary: #1a1a1a;
     --text-secondary: #666666;
     --border: #e0e0e0;
@@ -10,19 +11,46 @@
     --accent-hover: #4f46e5;
     --danger: #ef4444;
     --success: #22c55e;
+    --radius: 6px;
+    --radius-lg: 10px;
+
+    /* Категории — валидированная палитра (фиксированный порядок слотов) */
+    --cat-work: #2a78d6;
+    --cat-study: #1baf7a;
+    --cat-home: #eda100;
+    --cat-health: #008300;
+    --cat-other: #4a3aa7;
+
+    /* Приоритеты */
+    --prio-low: #94a3b8;
+    --prio-medium: #2a78d6;
+    --prio-high: #d97706;
+    --prio-critical: #dc2626;
 }
 
 .dark {
     --bg-primary: #0f0f0f;
     --bg-secondary: #1a1a1a;
-    --bg-card: #242424;
+    --bg-card: #1c1c1c;
+    --bg-hover: #262626;
     --text-primary: #f5f5f5;
     --text-secondary: #999999;
-    --border: #333333;
+    --border: #2e2e2e;
     --accent: #6366f1;
     --accent-hover: #818cf8;
     --danger: #ef4444;
     --success: #22c55e;
+
+    --cat-work: #3987e5;
+    --cat-study: #199e70;
+    --cat-home: #c98500;
+    --cat-health: #008300;
+    --cat-other: #9085e9;
+
+    --prio-low: #7d8898;
+    --prio-medium: #3987e5;
+    --prio-high: #eda100;
+    --prio-critical: #e66767;
 }
 
 * {
@@ -31,39 +59,143 @@
     box-sizing: border-box;
 }
 
+html, body, #app {
+    height: 100%;
+}
+
 body {
     background-color: var(--bg-primary);
     color: var(--text-primary);
     font-family: system-ui, -apple-system, sans-serif;
-    font-size: 14px;
+    font-size: 13px;
     line-height: 1.5;
+    overflow: hidden;
 }
 
+/* ===== Базовые элементы ===== */
 button {
     cursor: pointer;
-    padding: 6px 12px;
-    border-radius: 6px;
+    padding: 5px 12px;
+    border-radius: var(--radius);
     border: 1px solid var(--border);
-    background: var(--bg-secondary);
+    background: var(--bg-card);
     color: var(--text-primary);
     font-size: 13px;
-    transition: background 0.15s;
+    font-family: inherit;
+    transition: background 0.12s, border-color 0.12s;
 }
 
 button:hover {
-    background: var(--border);
+    background: var(--bg-hover);
 }
 
-input, select {
-    padding: 6px 10px;
-    border-radius: 6px;
+button:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+
+input, select, textarea {
+    padding: 5px 10px;
+    border-radius: var(--radius);
     border: 1px solid var(--border);
-    background: var(--bg-secondary);
+    background: var(--bg-primary);
     color: var(--text-primary);
     font-size: 13px;
+    font-family: inherit;
 }
 
-input:focus, select:focus {
+input:focus, select:focus, textarea:focus {
     outline: 2px solid var(--accent);
     border-color: transparent;
 }
+
+/* ===== Кнопки-варианты ===== */
+.btn-primary {
+    background: var(--accent);
+    color: #fff;
+    border-color: transparent;
+    font-weight: 500;
+}
+.btn-primary:hover { background: var(--accent-hover); }
+
+.btn-ghost {
+    background: transparent;
+    border-color: transparent;
+}
+.btn-ghost:hover { background: var(--bg-hover); }
+
+.btn-sm { padding: 2px 8px; font-size: 12px; }
+
+.btn-icon {
+    padding: 3px 6px;
+    line-height: 1;
+    background: transparent;
+    border-color: transparent;
+    color: var(--text-secondary);
+}
+.btn-icon:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+.btn-danger { color: var(--danger); }
+.btn-danger:hover { background: color-mix(in srgb, var(--danger) 10%, transparent); }
+
+/* ===== Карточки, секции, чипы ===== */
+.card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+}
+
+.section-title {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    color: var(--text-secondary);
+    font-weight: 600;
+    margin: 0 0 10px 0;
+}
+
+.page-title {
+    font-size: 18px;
+    font-weight: 700;
+    margin: 0;
+}
+
+.chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    line-height: 1.4;
+    padding: 1px 8px;
+    border-radius: 999px;
+    white-space: nowrap;
+    color: var(--text-secondary);
+    background: var(--bg-secondary);
+}
+
+/* Чип категории: цвет слота + лёгкая подложка того же цвета */
+.chip-cat { color: var(--cat, var(--text-secondary)); background: color-mix(in srgb, var(--cat, #888) 12%, transparent); }
+.chip-cat.cat-work   { --cat: var(--cat-work); }
+.chip-cat.cat-study  { --cat: var(--cat-study); }
+.chip-cat.cat-home   { --cat: var(--cat-home); }
+.chip-cat.cat-health { --cat: var(--cat-health); }
+.chip-cat.cat-other  { --cat: var(--cat-other); }
+
+.chip-tag { color: #0369a1; background: color-mix(in srgb, #0ea5e9 12%, transparent); }
+.dark .chip-tag { color: #7dd3fc; }
+
+.chip-danger { color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent); }
+
+.empty {
+    padding: 40px 16px;
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+
+.muted { color: var(--text-secondary); }

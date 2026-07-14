@@ -369,21 +369,5 @@
   </section>
 </div>
 
-<style>
-  /* Палитра категорий (валидирована на светлой/тёмной поверхности).
-     Порядок слотов фиксированный — он же порядок CATEGORY_ORDER. */
-  .dashboard-viz {
-    --cat-work: #2a78d6;
-    --cat-study: #1baf7a;
-    --cat-home: #eda100;
-    --cat-health: #008300;
-    --cat-other: #4a3aa7;
-  }
-  :global(.dark) .dashboard-viz {
-    --cat-work: #3987e5;
-    --cat-study: #199e70;
-    --cat-home: #c98500;
-    --cat-health: #008300;
-    --cat-other: #9085e9;
-  }
-</style>
+<!-- Палитра категорий (--cat-*) задана глобально в app.css и разделяется
+     с чипами категорий в списке задач. -->
