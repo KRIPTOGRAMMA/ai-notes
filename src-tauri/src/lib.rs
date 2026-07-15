@@ -48,6 +48,19 @@ fn open_quick_capture(app: tauri::AppHandle, mode: String) {
     show_quick_capture(&app, &mode);
 }
 
+// Режим быстрого ввода из аргументов CLI (--quick-note / --quick-task / -q).
+// Общий парсер для первого запуска и для аргументов, пересланных вторым
+// экземпляром через single-instance (биндами WM на Wayland).
+fn quick_mode_from_args(args: &[String]) -> Option<&'static str> {
+    if args.iter().any(|a| a == "--quick-note") {
+        Some("note")
+    } else if args.iter().any(|a| a == "--quick-task" || a == "-q") {
+        Some("task")
+    } else {
+        None
+    }
+}
+
 #[tauri::command]
 fn get_quick_mode(mode: tauri::State<'_, QuickMode>) -> String {
     mode.lock().unwrap().clone()
@@ -145,6 +158,17 @@ pub fn run() {
         .unwrap()
         .block_on(async {
             let app = tauri::Builder::default()
+                // Регистрируется первым: второй запуск (напр. `ai-notes --quick-task`
+                // из бинда Hyprland) не стартует новый экземпляр, а пересылает
+                // аргументы сюда — открываем быстрый ввод или главное окно.
+                .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+                    if let Some(mode) = quick_mode_from_args(&argv) {
+                        show_quick_capture(app, mode);
+                    } else if let Some(w) = app.get_webview_window("main") {
+                        let _ = w.show();
+                        let _ = w.set_focus();
+                    }
+                }))
                 .plugin(tauri_plugin_opener::init())
                 .plugin(tauri_plugin_notification::init())
                 .plugin(tauri_plugin_autostart::init(
@@ -306,13 +330,11 @@ pub fn run() {
 
                     // Парсинг аргументов CLI для поддержки системных хоткеев на Wayland
                     let args: Vec<String> = std::env::args().collect();
-                    let quick_note = args.iter().any(|a| a == "--quick-note");
-                    let quick_task = args.iter().any(|a| a == "--quick-task" || a == "-q");
-                    if quick_note || quick_task {
+                    if let Some(mode) = quick_mode_from_args(&args) {
                         if let Some(main_win) = app.get_webview_window("main") {
                             let _ = main_win.hide();
                         }
-                        show_quick_capture(&app.app_handle(), if quick_note { "note" } else { "task" });
+                        show_quick_capture(&app.app_handle(), mode);
                     }
 
                     // Глобальные хоткеи: Ctrl+Shift+N — задача, Ctrl+Shift+M — заметка
@@ -417,11 +439,22 @@ pub fn run() {
 }
 #[cfg(test)]
 mod tests {
-    use super::{quiet_check_id, quiet_remaining_mins};
+    use super::{quick_mode_from_args, quiet_check_id, quiet_remaining_mins};
     use chrono::{TimeZone, Utc};
 
     fn now() -> chrono::DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 7, 14, 12, 0, 0).unwrap()
+    }
+
+    #[test]
+    fn quick_mode_parsing() {
+        let args = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(quick_mode_from_args(&args(&["ai-notes", "--quick-task"])), Some("task"));
+        assert_eq!(quick_mode_from_args(&args(&["ai-notes", "-q"])), Some("task"));
+        assert_eq!(quick_mode_from_args(&args(&["ai-notes", "--quick-note"])), Some("note"));
+        // заметка приоритетнее, как и в старом коде запуска
+        assert_eq!(quick_mode_from_args(&args(&["ai-notes", "--quick-task", "--quick-note"])), Some("note"));
+        assert_eq!(quick_mode_from_args(&args(&["ai-notes"])), None);
     }
 
     #[test]

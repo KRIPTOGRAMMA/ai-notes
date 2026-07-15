@@ -104,6 +104,21 @@
     }
   }
 
+  // Тест-кнопка: сбросить онбординг и перезагрузить webview — App.svelte
+  // перечитает настройки и покажет онбординг сразу. Берём свежие настройки
+  // из БД, чтобы не сохранить заодно несохранённые правки формы.
+  async function resetOnboarding() {
+    error = null;
+    try {
+      const fresh = await api.getSettings();
+      fresh.onboarding_complete = false;
+      await api.saveSettings(fresh);
+      location.reload();
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
   async function importData() {
     backupMsg = null;
     error = null;
@@ -317,6 +332,7 @@
     <div class="preset-row">
       <button class="btn-sm" onclick={exportData}>Экспорт (ZIP)</button>
       <button class="btn-sm" onclick={importData}>Импорт (ZIP)</button>
+      <button class="btn-sm" onclick={resetOnboarding} title="Сбросит флаг onboarding_complete и покажет онбординг заново">Сбросить онбординг</button>
       {#if backupMsg}
         <span class="muted" style="font-size:12px;">{backupMsg}</span>
       {/if}

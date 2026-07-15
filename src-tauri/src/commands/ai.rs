@@ -355,4 +355,79 @@ mod tests {
     fn nothing_available_is_empty() {
         assert_eq!(resolve_provider_order("local", false, false, false), vec![]);
     }
+
+    async fn test_pool() -> SqlitePool {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./src/db/migrations").run(&pool).await.unwrap();
+        pool
+    }
+
+    async fn insert_completed_task(pool: &SqlitePool, title: &str, completed_at: &str) {
+        sqlx::query(
+            "INSERT INTO tasks (id, title, status, priority, category, recurrence, tags, hidden, created_at, updated_at, completed_at)
+             VALUES (?, ?, 'Done', 'Medium', 'Work', 'None', '[]', 0, ?, ?, ?)")
+            .bind(uuid::Uuid::new_v4().to_string())
+            .bind(title)
+            .bind(completed_at).bind(completed_at).bind(completed_at)
+            .execute(pool).await.unwrap();
+    }
+
+    async fn insert_activity(pool: &SqlitePool, timestamp: &str, state: &str, secs: i64) {
+        sqlx::query(
+            "INSERT INTO activity_log (timestamp, state, app_focused, input_events, duration_secs)
+             VALUES (?, ?, 1, 1, ?)")
+            .bind(timestamp).bind(state).bind(secs)
+            .execute(pool).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn insight_summary_empty_db_reports_no_data() {
+        let pool = test_pool().await;
+        let s = insight_summary(&pool).await.unwrap();
+        assert!(s.contains("Активные минуты по дням: нет данных"), "{s}");
+        assert!(s.contains("Выполнено задач за последние дни: 0"), "{s}");
+        assert!(s.contains("Топ-категория выполненных задач: нет данных"), "{s}");
+    }
+
+    #[tokio::test]
+    async fn insight_summary_includes_activity_and_completions() {
+        let pool = test_pool().await;
+        let now = chrono::Utc::now().to_rfc3339();
+        insert_activity(&pool, &now, "Active", 600).await;
+        insert_completed_task(&pool, "готово", &now).await;
+
+        let s = insight_summary(&pool).await.unwrap();
+        assert!(s.contains("10 мин"), "{s}");
+        assert!(s.contains("Выполнено задач за последние дни: 1"), "{s}");
+        assert!(s.contains("Топ-категория выполненных задач: Work"), "{s}");
+    }
+
+    #[tokio::test]
+    async fn period_summary_empty_db() {
+        let pool = test_pool().await;
+        let s = period_summary(&pool, 1, "день").await.unwrap();
+        assert!(s.contains("Период: день"), "{s}");
+        assert!(s.contains("Выполнено задач: 0."), "{s}");
+        assert!(s.contains("Активное время: 0 мин"), "{s}");
+        assert!(s.contains("Просрочено сейчас: 0"), "{s}");
+    }
+
+    #[tokio::test]
+    async fn period_summary_counts_only_period_and_active_state() {
+        let pool = test_pool().await;
+        let now = chrono::Utc::now();
+        let recent = now.to_rfc3339();
+        let old = (now - chrono::Duration::days(30)).to_rfc3339();
+
+        insert_completed_task(&pool, "свежая", &recent).await;
+        insert_completed_task(&pool, "старая", &old).await; // вне периода
+        insert_activity(&pool, &recent, "Active", 300).await;
+        insert_activity(&pool, &recent, "Idle", 3600).await; // Idle не считается
+        insert_activity(&pool, &old, "Active", 3600).await; // вне периода
+
+        let s = period_summary(&pool, 7, "неделя").await.unwrap();
+        assert!(s.contains("Выполнено задач: 1 (свежая)"), "{s}");
+        assert!(!s.contains("старая"), "{s}");
+        assert!(s.contains("Активное время: 5 мин"), "{s}");
+    }
 }
