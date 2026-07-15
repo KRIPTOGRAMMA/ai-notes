@@ -36,7 +36,19 @@ export interface Task {
   completed_at: string | null;
   recurrence: Recurrence;
   hidden: boolean;
+  project_id: string | null;
   subtasks: Subtask[];
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  color: string;
+  target_date: string | null;
+  archived: boolean;
+  created_at: string;
+  task_total: number;
+  task_done: number;
 }
 
 export interface CreateTaskPayload {
@@ -48,6 +60,7 @@ export interface CreateTaskPayload {
   deadline: string | null;
   tags: string[];
   recurrence: Recurrence;
+  project_id?: string | null;
 }
 
 export interface UpdateTaskPayload {
@@ -59,6 +72,7 @@ export interface UpdateTaskPayload {
   deadline?: string;
   tags?: string[];
   recurrence?: Recurrence;
+  project_id?: string; // пустая строка = отвязать от проекта
 }
 
 export interface Note {
@@ -67,6 +81,7 @@ export interface Note {
   content: string;
   tags: string[];
   linked_task_id: string | null;
+  project_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -76,6 +91,7 @@ export interface CreateNotePayload {
   content: string;
   tags?: string[];
   linked_task_id?: string | null;
+  project_id?: string | null;
 }
 
 export interface UpdateNotePayload {
@@ -83,6 +99,7 @@ export interface UpdateNotePayload {
   content?: string;
   tags?: string[];
   linked_task_id?: string | null;
+  project_id?: string | null;
 }
 
 export interface AppSettings {
@@ -111,4 +128,10 @@ export interface AppSettings {
   ai_fallback: boolean;
   openai_in_keyring: boolean;
   anthropic_in_keyring: boolean;
+  app_category_rules: string; // JSON [{pattern, category}]
+}
+
+export interface AppCategoryRule {
+  pattern: string;
+  category: Category;
 }

@@ -6,3 +6,4 @@ pub mod settings;
 pub mod backup;
 pub mod model;
 pub mod subtasks;
+pub mod projects;

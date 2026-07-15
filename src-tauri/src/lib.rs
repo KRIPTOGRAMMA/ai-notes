@@ -33,6 +33,14 @@ fn get_tracking_mode(mode: tauri::State<'_, ExtendedTracking>) -> &'static str {
     if mode.0 { "extended" } else { "basic" }
 }
 
+// Провайдер активного окна (имя), если capability detection нашёл рабочий.
+pub struct WindowTracking(pub Option<&'static str>);
+
+#[tauri::command]
+fn get_window_tracking(state: tauri::State<'_, WindowTracking>) -> Option<&'static str> {
+    state.0
+}
+
 fn normalize_quick_mode(mode: &str) -> &'static str {
     if mode == "note" { "note" } else { "task" }
 }
@@ -195,15 +203,22 @@ pub fn run() {
                         commands::tasks::update_task,
                         commands::tasks::complete_task,
                         commands::tasks::search_tasks,
+                        commands::projects::get_projects,
+                        commands::projects::create_project,
+                        commands::projects::update_project,
+                        commands::projects::delete_project,
                         open_quick_capture,
                         get_quick_mode,
                         is_wayland,
                         get_tracking_mode,
+                        get_window_tracking,
                         commands::monitor::record_input,
                         commands::monitor::get_session_stats,
                         commands::monitor::get_activity_state,
                         commands::monitor::get_activity_by_day,
                         commands::monitor::get_task_completions_by_day,
+                        commands::monitor::get_app_usage,
+                        commands::monitor::get_app_category_time,
                         commands::monitor::get_category_distribution,
                         commands::monitor::get_active_idle_ratio,
                         commands::ai::ai_rewrite,
@@ -388,6 +403,14 @@ pub fn run() {
             let extended = is_wayland() && monitor::wayland_idle::start(tracker.clone());
             app.manage(ExtendedTracking(extended));
             eprintln!("[monitor] режим трекинга: {}", if extended { "расширенный (ext-idle-notify)" } else { "базовый (окно в фокусе)" });
+
+            // Трекинг по приложениям: capability detection, нет провайдера — колонка app пустая.
+            let window_provider = monitor::window::detect_provider();
+            app.manage(WindowTracking(window_provider.as_ref().map(|p| p.name())));
+            eprintln!(
+                "[monitor] трекинг приложений: {}",
+                window_provider.as_ref().map(|p| p.name()).unwrap_or("недоступен")
+            );
             let settings = commands::settings::load_settings_raw(&pool)
                 .await
                 .unwrap_or_default();
@@ -444,6 +467,7 @@ pub fn run() {
                 settings.idle_threshold_secs,
                 settings.log_interval_secs,
                 work_mode.clone(),
+                window_provider,
             );
 
             notifier::scheduler::start_scheduler(app.app_handle().clone(), pool.clone(), work_mode.clone());

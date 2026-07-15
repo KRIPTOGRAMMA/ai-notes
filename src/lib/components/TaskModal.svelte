@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Task, CreateTaskPayload, UpdateTaskPayload, Priority, Category, Recurrence, RecurrenceUnit, TaskStatus } from "../types";
+  import { projectStore } from "../stores/projects.svelte";
 
   type Props = {
     task?: Task | null;
@@ -18,6 +19,8 @@
   let priority = $state<Priority>(task?.priority ?? "Medium");
   let category = $state<Category>(task?.category ?? "Work");
   let tagsInput = $state((task?.tags ?? []).join(", "));
+  // "" = без проекта; в патче пустая строка отвязывает
+  let projectId = $state(task?.project_id ?? "");
 
   // datetime-local работает в локальном времени. toISOString() дал бы UTC —
   // тогда каждое открытие+сохранение сдвигало бы дедлайн на смещение пояса.
@@ -91,6 +94,7 @@
           category,
           tags: parseTags(tagsInput),
           recurrence,
+          project_id: projectId,
           ...(deadlineIso ? { deadline: deadlineIso } : {}),
         };
         await onSave(patch);
@@ -104,6 +108,7 @@
           tags: parseTags(tagsInput),
           recurrence,
           deadline: deadlineIso,
+          project_id: projectId || null,
         };
         await onSave(payload);
       }
@@ -214,6 +219,22 @@
       <span class="label">Теги (через запятую)</span>
       <input bind:value={tagsInput} placeholder="работа, важное, срочное" />
     </label>
+
+    {#if projectStore.active.length > 0 || projectId}
+      <label class="field">
+        <span class="label">Проект</span>
+        <select bind:value={projectId}>
+          <option value="">Без проекта</option>
+          {#each projectStore.active as p (p.id)}
+            <option value={p.id}>{p.name}</option>
+          {/each}
+          <!-- задача может висеть на архивном проекте — не теряем привязку -->
+          {#each projectStore.projects.filter(p => p.archived && p.id === projectId) as p (p.id)}
+            <option value={p.id}>{p.name} (архив)</option>
+          {/each}
+        </select>
+      </label>
+    {/if}
 
     <div class="actions">
       <span class="muted" style="font-size:11px;margin-right:auto;"><kbd>Ctrl Enter</kbd> сохранить · <kbd>Esc</kbd> закрыть</span>

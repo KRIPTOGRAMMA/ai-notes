@@ -106,6 +106,7 @@ pub fn start_activity_loop(
     idle_threshold_secs: u64,
     log_interval_secs: u64,
     work_mode: Arc<Mutex<crate::commands::settings::WorkMode>>,
+    window_provider: Option<Arc<dyn super::window::WindowProvider>>,
 ) {
     tokio::spawn(async move {
         let mut tick = interval(Duration::from_secs(log_interval_secs));
@@ -150,20 +151,26 @@ pub fn start_activity_loop(
                 }
             }
 
-            // Логируем в БД каждый тик
+            // Логируем в БД каждый тик. Для Active-тика фиксируем класс окна
+            // в фокусе (если провайдер есть): локальный сокет, цена нулевая.
             let state_str = match new_state {
                 ActivityState::Idle => "Idle",
                 ActivityState::Active => "Active",
             };
+            let focused_app = match (&new_state, &window_provider) {
+                (ActivityState::Active, Some(p)) => p.current_window().map(|w| w.app),
+                _ => None,
+            };
             let result = sqlx::query(
-                "INSERT INTO activity_log (timestamp, state, app_focused, input_events, duration_secs)
-                 VALUES (?, ?, ?, ?, ?)"
+                "INSERT INTO activity_log (timestamp, state, app_focused, input_events, duration_secs, app)
+                 VALUES (?, ?, ?, ?, ?, ?)"
             )
             .bind(now.to_rfc3339())
             .bind(state_str)
             .bind(true)
             .bind(0i32)
             .bind(log_interval_secs as i64)
+            .bind(focused_app)
             .execute(&pool)
             .await;
 

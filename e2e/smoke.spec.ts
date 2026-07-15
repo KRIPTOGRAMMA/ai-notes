@@ -122,6 +122,33 @@ test("Ctrl+K находит задачу и открывает раздел за
   await expect(page.locator(".task-main", { hasText: "искомая задача" })).toBeVisible();
 });
 
+test("проекты: создание, назначение задаче, группировка и фильтр", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+
+  // создать проект
+  await page.getByRole("button", { name: "Проекты" }).click();
+  await page.getByPlaceholder("Название нового проекта").fill("Ремонт");
+  await page.getByRole("button", { name: "Создать" }).click();
+  await page.getByRole("button", { name: "Закрыть" }).click();
+
+  // задача в проект через модал
+  await page.getByRole("button", { name: "+ Новая", exact: true }).click();
+  await page.getByPlaceholder("Название задачи").fill("покрасить стены");
+  await page.getByLabel("Проект").selectOption({ label: "Ремонт" });
+  await page.getByRole("button", { name: "Создать" }).click();
+  await createTask(page, "задача вне проекта");
+
+  // группировка: заголовки секций видны
+  await expect(page.locator(".project-head", { hasText: "Ремонт" })).toBeVisible();
+  await expect(page.locator(".project-head", { hasText: "Без проекта" })).toBeVisible();
+
+  // фильтр по проекту
+  await page.locator(".project-filter").selectOption({ label: "Ремонт" });
+  await expect(page.getByText("покрасить стены")).toBeVisible();
+  await expect(page.locator(".task-main", { hasText: "задача вне проекта" })).toHaveCount(0);
+});
+
 test("тёмная тема применяется и переживает перезагрузку", async ({ page }) => {
   await withMock(page);
   await page.goto("/");

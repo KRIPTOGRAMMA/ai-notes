@@ -117,6 +117,139 @@ async fn state_sums(pool: &SqlitePool, window: &str) -> AppResult<(i64, i64)> {
     Ok((active, idle))
 }
 
+// ===== Трекинг по приложениям (v0.5 фаза 1) =====
+
+#[derive(Debug, serde::Serialize, PartialEq)]
+pub struct AppMinutes {
+    pub app: String,
+    pub minutes: i64,
+}
+
+#[derive(Debug, serde::Serialize, PartialEq)]
+pub struct CategoryMinutes {
+    pub category: String,
+    pub minutes: i64,
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct CategoryRule {
+    pub pattern: String,
+    pub category: String,
+}
+
+const KNOWN_CATEGORIES: [&str; 5] = ["Work", "Study", "Home", "Health", "Other"];
+
+// Правила категоризации приложений: JSON в settings под ключом
+// app_category_rules: [{"pattern":"kitty","category":"Work"}, ...].
+// Мусор/пустая строка — просто нет правил.
+pub fn parse_category_rules(json: &str) -> Vec<CategoryRule> {
+    serde_json::from_str(json).unwrap_or_default()
+}
+
+// Глоб с '*' (любая подстрока), регистронезависимый. Без '*' — точное совпадение.
+pub fn glob_match(pattern: &str, text: &str) -> bool {
+    let p = pattern.trim().to_lowercase();
+    let t = text.to_lowercase();
+    let parts: Vec<&str> = p.split('*').collect();
+    if parts.len() == 1 {
+        return p == t;
+    }
+    let mut pos = 0usize;
+    let last = parts.len() - 1;
+    for (i, part) in parts.iter().enumerate() {
+        if part.is_empty() {
+            continue;
+        }
+        if i == 0 {
+            if !t.starts_with(part) {
+                return false;
+            }
+            pos = part.len();
+        } else if i == last {
+            return t.len() >= pos + part.len() && t[pos..].ends_with(part);
+        } else {
+            match t[pos..].find(part) {
+                Some(idx) => pos += idx + part.len(),
+                None => return false,
+            }
+        }
+    }
+    true
+}
+
+// Первое совпавшее правило выигрывает; нет совпадений или неизвестная
+// категория — "Other" (дашборд знает только 5 категорий палитры).
+pub fn categorize_app(app: &str, rules: &[CategoryRule]) -> String {
+    for rule in rules {
+        if glob_match(&rule.pattern, app) && KNOWN_CATEGORIES.contains(&rule.category.as_str()) {
+            return rule.category.clone();
+        }
+    }
+    "Other".into()
+}
+
+async fn app_minutes_since(pool: &SqlitePool, days: i64) -> AppResult<Vec<AppMinutes>> {
+    let since = (chrono::Utc::now() - chrono::Duration::days(days)).to_rfc3339();
+    let rows = sqlx::query(
+        "SELECT app, SUM(duration_secs) / 60 as minutes
+         FROM activity_log
+         WHERE state = 'Active' AND app IS NOT NULL AND timestamp >= ?
+         GROUP BY app
+         ORDER BY minutes DESC",
+    )
+    .bind(&since)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .iter()
+        .map(|row| AppMinutes { app: row.get("app"), minutes: row.get("minutes") })
+        .collect())
+}
+
+#[tauri::command]
+pub async fn get_app_usage(pool: State<'_, SqlitePool>, days: i64) -> AppResult<Vec<AppMinutes>> {
+    get_app_usage_impl(pool.inner(), days).await
+}
+
+// Топ-10 приложений по активным минутам за последние N дней.
+pub async fn get_app_usage_impl(pool: &SqlitePool, days: i64) -> AppResult<Vec<AppMinutes>> {
+    let mut apps = app_minutes_since(pool, days.max(1)).await?;
+    apps.truncate(10);
+    Ok(apps)
+}
+
+#[tauri::command]
+pub async fn get_app_category_time(
+    pool: State<'_, SqlitePool>,
+    days: i64,
+) -> AppResult<Vec<CategoryMinutes>> {
+    get_app_category_time_impl(pool.inner(), days).await
+}
+
+// Активные минуты по категориям: приложения из лога прогоняются через правила.
+pub async fn get_app_category_time_impl(
+    pool: &SqlitePool,
+    days: i64,
+) -> AppResult<Vec<CategoryMinutes>> {
+    let rules_json = crate::commands::settings::get_setting(pool, "app_category_rules")
+        .await
+        .unwrap_or_default();
+    let rules = parse_category_rules(&rules_json);
+
+    let mut by_cat = std::collections::BTreeMap::<String, i64>::new();
+    for row in app_minutes_since(pool, days.max(1)).await? {
+        *by_cat.entry(categorize_app(&row.app, &rules)).or_default() += row.minutes;
+    }
+
+    let mut out: Vec<CategoryMinutes> = by_cat
+        .into_iter()
+        .map(|(category, minutes)| CategoryMinutes { category, minutes })
+        .collect();
+    out.sort_by(|a, b| b.minutes.cmp(&a.minutes));
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -215,5 +348,81 @@ mod tests {
         let r = get_active_idle_ratio_impl(&pool).await.unwrap();
         assert_eq!((r.today_active, r.today_idle), (120, 60));
         assert_eq!((r.week_active, r.week_idle), (420, 60));
+    }
+
+    #[test]
+    fn glob_match_cases() {
+        assert!(glob_match("kitty", "kitty"));
+        assert!(glob_match("KiTTy", "kitty")); // регистр не важен
+        assert!(!glob_match("kitty", "kitty-extra")); // без '*' — точное
+        assert!(glob_match("kitty*", "kitty-extra"));
+        assert!(glob_match("*fox", "firefox"));
+        assert!(glob_match("*ire*", "firefox"));
+        assert!(glob_match("jetbrains-*", "jetbrains-idea"));
+        assert!(!glob_match("jetbrains-*", "idea-jetbrains"));
+        assert!(glob_match("*", "что угодно"));
+        assert!(!glob_match("a*b", "ba")); // порядок частей обязателен
+    }
+
+    #[test]
+    fn categorize_first_match_wins_and_unknown_is_other() {
+        let rules = parse_category_rules(
+            r#"[{"pattern":"jetbrains-*","category":"Work"},
+                {"pattern":"*","category":"Study"},
+                {"pattern":"zen","category":"Игры"}]"#,
+        );
+        assert_eq!(categorize_app("jetbrains-idea", &rules), "Work");
+        assert_eq!(categorize_app("kitty", &rules), "Study"); // wildcard-правило
+        // «Игры» — не из палитры: правило пропускается (здесь ловит wildcard)
+        assert_eq!(categorize_app("zen", &rules), "Study");
+
+        assert_eq!(categorize_app("anything", &[]), "Other");
+        assert!(parse_category_rules("мусор").is_empty());
+        assert!(parse_category_rules("").is_empty());
+    }
+
+    async fn log_app(pool: &SqlitePool, ts: &str, app: Option<&str>, duration_secs: i64) {
+        sqlx::query(
+            "INSERT INTO activity_log (timestamp, state, app_focused, input_events, duration_secs, app)
+             VALUES (?, 'Active', 1, 0, ?, ?)")
+            .bind(ts).bind(duration_secs).bind(app)
+            .execute(pool).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn app_usage_sums_and_respects_window() {
+        let pool = test_pool().await;
+        let now = chrono::Utc::now();
+        let ts = |days_ago: i64| (now - chrono::Duration::days(days_ago)).to_rfc3339();
+
+        log_app(&pool, &ts(0), Some("kitty"), 600).await;
+        log_app(&pool, &ts(0), Some("kitty"), 600).await;
+        log_app(&pool, &ts(0), Some("zen"), 300).await;
+        log_app(&pool, &ts(0), None, 999).await; // без app — не считается
+        log_app(&pool, &ts(30), Some("kitty"), 6000).await; // вне окна
+
+        let usage = get_app_usage_impl(&pool, 7).await.unwrap();
+        assert_eq!(usage[0], AppMinutes { app: "kitty".into(), minutes: 20 });
+        assert_eq!(usage[1], AppMinutes { app: "zen".into(), minutes: 5 });
+        assert_eq!(usage.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn category_time_applies_rules_from_settings() {
+        let pool = test_pool().await;
+        crate::commands::settings::set_setting(
+            &pool,
+            "app_category_rules",
+            r#"[{"pattern":"kitty","category":"Work"}]"#,
+        )
+        .await
+        .unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        log_app(&pool, &now, Some("kitty"), 600).await;
+        log_app(&pool, &now, Some("zen"), 300).await; // нет правила → Other
+
+        let cats = get_app_category_time_impl(&pool, 1).await.unwrap();
+        assert_eq!(cats[0], CategoryMinutes { category: "Work".into(), minutes: 10 });
+        assert_eq!(cats[1], CategoryMinutes { category: "Other".into(), minutes: 5 });
     }
 }

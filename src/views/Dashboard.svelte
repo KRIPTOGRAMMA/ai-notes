@@ -44,6 +44,22 @@
   let settings: AppSettings | null = $state(null);
   let error: string | null = $state(null);
 
+  // Приложения: топ по активным минутам + время по категориям (правила из Настроек)
+  let appUsage: { app: string; minutes: number }[] = $state([]);
+  let appCategories: { category: string; minutes: number }[] = $state([]);
+  let appPeriod: 1 | 7 = $state(1);
+
+  async function loadAppUsage(days: 1 | 7) {
+    appPeriod = days;
+    try {
+      appUsage = await api.getAppUsage(days);
+      appCategories = await api.getAppCategoryTime(days);
+    } catch {
+      appUsage = [];
+      appCategories = [];
+    }
+  }
+
   let insightText: string | null = $state(null);
   let insightError: string | null = $state(null);
   let insightPending = $state(false);
@@ -110,6 +126,7 @@
         categories = await api.getCategoryDistribution();
         ratio = await api.getActiveIdleRatio();
         settings = await api.getSettings();
+        await loadAppUsage(1);
       } catch (e) {
         error = String(e);
       }
@@ -292,6 +309,47 @@
       {/if}
     </section>
 
+    <!-- Приложения (только если провайдер окон что-то записал) -->
+    {#if appUsage.length > 0}
+      {@const maxApp = Math.max(...appUsage.map(a => a.minutes), 1)}
+      <section class="card panel wide">
+        <div class="apps-head">
+          <h3 class="section-title" style="margin:0;">Приложения</h3>
+          <div class="btn-group">
+            <button class:active-toggle={appPeriod === 1} onclick={() => loadAppUsage(1)}>Сегодня</button>
+            <button class:active-toggle={appPeriod === 7} onclick={() => loadAppUsage(7)}>Неделя</button>
+          </div>
+        </div>
+
+        <div class="apps-cols">
+          <div class="rows" style="flex:1;min-width:0;">
+            {#each appUsage as a (a.app)}
+              <div class="bar-row">
+                <span class="bar-date" title={a.app}>{a.app}</span>
+                <div class="track tall">
+                  <div class="fill" style="width:{Math.round((a.minutes / maxApp) * 100)}%;"></div>
+                </div>
+                <span class="bar-val">{a.minutes} мин</span>
+              </div>
+            {/each}
+          </div>
+
+          <ul class="legend">
+            {#each appCategories as c (c.category)}
+              <li>
+                <span class="swatch" style="background:var(--cat-{c.category.toLowerCase()});"></span>
+                <span>{CATEGORY_LABELS[c.category] ?? c.category}</span>
+                <span class="muted">{c.minutes} мин</span>
+              </li>
+            {/each}
+          </ul>
+        </div>
+        <p class="muted" style="font-size:11px;margin:8px 0 0 0;">
+          Категории — по правилам «класс окна → категория» в Настройках → Мониторинг.
+        </p>
+      </section>
+    {/if}
+
     <!-- Активность по дням -->
     <section class="card panel wide">
       <h3 class="section-title">Активность по дням (мин)</h3>
@@ -432,6 +490,24 @@
     display: flex;
     align-items: flex-start;
     gap: 12px;
+  }
+
+  .apps-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+
+  .apps-cols {
+    display: flex;
+    gap: 24px;
+    align-items: flex-start;
+  }
+
+  .active-toggle {
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    color: var(--accent);
   }
 
   .btn-group {

@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { save as saveDialog, open as openDialog } from "@tauri-apps/plugin-dialog";
   import { api } from "../lib/api/tauri";
-  import type { AppSettings } from "../lib/types";
+  import type { AppSettings, AppCategoryRule } from "../lib/types";
   import { applyTheme } from "../lib/theme";
   import ModelDownloader from "../lib/components/ModelDownloader.svelte";
 
@@ -57,26 +57,51 @@
     ai_fallback: false,
     openai_in_keyring: false,
     anthropic_in_keyring: false,
+    app_category_rules: "",
   });
 
   let saving = $state(false);
   let saved = $state(false);
   let error: string | null = $state(null);
   let trackingMode: "extended" | "basic" | null = $state(null);
+  let windowTracking: string | null = $state(null);
+
+  // Правила «класс окна → категория»: редактируются строками,
+  // сериализуются в settings.app_category_rules при сохранении.
+  let appRules: AppCategoryRule[] = $state([]);
+  const RULE_CATEGORIES: { value: AppCategoryRule["category"]; label: string }[] = [
+    { value: "Work", label: "Работа" },
+    { value: "Study", label: "Учёба" },
+    { value: "Home", label: "Дом" },
+    { value: "Health", label: "Здоровье" },
+    { value: "Other", label: "Другое" },
+  ];
+
+  function parseRules(json: string): AppCategoryRule[] {
+    try {
+      const v = JSON.parse(json);
+      return Array.isArray(v) ? v : [];
+    } catch {
+      return [];
+    }
+  }
 
   onMount(async () => {
     try {
       settings = await api.getSettings();
+      appRules = parseRules(settings.app_category_rules);
     } catch (e) {
       error = String(e);
     }
     trackingMode = await api.getTrackingMode().catch(() => null);
+    windowTracking = await api.getWindowTracking().catch(() => null);
   });
 
   async function save() {
     saving = true;
     error = null;
     try {
+      settings.app_category_rules = JSON.stringify(appRules.filter(r => r.pattern.trim()));
       await api.saveSettings(settings);
       applyTheme(settings.theme_mode, settings);
       saved = true;
@@ -303,6 +328,30 @@
         Режим трекинга: {trackingMode === "extended"
           ? "расширенный — системный простой/возврат от композитора (ext-idle-notify)"
           : "базовый — только ввод в окне приложения"}
+        {windowTracking ? ` · приложения: ${windowTracking}` : ""}
+      </p>
+    {/if}
+
+    {#if windowTracking}
+      <div class="sub-label" style="margin-top:12px;">Категории приложений (класс окна → категория)</div>
+      {#each appRules as rule, i}
+        <div class="rule-row">
+          <input bind:value={rule.pattern} placeholder="класс окна, напр. jetbrains-*" />
+          <select bind:value={rule.category}>
+            {#each RULE_CATEGORIES as c}
+              <option value={c.value}>{c.label}</option>
+            {/each}
+          </select>
+          <button class="btn-icon btn-danger" title="Удалить правило"
+            onclick={() => appRules = appRules.filter((_, j) => j !== i)}>✕</button>
+        </div>
+      {/each}
+      <button class="btn-sm" onclick={() => appRules = [...appRules, { pattern: "", category: "Work" }]}>
+        + Правило
+      </button>
+      <p class="hint">
+        Первое совпавшее правило выигрывает; <code>*</code> — любая подстрока.
+        Приложения без правила попадают в «Другое». Применяется после «Сохранить».
       </p>
     {/if}
   </section>
@@ -431,6 +480,18 @@
     font-size: 12px;
     color: var(--text-secondary);
     margin: 8px 0 0 0;
+  }
+
+  .rule-row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    margin-bottom: 6px;
+  }
+
+  .rule-row input {
+    flex: 1;
+    min-width: 0;
   }
 
   .key-ok {

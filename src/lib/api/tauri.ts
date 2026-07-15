@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Task, Subtask, CreateTaskPayload, UpdateTaskPayload, Note, CreateNotePayload, UpdateNotePayload, AppSettings } from "../types";
+import type { Task, Subtask, CreateTaskPayload, UpdateTaskPayload, Note, CreateNotePayload, UpdateNotePayload, AppSettings, Project } from "../types";
 
 export const api = {
   getTasks: () => invoke<Task[]>("get_tasks"),
@@ -8,6 +8,12 @@ export const api = {
   deleteTask: (id: string) => invoke<void>("delete_task", { id }),
   completeTask: (id: string) => invoke<Task>("complete_task", { id }),
   searchTasks: (query: string) => invoke<Task[]>("search_tasks", { query }),
+  getProjects: () => invoke<Project[]>("get_projects"),
+  createProject: (project: { name: string; color?: string; target_date?: string | null }) =>
+    invoke<Project>("create_project", { project }),
+  updateProject: (id: string, patch: { name?: string; color?: string; target_date?: string; archived?: boolean }) =>
+    invoke<void>("update_project", { id, patch }),
+  deleteProject: (id: string) => invoke<void>("delete_project", { id }),
   recordInput: () => invoke<void>("record_input"),
   openQuickCapture: (mode: "task" | "note") => invoke<void>("open_quick_capture", { mode }),
   getQuickMode: () => invoke<"task" | "note">("get_quick_mode"),
@@ -23,6 +29,9 @@ export const api = {
   getCategoryDistribution: () => invoke<{ category: string; count: number }[]>("get_category_distribution"),
   getActiveIdleRatio: () =>
     invoke<{ today_active: number; today_idle: number; week_active: number; week_idle: number }>("get_active_idle_ratio"),
+  getAppUsage: (days: number) => invoke<{ app: string; minutes: number }[]>("get_app_usage", { days }),
+  getAppCategoryTime: (days: number) =>
+    invoke<{ category: string; minutes: number }[]>("get_app_category_time", { days }),
   dashboardInsight: () => invoke<void>("dashboard_insight"),
   summarizeDay: () => invoke<void>("summarize_day"),
   summarizeWeek: () => invoke<void>("summarize_week"),
@@ -30,6 +39,7 @@ export const api = {
   saveSettings: (settings: AppSettings) => invoke<void>("save_settings", { settings }),
   isWayland: () => invoke<boolean>("is_wayland"),
   getTrackingMode: () => invoke<"extended" | "basic">("get_tracking_mode"),
+  getWindowTracking: () => invoke<string | null>("get_window_tracking"),
   exportData: (path: string) => invoke<void>("export", { path }),
   importData: (path: string) => invoke<void>("import", { path }),
   getSubtasks: (taskId: string) => invoke<Subtask[]>("get_subtasks", { taskId }),

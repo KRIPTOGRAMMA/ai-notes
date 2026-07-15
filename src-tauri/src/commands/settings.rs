@@ -67,6 +67,8 @@ pub struct AppSettings {
     pub openai_in_keyring: bool,     // runtime-only: ключ хранится в keyring
     #[serde(default)]
     pub anthropic_in_keyring: bool,  // runtime-only: ключ хранится в keyring
+    #[serde(default)]
+    pub app_category_rules: String,  // JSON [{pattern, category}] — классы окон → категории
 }
 
 fn default_true() -> bool { true }
@@ -102,6 +104,7 @@ impl Default for AppSettings {
             ai_fallback: false,
             openai_in_keyring: false,
             anthropic_in_keyring: false,
+            app_category_rules: String::new(),
         }
     }
 }
@@ -198,6 +201,7 @@ pub async fn load_settings_raw(pool: &SqlitePool) -> AppResult<AppSettings> {
     if let Some(v) = get_setting(pool, "quiet_until").await { s.quiet_until = v; }
     if let Some(v) = get_setting(pool, "context_notifications").await { s.context_notifications = v != "false"; }
     if let Some(v) = get_setting(pool, "ai_fallback").await { s.ai_fallback = v == "true"; }
+    if let Some(v) = get_setting(pool, "app_category_rules").await { s.app_category_rules = v; }
     // Ключи: сначала keyring, затем legacy-значение из БД
     let openai_from_keyring = keyring_get("openai_key");
     let anthropic_from_keyring = keyring_get("anthropic_key");
@@ -257,6 +261,15 @@ pub async fn save_settings(
     set_setting(pool.inner(), "quiet_until", quiet).await?;
     set_setting(pool.inner(), "context_notifications", if settings.context_notifications { "true" } else { "false" }).await?;
     set_setting(pool.inner(), "ai_fallback", if settings.ai_fallback { "true" } else { "false" }).await?;
+    // Правила категоризации приложений: храним только валидный JSON-массив
+    let rules = if crate::commands::monitor::parse_category_rules(&settings.app_category_rules).is_empty()
+        && !settings.app_category_rules.trim().is_empty()
+    {
+        "" // мусор не сохраняем
+    } else {
+        settings.app_category_rules.as_str()
+    };
+    set_setting(pool.inner(), "app_category_rules", rules).await?;
 
     for (name, value) in [("openai_key", &settings.openai_key), ("anthropic_key", &settings.anthropic_key)] {
         match keyring_set(name, value) {

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { taskStore } from "./lib/stores/tasks.svelte";
   import { noteStore } from "./lib/stores/notes.svelte";
+  import { projectStore } from "./lib/stores/projects.svelte";
   import { api } from "./lib/api/tauri";
   import { onMount } from "svelte";
   import { listen } from "@tauri-apps/api/event";
@@ -31,6 +32,8 @@
   onMount(async () => {
     // Заметки нужны глобально для поиска (Ctrl+K), даже если раздел ещё не открывали.
     noteStore.load();
+    // Проекты нужны модалу задачи из любого раздела (например, из Календаря).
+    projectStore.load();
     // Создание в окне быстрого ввода — подхватываем глобально: раздел задач
     // может быть не смонтирован (открыт Календарь/Дашборд), а store общий.
     const unlistenNote = listen("note-created", () => noteStore.load());

@@ -36,6 +36,7 @@
     ai_fallback: false,
     openai_in_keyring: false,
     anthropic_in_keyring: false,
+    app_category_rules: "",
   };
 
   let db;
@@ -44,7 +45,8 @@
   } catch {
     db = null;
   }
-  if (!db) db = { tasks: [], notes: [], settings: { ...defaultSettings } };
+  if (!db) db = { tasks: [], notes: [], projects: [], settings: { ...defaultSettings } };
+  if (!db.projects) db.projects = [];
   // сид может задать только часть настроек
   db.settings = { ...defaultSettings, ...db.settings };
 
@@ -77,6 +79,7 @@
     },
     is_wayland: () => false,
     get_tracking_mode: () => "basic",
+    get_window_tracking: () => null,
     record_input: () => {},
     open_quick_capture: ({ mode }) => {
       db.quickMode = mode;
@@ -95,6 +98,7 @@
         completed_at: null,
         recurrence: "None",
         hidden: false,
+        project_id: null,
         subtasks: [],
         ...task,
         created_at: now(),
@@ -134,6 +138,40 @@
       return db.tasks.filter((t) => t.title.toLowerCase().includes(q));
     },
 
+    // --- проекты ---
+    get_projects: () =>
+      db.projects.map((p) => ({
+        ...p,
+        task_total: db.tasks.filter((t) => t.project_id === p.id).length,
+        task_done: db.tasks.filter((t) => t.project_id === p.id && t.completed_at).length,
+      })),
+    create_project: ({ project }) => {
+      const full = {
+        id: uuid(),
+        color: "",
+        target_date: null,
+        archived: false,
+        ...project,
+        created_at: now(),
+      };
+      db.projects.push(full);
+      persist();
+      return { ...full, task_total: 0, task_done: 0 };
+    },
+    update_project: ({ id, patch }) => {
+      const p = db.projects.find((p) => p.id === id);
+      if (!p) throw `Проект не найден: ${id}`;
+      for (const [k, v] of Object.entries(patch)) {
+        if (v !== undefined) p[k] = k === "target_date" && v === "" ? null : v;
+      }
+      persist();
+    },
+    delete_project: ({ id }) => {
+      db.projects = db.projects.filter((p) => p.id !== id);
+      for (const t of db.tasks) if (t.project_id === id) t.project_id = null;
+      persist();
+    },
+
     // --- подзадачи ---
     get_subtasks: ({ taskId }) => findTask(taskId)?.subtasks ?? [],
     add_subtask: ({ taskId, title }) => {
@@ -162,6 +200,7 @@
         id: uuid(),
         tags: [],
         linked_task_id: null,
+        project_id: null,
         ...note,
         created_at: now(),
         updated_at: now(),
@@ -190,6 +229,8 @@
     get_task_completions_by_day: () => [],
     get_category_distribution: () => [],
     get_active_idle_ratio: () => ({ today_active: 0, today_idle: 0, week_active: 0, week_idle: 0 }),
+    get_app_usage: () => [],
+    get_app_category_time: () => [],
     dashboard_insight: () => {},
     summarize_day: () => {},
     summarize_week: () => {},

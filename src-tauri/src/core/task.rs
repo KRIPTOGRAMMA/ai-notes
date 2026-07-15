@@ -47,6 +47,8 @@ pub struct Task {
   pub recurrence: Recurrence,
   pub hidden: bool,
   #[serde(default)]
+  pub project_id: Option<String>,
+  #[serde(default)]
   pub subtasks: Vec<Subtask>,
 }
 
@@ -74,6 +76,7 @@ pub struct TaskRow {
     pub completed_at: Option<String>,
     pub recurrence: String,
     pub hidden: bool,
+    pub project_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -86,6 +89,8 @@ pub struct CreateTask {
   pub deadline: Option<DateTime<Utc>>,
   pub tags: Vec<String>,
   pub recurrence: Option<Recurrence>,
+  #[serde(default)]
+  pub project_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -98,6 +103,8 @@ pub struct UpdateTask {
     pub deadline: Option<String>,
     pub tags: Option<Vec<String>>,
     pub recurrence: Option<Recurrence>,
+    // Как deadline: пустая строка = отвязать от проекта, отсутствие = не менять
+    pub project_id: Option<String>,
 }
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub enum RecurrenceUnit {
@@ -193,6 +200,7 @@ impl CreateTask {
             completed_at: None,
             recurrence: self.recurrence.unwrap_or(Recurrence::None),
             hidden: false,
+            project_id: self.project_id.filter(|p| !p.is_empty()),
             subtasks: Vec::new(),
         }
     }
@@ -234,6 +242,7 @@ impl TaskRow {
                 .map(|d| d.with_timezone(&Utc)),
             recurrence: Recurrence::from_db(&self.recurrence),
             hidden: self.hidden,
+            project_id: self.project_id,
             subtasks: Vec::new(),
         }
     }
@@ -257,6 +266,7 @@ mod tests {
             completed_at: None,
             recurrence: "None".into(),
             hidden: false,
+            project_id: None,
         };
         overrides(&mut r);
         r

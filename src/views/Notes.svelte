@@ -2,6 +2,7 @@
   import { onMount, tick } from "svelte";
   import { noteStore } from "../lib/stores/notes.svelte";
   import { taskStore } from "../lib/stores/tasks.svelte";
+  import { projectStore } from "../lib/stores/projects.svelte";
   import { renderMarkdown, toggleTaskListItem } from "../lib/markdown";
   import type { Note } from "../lib/types";
 
@@ -10,6 +11,7 @@
   let editContent = $state("");
   let editTags: string[] = $state([]);
   let editLinkedTaskId: string | null = $state(null);
+  let editProjectId: string | null = $state(null);
   let tagInput = $state("");
   let previewMode = $state(false);
   let previewEl: HTMLDivElement | undefined = $state();
@@ -25,6 +27,7 @@
     editContent = note.content;
     editTags = [...note.tags];
     editLinkedTaskId = note.linked_task_id;
+    editProjectId = note.project_id;
     previewMode = false;
   }
 
@@ -55,7 +58,11 @@
   // Теги и привязка сохраняются сразу (без дебаунса).
   async function saveMeta() {
     if (!selectedId) return;
-    await noteStore.update(selectedId, { tags: editTags, linked_task_id: editLinkedTaskId });
+    await noteStore.update(selectedId, {
+      tags: editTags,
+      linked_task_id: editLinkedTaskId,
+      project_id: editProjectId,
+    });
   }
 
   function addTag() {
@@ -170,6 +177,17 @@
             {/each}
           </select>
         </label>
+        {#if projectStore.projects.length > 0}
+          <label class="meta-label">
+            Проект:
+            <select bind:value={editProjectId} onchange={saveMeta}>
+              <option value={null}>— без проекта —</option>
+              {#each projectStore.active as p (p.id)}
+                <option value={p.id}>{p.name}</option>
+              {/each}
+            </select>
+          </label>
+        {/if}
         {#if linkedTask}
           <span class="chip">🔗 {linkedTask.title}</span>
         {/if}

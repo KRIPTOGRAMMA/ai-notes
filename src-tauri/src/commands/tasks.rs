@@ -19,8 +19,8 @@ pub async fn create_task_impl(pool: &SqlitePool, task: CreateTask) -> Result<Tas
   let new_task = task.into_task();
 
   sqlx::query(
-    "INSERT INTO tasks (id, title, description, status, priority, category, deadline, tags, recurrence, hidden, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    "INSERT INTO tasks (id, title, description, status, priority, category, deadline, tags, recurrence, hidden, created_at, updated_at, project_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   )
   .bind(&new_task.id)
   .bind(&new_task.title)
@@ -34,6 +34,7 @@ pub async fn create_task_impl(pool: &SqlitePool, task: CreateTask) -> Result<Tas
   .bind(new_task.hidden)
   .bind(new_task.created_at.to_rfc3339())
   .bind(new_task.updated_at.to_rfc3339())
+  .bind(&new_task.project_id)
   .execute(pool)
   .await
   .map_err(|e| e.to_string())?;
@@ -133,6 +134,11 @@ pub async fn update_task_impl(pool: &SqlitePool, id: String, patch: UpdateTask) 
         };
     }
 
+    // Как deadline: пустая строка отвязывает от проекта
+    if let Some(pid) = patch.project_id {
+        task.project_id = if pid.is_empty() { None } else { Some(pid) };
+    }
+
     task.updated_at = Utc::now();
     // Если дедлайн реально изменился, старые флаги notified_* больше не
     // отражают актуальный дедлайн — иначе планировщик никогда не пришлёт
@@ -141,7 +147,7 @@ pub async fn update_task_impl(pool: &SqlitePool, id: String, patch: UpdateTask) 
 
     sqlx::query(
         "UPDATE tasks SET title=?, description=?, status=?, priority=?,
-         category=?, deadline=?, tags=?, recurrence=?, updated_at=?,
+         category=?, deadline=?, tags=?, recurrence=?, updated_at=?, project_id=?,
          notified_24h = CASE WHEN ? THEN 0 ELSE notified_24h END,
          notified_1h = CASE WHEN ? THEN 0 ELSE notified_1h END,
          notified_deadline = CASE WHEN ? THEN 0 ELSE notified_deadline END
@@ -156,6 +162,7 @@ pub async fn update_task_impl(pool: &SqlitePool, id: String, patch: UpdateTask) 
     .bind(serde_json::to_string(&task.tags).unwrap_or_else(|_| "[]".into()))
     .bind(task.recurrence.to_db())
     .bind(task.updated_at.to_rfc3339())
+    .bind(&task.project_id)
     .bind(deadline_changed)
     .bind(deadline_changed)
     .bind(deadline_changed)
@@ -285,6 +292,7 @@ mod tests {
             deadline: Some(Utc::now() + chrono::Duration::days(3)),
             tags: vec!["a".into(), "b".into()],
             recurrence: None,
+            project_id: None,
         }
     }
 
@@ -358,7 +366,7 @@ mod tests {
 
         let patch = UpdateTask {
             title: None, description: None, status: None, priority: None,
-            category: None, tags: None, recurrence: None,
+            category: None, tags: None, recurrence: None, project_id: None,
             deadline: Some((Utc::now() + chrono::Duration::days(10)).to_rfc3339()),
         };
         update_task_impl(&pool, t.id.clone(), patch).await.unwrap();
@@ -405,6 +413,7 @@ mod tests {
             content: "x".into(),
             tags: vec![],
             linked_task_id: Some(t.id.clone()),
+            project_id: None,
         }).await.unwrap();
 
         delete_task_impl(&pool, t.id).await.unwrap();

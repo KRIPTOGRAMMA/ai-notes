@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { listen } from "@tauri-apps/api/event";
   import { taskStore } from "../lib/stores/tasks.svelte";
+  import { projectStore } from "../lib/stores/projects.svelte";
   import { api } from "../lib/api/tauri";
   import TaskModal from "../lib/components/TaskModal.svelte";
   import type { Task, Category, CreateTaskPayload, UpdateTaskPayload } from "../lib/types";
@@ -11,6 +12,47 @@
   let showHistory = $state(false);
   let showCreateModal = $state(false);
   let editingTask: Task | null = $state(null);
+
+  // Проекты: фильтр списка ("all" | "none" | id) и модал управления
+  let projectFilter = $state<string>("all");
+  let showProjects = $state(false);
+  let newProjectName = $state("");
+
+  onMount(() => {
+    projectStore.load();
+  });
+
+  const filteredActive = $derived(
+    taskStore.activeTasks.filter(t =>
+      projectFilter === "all" ? true :
+      projectFilter === "none" ? !t.project_id :
+      t.project_id === projectFilter
+    )
+  );
+
+  // Группировка «все проекты»: секция на проект (в порядке списка проектов) + «Без проекта».
+  const grouped = $derived.by(() => {
+    if (projectFilter !== "all" || projectStore.projects.length === 0) return null;
+    const groups: { id: string; name: string; done: number; total: number; tasks: Task[] }[] = [];
+    for (const p of projectStore.projects) {
+      const tasks = filteredActive.filter(t => t.project_id === p.id);
+      if (tasks.length > 0) {
+        groups.push({ id: p.id, name: p.name, done: p.task_done, total: p.task_total, tasks });
+      }
+    }
+    const orphan = filteredActive.filter(t => !t.project_id || !projectStore.projects.some(p => p.id === t.project_id));
+    if (orphan.length > 0 && groups.length > 0) {
+      groups.push({ id: "", name: "Без проекта", done: 0, total: 0, tasks: orphan });
+    }
+    return groups.length > 0 ? groups : null;
+  });
+
+  async function addProject() {
+    const name = newProjectName.trim();
+    if (!name) return;
+    await projectStore.create(name);
+    newProjectName = "";
+  }
 
   let searchQuery = $state("");
   let searchResults = $state<Task[]>([]);
@@ -292,6 +334,50 @@
   />
 {/if}
 
+{#if showProjects}
+  <div role="dialog" aria-modal="true" class="overlay backdrop"
+    onclick={(e) => { if (e.target === e.currentTarget) showProjects = false; }}>
+    <div class="modal dialog">
+      <h2 class="dialog-title">Проекты</h2>
+
+      {#if projectStore.error}
+        <div class="alert" style="margin:0;">{projectStore.error}</div>
+      {/if}
+
+      {#each projectStore.projects as p (p.id)}
+        <div class="proj-row" class:archived={p.archived}>
+          <input
+            value={p.name}
+            onchange={(e) => projectStore.update(p.id, { name: e.currentTarget.value })}
+          />
+          <span class="muted proj-progress">{p.task_done}/{p.task_total}</span>
+          <button class="btn-sm" title={p.archived ? "Разархивировать" : "В архив"}
+            onclick={() => projectStore.update(p.id, { archived: !p.archived })}>
+            {p.archived ? "Вернуть" : "Архив"}
+          </button>
+          <button class="btn-icon btn-danger" title="Удалить проект (задачи останутся без проекта)"
+            onclick={() => projectStore.remove(p.id)}>✕</button>
+        </div>
+      {:else}
+        <p class="muted" style="margin:0;font-size:13px;">Проектов пока нет — создайте первый.</p>
+      {/each}
+
+      <div class="proj-row">
+        <input
+          bind:value={newProjectName}
+          placeholder="Название нового проекта"
+          onkeydown={(e) => { if (e.key === "Enter") addProject(); }}
+        />
+        <button class="btn-primary" onclick={addProject} disabled={!newProjectName.trim()}>Создать</button>
+      </div>
+
+      <div class="actions">
+        <button class="btn-ghost" onclick={() => showProjects = false}>Закрыть</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
 <div class="page">
   <div class="page-head">
     <h1 class="page-title">Задачи</h1>
@@ -305,6 +391,16 @@
       placeholder="Поиск задач…"
       class="head-search"
     />
+    {#if projectStore.projects.length > 0}
+      <select bind:value={projectFilter} class="project-filter" title="Фильтр по проекту">
+        <option value="all">Все проекты</option>
+        <option value="none">Без проекта</option>
+        {#each projectStore.active as p (p.id)}
+          <option value={p.id}>{p.name}</option>
+        {/each}
+      </select>
+    {/if}
+    <button onclick={() => showProjects = true}>Проекты</button>
     <button class:active-toggle={showHistory} onclick={() => showHistory = !showHistory}>История</button>
     <button class="btn-primary" onclick={() => showCreateModal = true}>+ Новая</button>
   </div>
@@ -335,9 +431,25 @@
         Нет активных задач.<br />
         <span class="muted">Создайте первую: «+ Новая» или Ctrl+Shift+N</span>
       </div>
+    {:else if filteredActive.length === 0}
+      <div class="empty card">В этом проекте нет активных задач</div>
+    {:else if grouped}
+      {#each grouped as group (group.id)}
+        <div class="section-title project-head">
+          <span>{group.name}</span>
+          {#if group.total > 0}
+            <span class="muted">{group.done}/{group.total}</span>
+          {/if}
+        </div>
+        <ul class="task-list card" style="margin-bottom:12px;">
+          {#each group.tasks as task (task.id)}
+            {@render taskRow(task)}
+          {/each}
+        </ul>
+      {/each}
     {:else}
       <ul class="task-list card">
-        {#each taskStore.activeTasks as task (task.id)}
+        {#each filteredActive as task (task.id)}
           {@render taskRow(task)}
         {/each}
       </ul>
@@ -395,6 +507,38 @@
   .active-toggle {
     background: var(--bg-hover);
     font-weight: 600;
+  }
+
+  .project-filter {
+    max-width: 160px;
+  }
+
+  .project-head {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+
+  .proj-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .proj-row input {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .proj-row.archived input {
+    opacity: 0.55;
+    text-decoration: line-through;
+  }
+
+  .proj-progress {
+    font-size: 12px;
+    flex-shrink: 0;
   }
 
   .ai-error {
