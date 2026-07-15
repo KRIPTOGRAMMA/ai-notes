@@ -62,6 +62,7 @@
   let saving = $state(false);
   let saved = $state(false);
   let error: string | null = $state(null);
+  let trackingMode: "extended" | "basic" | null = $state(null);
 
   onMount(async () => {
     try {
@@ -69,6 +70,7 @@
     } catch (e) {
       error = String(e);
     }
+    trackingMode = await api.getTrackingMode().catch(() => null);
   });
 
   async function save() {
@@ -296,6 +298,13 @@
       </label>
     </div>
     <p class="hint">Применяется после перезапуска приложения.</p>
+    {#if trackingMode}
+      <p class="hint">
+        Режим трекинга: {trackingMode === "extended"
+          ? "расширенный — системный простой/возврат от композитора (ext-idle-notify)"
+          : "базовый — только ввод в окне приложения"}
+      </p>
+    {/if}
   </section>
 
   <section class="card panel">

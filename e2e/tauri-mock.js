@@ -76,6 +76,7 @@
       persist();
     },
     is_wayland: () => false,
+    get_tracking_mode: () => "basic",
     record_input: () => {},
     open_quick_capture: ({ mode }) => {
       db.quickMode = mode;

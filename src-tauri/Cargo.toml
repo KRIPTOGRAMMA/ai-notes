@@ -37,3 +37,5 @@ tauri-plugin-dialog = "2.7.1"
 thiserror = "2.0.18"
 keyring = "4.1.2"
 tauri-plugin-single-instance = "2.4.3"
+wayland-client = "0.31.14"
+wayland-protocols = { version = "0.32.13", features = ["client", "staging"] }

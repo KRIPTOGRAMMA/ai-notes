@@ -24,6 +24,15 @@ fn is_wayland() -> bool {
     std::env::var("WAYLAND_DISPLAY").is_ok()
 }
 
+// Режим трекинга активности: extended — системный idle/resume через
+// ext-idle-notify-v1 (Wayland), basic — только ввод в окне приложения.
+pub struct ExtendedTracking(pub bool);
+
+#[tauri::command]
+fn get_tracking_mode(mode: tauri::State<'_, ExtendedTracking>) -> &'static str {
+    if mode.0 { "extended" } else { "basic" }
+}
+
 fn normalize_quick_mode(mode: &str) -> &'static str {
     if mode == "note" { "note" } else { "task" }
 }
@@ -189,6 +198,7 @@ pub fn run() {
                         open_quick_capture,
                         get_quick_mode,
                         is_wayland,
+                        get_tracking_mode,
                         commands::monitor::record_input,
                         commands::monitor::get_session_stats,
                         commands::monitor::get_activity_state,
@@ -372,6 +382,12 @@ pub fn run() {
 
             let tracker = Arc::new(monitor::activity::ActivityTracker::new());
             app.manage(tracker.clone());
+
+            // Расширенный трекинг: системный idle/resume от компоситора.
+            // Не поддерживается (X11, старый компоситор) — базовый режим.
+            let extended = is_wayland() && monitor::wayland_idle::start(tracker.clone());
+            app.manage(ExtendedTracking(extended));
+            eprintln!("[monitor] режим трекинга: {}", if extended { "расширенный (ext-idle-notify)" } else { "базовый (окно в фокусе)" });
             let settings = commands::settings::load_settings_raw(&pool)
                 .await
                 .unwrap_or_default();

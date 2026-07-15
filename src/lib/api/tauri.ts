@@ -29,6 +29,7 @@ export const api = {
   getSettings: () => invoke<AppSettings>("get_settings"),
   saveSettings: (settings: AppSettings) => invoke<void>("save_settings", { settings }),
   isWayland: () => invoke<boolean>("is_wayland"),
+  getTrackingMode: () => invoke<"extended" | "basic">("get_tracking_mode"),
   exportData: (path: string) => invoke<void>("export", { path }),
   importData: (path: string) => invoke<void>("import", { path }),
   getSubtasks: (taskId: string) => invoke<Subtask[]>("get_subtasks", { taskId }),
