@@ -139,18 +139,38 @@ pub async fn update_task_impl(pool: &SqlitePool, id: String, patch: UpdateTask) 
         task.project_id = if pid.is_empty() { None } else { Some(pid) };
     }
 
+    // Тайм-блок: пустая строка снимает блок целиком (и длительность)
+    let old_scheduled = task.scheduled_at;
+    if let Some(sa) = patch.scheduled_at {
+        if sa.is_empty() {
+            task.scheduled_at = None;
+            task.scheduled_mins = None;
+        } else {
+            task.scheduled_at = Some(DateTime::parse_from_rfc3339(&sa)
+                .map_err(|e| e.to_string())?
+                .with_timezone(&Utc));
+        }
+    }
+    if let Some(mins) = patch.scheduled_mins {
+        task.scheduled_mins = Some(mins.clamp(15, 24 * 60));
+    }
+
     task.updated_at = Utc::now();
     // Если дедлайн реально изменился, старые флаги notified_* больше не
     // отражают актуальный дедлайн — иначе планировщик никогда не пришлёт
     // уведомление по новой дате (раньше это был баг: флаги не сбрасывались).
     let deadline_changed = task.deadline != old_deadline;
+    // Перенос блока: сбросить notified_block, чтобы пуш пришёл по новому времени
+    let block_changed = task.scheduled_at != old_scheduled;
 
     sqlx::query(
         "UPDATE tasks SET title=?, description=?, status=?, priority=?,
          category=?, deadline=?, tags=?, recurrence=?, updated_at=?, project_id=?,
+         scheduled_at=?, scheduled_mins=?,
          notified_24h = CASE WHEN ? THEN 0 ELSE notified_24h END,
          notified_1h = CASE WHEN ? THEN 0 ELSE notified_1h END,
-         notified_deadline = CASE WHEN ? THEN 0 ELSE notified_deadline END
+         notified_deadline = CASE WHEN ? THEN 0 ELSE notified_deadline END,
+         notified_block = CASE WHEN ? THEN 0 ELSE notified_block END
          WHERE id=?"
     )
     .bind(&task.title)
@@ -163,9 +183,12 @@ pub async fn update_task_impl(pool: &SqlitePool, id: String, patch: UpdateTask) 
     .bind(task.recurrence.to_db())
     .bind(task.updated_at.to_rfc3339())
     .bind(&task.project_id)
+    .bind(task.scheduled_at.map(|d| d.to_rfc3339()))
+    .bind(task.scheduled_mins)
     .bind(deadline_changed)
     .bind(deadline_changed)
     .bind(deadline_changed)
+    .bind(block_changed)
     .bind(&id)
     .execute(pool)
     .await
@@ -367,6 +390,7 @@ mod tests {
         let patch = UpdateTask {
             title: None, description: None, status: None, priority: None,
             category: None, tags: None, recurrence: None, project_id: None,
+            scheduled_at: None, scheduled_mins: None,
             deadline: Some((Utc::now() + chrono::Duration::days(10)).to_rfc3339()),
         };
         update_task_impl(&pool, t.id.clone(), patch).await.unwrap();
@@ -401,6 +425,41 @@ mod tests {
         let t = create_task_impl(&pool, new_task("на удаление")).await.unwrap();
         delete_task_impl(&pool, t.id).await.unwrap();
         assert!(get_tasks_impl(&pool).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn schedule_block_set_move_and_clear() {
+        let pool = test_pool().await;
+        let t = create_task_impl(&pool, new_task("блок")).await.unwrap();
+        let start = Utc::now() + chrono::Duration::hours(2);
+
+        let patch = |sa: Option<String>, mins: Option<i64>| UpdateTask {
+            title: None, description: None, status: None, priority: None,
+            category: None, tags: None, recurrence: None, project_id: None,
+            deadline: None, scheduled_at: sa, scheduled_mins: mins,
+        };
+
+        // назначить блок
+        let up = update_task_impl(&pool, t.id.clone(), patch(Some(start.to_rfc3339()), Some(45))).await.unwrap();
+        assert_eq!(up.scheduled_mins, Some(45));
+        assert!(up.scheduled_at.is_some());
+
+        // перенос сбрасывает notified_block
+        sqlx::query("UPDATE tasks SET notified_block = 1 WHERE id = ?")
+            .bind(&t.id).execute(&pool).await.unwrap();
+        update_task_impl(&pool, t.id.clone(), patch(Some((start + chrono::Duration::hours(1)).to_rfc3339()), None)).await.unwrap();
+        let notified: bool = sqlx::query_scalar("SELECT notified_block FROM tasks WHERE id = ?")
+            .bind(&t.id).fetch_one(&pool).await.unwrap();
+        assert!(!notified);
+
+        // длительность зажимается снизу
+        let up = update_task_impl(&pool, t.id.clone(), patch(None, Some(5))).await.unwrap();
+        assert_eq!(up.scheduled_mins, Some(15));
+
+        // пустая строка снимает блок целиком
+        let up = update_task_impl(&pool, t.id.clone(), patch(Some(String::new()), None)).await.unwrap();
+        assert_eq!(up.scheduled_at, None);
+        assert_eq!(up.scheduled_mins, None);
     }
 
     #[tokio::test]

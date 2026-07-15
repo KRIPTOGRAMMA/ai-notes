@@ -99,6 +99,8 @@
         recurrence: "None",
         hidden: false,
         project_id: null,
+        scheduled_at: null,
+        scheduled_mins: null,
         subtasks: [],
         ...task,
         created_at: now(),
@@ -112,7 +114,13 @@
       const t = findTask(id);
       if (!t) throw `Задача не найдена: ${id}`;
       for (const [k, v] of Object.entries(patch)) {
-        if (v !== undefined) t[k] = v;
+        if (v === undefined) continue;
+        // конвенции бэкенда: пустая строка = снять значение
+        if (k === "project_id") t.project_id = v === "" ? null : v;
+        else if (k === "scheduled_at") {
+          if (v === "") { t.scheduled_at = null; t.scheduled_mins = null; }
+          else t.scheduled_at = v;
+        } else t[k] = v;
       }
       t.updated_at = now();
       persist();

@@ -54,6 +54,21 @@
     newProjectName = "";
   }
 
+  // Расписание дня: сегодняшние тайм-блоки (назначаются в Календарь → Неделя)
+  const todayBlocks = $derived.by(() => {
+    const today = new Date().toDateString();
+    return taskStore.activeTasks
+      .filter(t => t.scheduled_at && new Date(t.scheduled_at).toDateString() === today)
+      .sort((a, b) => a.scheduled_at!.localeCompare(b.scheduled_at!));
+  });
+
+  function blockTime(t: Task): string {
+    const start = new Date(t.scheduled_at!);
+    const end = new Date(start.getTime() + (t.scheduled_mins ?? 60) * 60_000);
+    const fmt = (d: Date) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    return `${fmt(start)}–${fmt(end)}`;
+  }
+
   let searchQuery = $state("");
   let searchResults = $state<Task[]>([]);
   let isSearching = $state(false);
@@ -412,6 +427,17 @@
     </div>
   {/if}
 
+  {#if todayBlocks.length > 0 && !searchQuery.trim()}
+    <div class="day-plan card">
+      <span class="day-plan-label">Сегодня:</span>
+      {#each todayBlocks as t (t.id)}
+        <button class="chip day-plan-chip" onclick={() => editingTask = t} title={t.title}>
+          <span class="day-plan-time">{blockTime(t)}</span> {t.title}
+        </button>
+      {/each}
+    </div>
+  {/if}
+
   {#if searchQuery.trim()}
     <div class="section-title">Результаты поиска</div>
     {#if isSearching}
@@ -539,6 +565,33 @@
   .proj-progress {
     font-size: 12px;
     flex-shrink: 0;
+  }
+
+  .day-plan {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    padding: 8px 12px;
+    margin-bottom: 12px;
+  }
+
+  .day-plan-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-weight: 600;
+  }
+
+  .day-plan-chip {
+    max-width: 260px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .day-plan-time {
+    color: var(--accent);
+    font-weight: 600;
   }
 
   .ai-error {

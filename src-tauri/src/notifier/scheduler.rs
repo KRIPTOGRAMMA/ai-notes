@@ -12,6 +12,7 @@ pub fn start_scheduler(app: tauri::AppHandle, pool: SqlitePool, work_mode: Arc<M
             let mode = work_mode.lock().unwrap().clone();
             let muted = crate::notifier::mute::muted_now(&pool, &mode).await;
             check_deadlines(&app, &pool, muted).await;
+            check_blocks(&app, &pool, muted).await;
             tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
         }
     });
@@ -76,10 +77,140 @@ async fn check_deadlines(app: &tauri::AppHandle, pool: &SqlitePool, muted: bool)
     }
 }
 
+#[derive(Debug, PartialEq)]
+pub struct BlockDue {
+    pub id: String,
+    pub title: String,
+    pub end_local: String, // "HH:MM" конца блока в локальном времени — для текста пуша
+}
+
+// Блоки, начавшиеся в окне (now - grace, now], о которых ещё не уведомляли.
+// Grace-окно: после долгого сна/перезапуска не спамим давно начавшимися блоками —
+// они просто помечаются при следующей проверке.
+pub async fn blocks_due(pool: &SqlitePool, now: chrono::DateTime<Utc>, grace_mins: i64) -> Vec<BlockDue> {
+    let rows = match sqlx::query(
+        "SELECT id, title, scheduled_at, COALESCE(scheduled_mins, 60) as mins
+         FROM tasks
+         WHERE hidden = 0 AND notified_block = 0 AND scheduled_at IS NOT NULL",
+    )
+    .fetch_all(pool)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(_) => return vec![],
+    };
+
+    let mut due = vec![];
+    for row in rows {
+        let scheduled_str: String = row.get("scheduled_at");
+        let Ok(start) = chrono::DateTime::parse_from_rfc3339(&scheduled_str) else { continue; };
+        let start = start.with_timezone(&Utc);
+        if start <= now && start > now - chrono::Duration::minutes(grace_mins) {
+            let mins: i64 = row.get("mins");
+            let end = (start + chrono::Duration::minutes(mins)).with_timezone(&chrono::Local);
+            due.push(BlockDue {
+                id: row.get("id"),
+                title: row.get("title"),
+                end_local: end.format("%H:%M").to_string(),
+            });
+        }
+    }
+    due
+}
+
+pub async fn mark_block_notified(pool: &SqlitePool, id: &str) {
+    let _ = sqlx::query("UPDATE tasks SET notified_block = 1 WHERE id = ?")
+        .bind(id).execute(pool).await;
+}
+
+// Просроченные (старше grace-окна) блоки без уведомления тоже помечаем,
+// чтобы они не оставались вечными кандидатами.
+async fn sweep_stale_blocks(pool: &SqlitePool, now: chrono::DateTime<Utc>, grace_mins: i64) {
+    let cutoff = (now - chrono::Duration::minutes(grace_mins)).to_rfc3339();
+    let _ = sqlx::query(
+        "UPDATE tasks SET notified_block = 1
+         WHERE notified_block = 0 AND scheduled_at IS NOT NULL AND scheduled_at <= ?",
+    )
+    .bind(&cutoff)
+    .execute(pool)
+    .await;
+}
+
+const BLOCK_GRACE_MINS: i64 = 10;
+
+async fn check_blocks(app: &tauri::AppHandle, pool: &SqlitePool, muted: bool) {
+    let now = Utc::now();
+    for block in blocks_due(pool, now, BLOCK_GRACE_MINS).await {
+        if !muted {
+            send_notification(app, &block.title, &format!("Начался блок (до {})", block.end_local));
+        }
+        mark_block_notified(pool, &block.id).await;
+    }
+    sweep_stale_blocks(pool, now, BLOCK_GRACE_MINS).await;
+}
+
 pub fn send_notification(app: &tauri::AppHandle, title: &str, body: &str) {
     let _ = app.notification()
         .builder()
         .title(title)
         .body(body)
         .show();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn test_pool() -> SqlitePool {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./src/db/migrations").run(&pool).await.unwrap();
+        pool
+    }
+
+    async fn insert_block(pool: &SqlitePool, title: &str, scheduled_at: &str, notified: bool) -> String {
+        let id = uuid::Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO tasks (id, title, status, priority, category, recurrence, tags, hidden,
+             created_at, updated_at, scheduled_at, scheduled_mins, notified_block)
+             VALUES (?, ?, 'Todo', 'Medium', 'Work', 'None', '[]', 0, ?, ?, ?, 30, ?)")
+            .bind(&id).bind(title)
+            .bind(scheduled_at).bind(scheduled_at)
+            .bind(scheduled_at).bind(notified)
+            .execute(pool).await.unwrap();
+        id
+    }
+
+    #[tokio::test]
+    async fn blocks_due_respects_window_and_flag() {
+        let pool = test_pool().await;
+        let now = Utc::now();
+        let ts = |mins_ago: i64| (now - chrono::Duration::minutes(mins_ago)).to_rfc3339();
+
+        insert_block(&pool, "начался", &ts(2), false).await;
+        insert_block(&pool, "уже уведомлён", &ts(2), true).await;
+        insert_block(&pool, "слишком давно", &ts(30), false).await;
+        insert_block(&pool, "ещё не начался", &ts(-30), false).await;
+
+        let due = blocks_due(&pool, now, 10).await;
+        assert_eq!(due.len(), 1);
+        assert_eq!(due[0].title, "начался");
+    }
+
+    #[tokio::test]
+    async fn mark_and_sweep_stop_repeat_notifications() {
+        let pool = test_pool().await;
+        let now = Utc::now();
+        let fresh = insert_block(&pool, "свежий", &(now - chrono::Duration::minutes(1)).to_rfc3339(), false).await;
+        insert_block(&pool, "протухший", &(now - chrono::Duration::minutes(120)).to_rfc3339(), false).await;
+
+        mark_block_notified(&pool, &fresh).await;
+        sweep_stale_blocks(&pool, now, 10).await;
+
+        // после пометки и свипа кандидатов не осталось
+        assert!(blocks_due(&pool, now, 10).await.is_empty());
+        let unnotified: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM tasks WHERE notified_block = 0")
+            .fetch_one(&pool).await.unwrap();
+        assert_eq!(unnotified, 0);
+    }
 }

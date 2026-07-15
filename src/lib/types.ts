@@ -37,6 +37,8 @@ export interface Task {
   recurrence: Recurrence;
   hidden: boolean;
   project_id: string | null;
+  scheduled_at: string | null; // тайм-блок: начало (RFC3339)
+  scheduled_mins: number | null; // тайм-блок: длительность
   subtasks: Subtask[];
 }
 
@@ -73,6 +75,8 @@ export interface UpdateTaskPayload {
   tags?: string[];
   recurrence?: Recurrence;
   project_id?: string; // пустая строка = отвязать от проекта
+  scheduled_at?: string; // пустая строка = снять тайм-блок
+  scheduled_mins?: number;
 }
 
 export interface Note {

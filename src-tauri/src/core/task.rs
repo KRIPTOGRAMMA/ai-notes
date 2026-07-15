@@ -48,6 +48,11 @@ pub struct Task {
   pub hidden: bool,
   #[serde(default)]
   pub project_id: Option<String>,
+  // Тайм-блок: запланированное время работы (не дедлайн)
+  #[serde(default)]
+  pub scheduled_at: Option<DateTime<Utc>>,
+  #[serde(default)]
+  pub scheduled_mins: Option<i64>,
   #[serde(default)]
   pub subtasks: Vec<Subtask>,
 }
@@ -77,6 +82,8 @@ pub struct TaskRow {
     pub recurrence: String,
     pub hidden: bool,
     pub project_id: Option<String>,
+    pub scheduled_at: Option<String>,
+    pub scheduled_mins: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -105,6 +112,9 @@ pub struct UpdateTask {
     pub recurrence: Option<Recurrence>,
     // Как deadline: пустая строка = отвязать от проекта, отсутствие = не менять
     pub project_id: Option<String>,
+    // Тайм-блок: пустая строка scheduled_at снимает блок (и длительность)
+    pub scheduled_at: Option<String>,
+    pub scheduled_mins: Option<i64>,
 }
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub enum RecurrenceUnit {
@@ -201,6 +211,8 @@ impl CreateTask {
             recurrence: self.recurrence.unwrap_or(Recurrence::None),
             hidden: false,
             project_id: self.project_id.filter(|p| !p.is_empty()),
+            scheduled_at: None,
+            scheduled_mins: None,
             subtasks: Vec::new(),
         }
     }
@@ -243,6 +255,10 @@ impl TaskRow {
             recurrence: Recurrence::from_db(&self.recurrence),
             hidden: self.hidden,
             project_id: self.project_id,
+            scheduled_at: self.scheduled_at
+                .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
+                .map(|d| d.with_timezone(&Utc)),
+            scheduled_mins: self.scheduled_mins,
             subtasks: Vec::new(),
         }
     }
@@ -267,6 +283,8 @@ mod tests {
             recurrence: "None".into(),
             hidden: false,
             project_id: None,
+            scheduled_at: None,
+            scheduled_mins: None,
         };
         overrides(&mut r);
         r
