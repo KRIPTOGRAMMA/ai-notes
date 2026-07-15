@@ -259,6 +259,24 @@
     dashboard_insight: () => {},
     summarize_day: () => {},
     summarize_week: () => {},
+    // Планировщик: детерминированный «ИИ» — первый бэклог-таск в 10:00 на 60 мин
+    ai_plan_day: () => {
+      const t = db.tasks.find(
+        (t) => !t.hidden && !t.scheduled_at && (t.status === "Todo" || t.status === "InProgress"),
+      );
+      const at = new Date();
+      at.setHours(10, 0, 0, 0);
+      setTimeout(() => window.__mockEmit("ai-plan", {
+        blocks: t ? [{ id: t.id, title: t.title, scheduled_at: at.toISOString(), mins: 60 }] : [],
+        error: t ? null : "Бэклог пуст — нечего планировать",
+      }), 0);
+    },
+    ai_what_now: () => {
+      setTimeout(() => window.__mockEmit("ai-what-now", {
+        result: "Совет мока: начните с самой приоритетной задачи.",
+        error: null,
+      }), 0);
+    },
     ai_rewrite: () => {},
     ai_subtasks: () => {},
     ai_classify: () => {},

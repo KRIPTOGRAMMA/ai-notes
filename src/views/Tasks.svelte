@@ -20,7 +20,11 @@
 
   onMount(() => {
     projectStore.load();
+    // Капабилити-детект: при выключенном ИИ кнопка «Что сейчас?» просто скрыта
+    api.getSettings().then(s => aiEnabled = s.ai_provider !== "none").catch(() => {});
   });
+
+  let aiEnabled = $state(false);
 
   const filteredActive = $derived(
     taskStore.activeTasks.filter(t =>
@@ -241,10 +245,33 @@
       }
     });
 
+    const unlistenWhatNow = listen<{ result: string | null; error: string | null }>("ai-what-now", ({ payload }) => {
+      whatNowPending = false;
+      whatNow = payload.result;
+      if (payload.error) aiError = payload.error;
+    });
+
     return () => {
       unlistenAi.then(fn => fn());
+      unlistenWhatNow.then(fn => fn());
     };
   });
+
+  // «Что делать сейчас»: совет ИИ по текущему контексту (блоки, дедлайны, приоритеты)
+  let whatNow: string | null = $state(null);
+  let whatNowPending = $state(false);
+
+  async function askWhatNow() {
+    whatNowPending = true;
+    whatNow = null;
+    aiError = null;
+    try {
+      await api.aiWhatNow();
+    } catch (e) {
+      whatNowPending = false;
+      aiError = String(e);
+    }
+  }
 </script>
 
 {#snippet taskRow(task: Task)}
@@ -454,6 +481,12 @@
         {/each}
       </select>
     {/if}
+    {#if aiEnabled}
+      <button onclick={askWhatNow} disabled={whatNowPending}
+        title="ИИ посоветует, чем заняться сейчас — по блокам, дедлайнам и приоритетам">
+        {whatNowPending ? "Думаю…" : "🎯 Что сейчас?"}
+      </button>
+    {/if}
     <button onclick={() => { showProjects = true; projectStore.load(); }}>Проекты</button>
     <button class:active-toggle={showHistory} onclick={() => showHistory = !showHistory}>История</button>
     <button class="btn-primary" onclick={() => showCreateModal = true}>+ Новая</button>
@@ -463,6 +496,14 @@
     <div class="ai-error">
       <span>{aiError}</span>
       <button class="btn-icon" style="color:white;" onclick={() => aiError = null}>✕</button>
+    </div>
+  {/if}
+
+  {#if whatNow}
+    <div class="what-now card">
+      <span class="what-now-icon">🎯</span>
+      <span class="what-now-text">{whatNow}</span>
+      <button class="btn-icon" onclick={() => whatNow = null}>✕</button>
     </div>
   {/if}
 
@@ -658,6 +699,18 @@
     padding: 8px 12px;
     margin-bottom: 12px;
   }
+
+  .what-now {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 10px 12px;
+    margin-bottom: 12px;
+    border-left: 3px solid var(--accent);
+    font-size: 13px;
+  }
+
+  .what-now-text { flex: 1; }
 
   .day-plan-label {
     font-size: 12px;

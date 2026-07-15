@@ -19,7 +19,7 @@ const SYSTEM_INSIGHT: &str =
     "Ты ассистент по продуктивности. Дай 1–3 коротких предложения про продуктивность пользователя, по-русски. Только текст, без пояснений и списков.";
 
 const SYSTEM_SUMMARY: &str =
-    "Ты ассистент по продуктивности. Составь краткое резюме периода (3–5 предложений): что сделано, сколько активного времени, что требует внимания. По-русски, только текст.";
+    "Ты ассистент по продуктивности. Составь краткое резюме периода (3–5 предложений): что сделано, сколько активного времени, прогресс целей (если есть), что требует внимания. По-русски, только текст.";
 
 #[derive(Clone, Serialize)]
 pub struct AiResult {
@@ -112,7 +112,7 @@ async fn ask_provider(
     }
 }
 
-async fn ask_ai(app: &tauri::AppHandle, system: &str, user: &str) -> Result<String, String> {
+pub async fn ask_ai(app: &tauri::AppHandle, system: &str, user: &str) -> Result<String, String> {
     let settings = crate::commands::settings::load_settings_raw(app.state::<SqlitePool>().inner())
         .await
         .map_err(|e| e.to_string())?;
@@ -275,14 +275,42 @@ async fn period_summary(pool: &SqlitePool, days: i64, label: &str) -> Result<Str
 
     let overdue = crate::notifier::triggers::overdue_count(pool, &chrono::Utc::now().to_rfc3339()).await;
 
-    Ok(format!(
+    let mut summary = format!(
         "Период: {}. Выполнено задач: {}{}. Активное время: {} мин. Просрочено сейчас: {}.",
         label,
         done.len(),
         if done.is_empty() { String::new() } else { format!(" ({})", done.join(", ")) },
         active_mins,
         overdue
-    ))
+    );
+
+    // Недельное ревью (v0.5.6): цели проектов и топ приложений — данные фаз 1–2
+    if days >= 7 {
+        let projects = crate::commands::projects::get_projects_impl(pool).await.unwrap_or_default();
+        let goals: Vec<String> = projects
+            .iter()
+            .filter(|p| !p.archived && (p.goal_tasks.is_some() || p.goal_mins.is_some()))
+            .map(|p| {
+                let mut parts = vec![];
+                if let Some(n) = p.goal_tasks { parts.push(format!("{}/{} задач", p.goal_done_tasks, n)); }
+                if let Some(n) = p.goal_mins { parts.push(format!("{}/{} мин", p.goal_done_mins, n)); }
+                format!("{}: {}", p.name, parts.join(", "))
+            })
+            .collect();
+        if !goals.is_empty() {
+            summary.push_str(&format!(" Цели проектов: {}.", goals.join("; ")));
+        }
+
+        let apps = crate::commands::monitor::get_app_usage_impl(pool, 7).await.unwrap_or_default();
+        let top: Vec<String> = apps.iter().take(3)
+            .map(|a| format!("{} ({} мин)", a.app, a.minutes))
+            .collect();
+        if !top.is_empty() {
+            summary.push_str(&format!(" Топ приложений: {}.", top.join(", ")));
+        }
+    }
+
+    Ok(summary)
 }
 
 fn spawn_summary(app: tauri::AppHandle, days: i64, label: &'static str, kind: &'static str) {

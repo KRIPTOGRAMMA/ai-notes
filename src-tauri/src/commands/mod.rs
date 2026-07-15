@@ -7,3 +7,4 @@ pub mod backup;
 pub mod model;
 pub mod subtasks;
 pub mod projects;
+pub mod planner;

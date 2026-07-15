@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { taskStore } from "../lib/stores/tasks.svelte";
+  import { api } from "../lib/api/tauri";
   import TaskModal from "../lib/components/TaskModal.svelte";
   import type { Task, CreateTaskPayload } from "../lib/types";
 
@@ -11,9 +13,70 @@
   let month = $state(today.getMonth()); // 0-11
   let viewMode = $state<"month" | "week">("month");
 
+  // ИИ-планировщик: предложенные блоки (призраки в сетке) до «Применить»
+  interface PlannedBlock { id: string; title: string; scheduled_at: string; mins: number }
+  let planning = $state(false);
+  let proposed: PlannedBlock[] | null = $state(null);
+  let planError: string | null = $state(null);
+
+  let aiEnabled = $state(false);
+
   onMount(() => {
     taskStore.load();
+    // Капабилити-детект: при выключенном ИИ планировщик просто скрыт
+    api.getSettings().then(s => aiEnabled = s.ai_provider !== "none").catch(() => {});
+    const unlisteners: UnlistenFn[] = [];
+    (async () => {
+      unlisteners.push(await listen<{ blocks: PlannedBlock[]; error: string | null }>("ai-plan", (e) => {
+        planning = false;
+        planError = e.payload.error;
+        proposed = e.payload.error ? null : e.payload.blocks;
+      }));
+    })();
+    return () => unlisteners.forEach(u => u());
   });
+
+  async function planDay() {
+    planning = true;
+    planError = null;
+    proposed = null;
+    try {
+      await api.aiPlanDay();
+    } catch (e) {
+      planning = false;
+      planError = String(e);
+    }
+  }
+
+  async function applyPlan() {
+    if (!proposed) return;
+    for (const b of proposed) {
+      await taskStore.update(b.id, { scheduled_at: b.scheduled_at, scheduled_mins: b.mins });
+    }
+    proposed = null;
+  }
+
+  // Призраки по дням (план всегда на сегодня, но раскладываем универсально)
+  const proposedByDay = $derived.by(() => {
+    const map = new Map<string, PlannedBlock[]>();
+    for (const b of proposed ?? []) {
+      const key = localDateKey(new Date(b.scheduled_at));
+      map.set(key, [...(map.get(key) ?? []), b]);
+    }
+    return map;
+  });
+
+  function ghostTop(b: PlannedBlock): number {
+    const d = new Date(b.scheduled_at);
+    return ((d.getHours() * 60 + d.getMinutes()) / 60) * HOUR_H;
+  }
+
+  function ghostLabel(b: PlannedBlock): string {
+    const start = new Date(b.scheduled_at);
+    const end = new Date(start.getTime() + b.mins * 60_000);
+    const fmt = (d: Date) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    return `${fmt(start)}–${fmt(end)}`;
+  }
 
   const MONTHS = [
     "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
@@ -296,6 +359,20 @@
                   <div class="resize-handle" role="presentation" onmousedown={(e) => startResize(e, t)}></div>
                 </div>
               {/each}
+
+              {#each proposedByDay.get(d.key) ?? [] as b (b.id)}
+                <div
+                  class="block ghost"
+                  role="listitem"
+                  style="top:{ghostTop(b)}px; height:{Math.max((b.mins / 60) * HOUR_H, 18)}px;"
+                  title="Предложение ИИ: {ghostLabel(b)} · {b.title}"
+                >
+                  <div class="block-body">
+                    <span class="block-time">{ghostLabel(b)}</span>
+                    <span class="block-title">{b.title}</span>
+                  </div>
+                </div>
+              {/each}
             </div>
           {/each}
         </div>
@@ -304,6 +381,30 @@
 
     <aside class="backlog card">
       <div class="section-title" style="margin-bottom:8px;">Бэклог</div>
+
+      {#if aiEnabled}
+        {#if proposed}
+          <div class="plan-bar">
+            <span class="plan-hint">ИИ предложил {proposed.length} блок(а) — пунктиром в сетке</span>
+            <div class="plan-actions">
+              <button class="btn-primary btn-sm" onclick={applyPlan}>Применить</button>
+              <button class="btn-ghost btn-sm" onclick={() => proposed = null}>Отмена</button>
+            </div>
+          </div>
+        {:else}
+          <button class="btn-sm plan-btn" onclick={planDay} disabled={planning || backlog.length === 0}
+            title="ИИ разложит важные задачи из бэклога по свободному времени сегодня">
+            {planning ? "Планирую…" : "⚡ Спланировать день"}
+          </button>
+        {/if}
+        {#if planError}
+          <div class="plan-error">
+            {planError}
+            <button class="btn-icon" onclick={() => planError = null}>✕</button>
+          </div>
+        {/if}
+      {/if}
+
       {#if backlog.length === 0}
         <p class="muted" style="font-size:12px;margin:0;">Все активные задачи уже в расписании</p>
       {:else}
@@ -580,6 +681,54 @@
   .block:hover {
     background: color-mix(in srgb, var(--accent) 26%, var(--bg-primary));
     z-index: 2;
+  }
+
+  /* Предложение ИИ: полупрозрачный пунктирный «призрак» до подтверждения */
+  .block.ghost {
+    background: color-mix(in srgb, var(--accent) 7%, var(--bg-primary));
+    border: 1.5px dashed var(--accent);
+    border-left-width: 3px;
+    cursor: default;
+    opacity: 0.85;
+  }
+
+  .block.ghost .block-body {
+    padding-right: 5px;
+    cursor: default;
+  }
+
+  .plan-btn {
+    width: 100%;
+    margin-bottom: 10px;
+  }
+
+  .plan-bar {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px;
+    margin-bottom: 10px;
+    border: 1.5px dashed var(--accent);
+    border-radius: 6px;
+  }
+
+  .plan-hint {
+    font-size: 11px;
+    color: var(--text-secondary);
+  }
+
+  .plan-actions {
+    display: flex;
+    gap: 6px;
+  }
+
+  .plan-error {
+    display: flex;
+    align-items: flex-start;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--danger);
+    margin-bottom: 10px;
   }
 
   .block-body {

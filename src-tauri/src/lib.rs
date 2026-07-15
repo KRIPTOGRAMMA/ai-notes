@@ -227,6 +227,8 @@ pub fn run() {
                         commands::ai::dashboard_insight,
                         commands::ai::summarize_day,
                         commands::ai::summarize_week,
+                        commands::planner::ai_plan_day,
+                        commands::planner::ai_what_now,
                         commands::notes::get_notes,
                         commands::notes::create_note,
                         commands::notes::update_note,
