@@ -5,7 +5,7 @@
   import { projectStore } from "../lib/stores/projects.svelte";
   import { api } from "../lib/api/tauri";
   import TaskModal from "../lib/components/TaskModal.svelte";
-  import type { Task, Category, CreateTaskPayload, UpdateTaskPayload } from "../lib/types";
+  import type { Task, Category, CreateTaskPayload, UpdateTaskPayload, Project } from "../lib/types";
 
   type AiResult = { task_id: string; type: string; result?: string; error?: string };
 
@@ -33,19 +33,33 @@
   // Группировка «все проекты»: секция на проект (в порядке списка проектов) + «Без проекта».
   const grouped = $derived.by(() => {
     if (projectFilter !== "all" || projectStore.projects.length === 0) return null;
-    const groups: { id: string; name: string; done: number; total: number; tasks: Task[] }[] = [];
+    const groups: { id: string; name: string; done: number; total: number; tasks: Task[]; project: Project | null }[] = [];
     for (const p of projectStore.projects) {
       const tasks = filteredActive.filter(t => t.project_id === p.id);
       if (tasks.length > 0) {
-        groups.push({ id: p.id, name: p.name, done: p.task_done, total: p.task_total, tasks });
+        groups.push({ id: p.id, name: p.name, done: p.task_done, total: p.task_total, tasks, project: p });
       }
     }
     const orphan = filteredActive.filter(t => !t.project_id || !projectStore.projects.some(p => p.id === t.project_id));
     if (orphan.length > 0 && groups.length > 0) {
-      groups.push({ id: "", name: "Без проекта", done: 0, total: 0, tasks: orphan });
+      groups.push({ id: "", name: "Без проекта", done: 0, total: 0, tasks: orphan, project: null });
     }
     return groups.length > 0 ? groups : null;
   });
+
+  // Цель проекта: текст прогресса «done/target задач · done/target мин» и её статус
+  function goalText(p: Project): string | null {
+    if (p.goal_tasks == null && p.goal_mins == null) return null;
+    const parts: string[] = [];
+    if (p.goal_tasks != null) parts.push(`${p.goal_done_tasks}/${p.goal_tasks} задач`);
+    if (p.goal_mins != null) parts.push(`${p.goal_done_mins}/${p.goal_mins} мин`);
+    return parts.join(" · ");
+  }
+
+  function goalMet(p: Project): boolean {
+    return (p.goal_tasks == null || p.goal_done_tasks >= p.goal_tasks)
+        && (p.goal_mins == null || p.goal_done_mins >= p.goal_mins);
+  }
 
   async function addProject() {
     const name = newProjectName.trim();
@@ -238,7 +252,7 @@
   <li class="task-row" style="--prio: var(--prio-{task.priority.toLowerCase()});">
     <button
       class="task-check"
-      onclick={() => taskStore.complete(task.id)}
+      onclick={async () => { await taskStore.complete(task.id); projectStore.load(); }}
       title="Выполнить"
       aria-label="Выполнить задачу"
     ></button>
@@ -373,6 +387,31 @@
           <button class="btn-icon btn-danger" title="Удалить проект (задачи останутся без проекта)"
             onclick={() => projectStore.remove(p.id)}>✕</button>
         </div>
+        {#if !p.archived}
+          <div class="proj-goal">
+            <span class="muted">Цель:</span>
+            <input class="goal-num" type="number" min="0" placeholder="—"
+              value={p.goal_tasks ?? ""}
+              onchange={(e) => projectStore.update(p.id, { goal_tasks: Number(e.currentTarget.value) || 0 })}
+            />
+            <span class="muted">задач ·</span>
+            <input class="goal-num" type="number" min="0" step="15" placeholder="—"
+              value={p.goal_mins ?? ""}
+              onchange={(e) => projectStore.update(p.id, { goal_mins: Number(e.currentTarget.value) || 0 })}
+            />
+            <span class="muted">мин в</span>
+            <select
+              value={p.goal_period}
+              onchange={(e) => projectStore.update(p.id, { goal_period: e.currentTarget.value as "week" | "month" })}
+            >
+              <option value="week">неделю</option>
+              <option value="month">месяц</option>
+            </select>
+            {#if goalText(p)}
+              <span class="goal-chip" class:met={goalMet(p)}>{goalText(p)}</span>
+            {/if}
+          </div>
+        {/if}
       {:else}
         <p class="muted" style="margin:0;font-size:13px;">Проектов пока нет — создайте первый.</p>
       {/each}
@@ -415,7 +454,7 @@
         {/each}
       </select>
     {/if}
-    <button onclick={() => showProjects = true}>Проекты</button>
+    <button onclick={() => { showProjects = true; projectStore.load(); }}>Проекты</button>
     <button class:active-toggle={showHistory} onclick={() => showHistory = !showHistory}>История</button>
     <button class="btn-primary" onclick={() => showCreateModal = true}>+ Новая</button>
   </div>
@@ -465,6 +504,15 @@
           <span>{group.name}</span>
           {#if group.total > 0}
             <span class="muted">{group.done}/{group.total}</span>
+          {/if}
+          {#if group.project}
+            {@const goal = goalText(group.project)}
+            {#if goal}
+              <span class="goal-chip" class:met={goalMet(group.project)}
+                title={group.project.goal_period === "month" ? "Цель месяца" : "Цель недели"}>
+                {goal}
+              </span>
+            {/if}
           {/if}
         </div>
         <ul class="task-list card" style="margin-bottom:12px;">
@@ -565,6 +613,41 @@
   .proj-progress {
     font-size: 12px;
     flex-shrink: 0;
+  }
+
+  .proj-goal {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    margin: -4px 0 10px 8px;
+    flex-wrap: wrap;
+  }
+
+  .proj-goal .goal-num {
+    width: 58px;
+    padding: 3px 6px;
+    font-size: 12px;
+  }
+
+  .proj-goal select {
+    padding: 3px 6px;
+    font-size: 12px;
+  }
+
+  .goal-chip {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: var(--bg-hover);
+    color: var(--text-secondary);
+    white-space: nowrap;
+  }
+
+  .goal-chip.met {
+    background: color-mix(in srgb, var(--success) 15%, transparent);
+    color: var(--success);
+    font-weight: 600;
   }
 
   .day-plan {

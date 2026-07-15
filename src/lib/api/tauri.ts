@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Task, Subtask, CreateTaskPayload, UpdateTaskPayload, Note, CreateNotePayload, UpdateNotePayload, AppSettings, Project } from "../types";
+import type { Task, Subtask, CreateTaskPayload, UpdateTaskPayload, Note, CreateNotePayload, UpdateNotePayload, AppSettings, Project, UpdateProjectPayload } from "../types";
 
 export const api = {
   getTasks: () => invoke<Task[]>("get_tasks"),
@@ -11,7 +11,7 @@ export const api = {
   getProjects: () => invoke<Project[]>("get_projects"),
   createProject: (project: { name: string; color?: string; target_date?: string | null }) =>
     invoke<Project>("create_project", { project }),
-  updateProject: (id: string, patch: { name?: string; color?: string; target_date?: string; archived?: boolean }) =>
+  updateProject: (id: string, patch: UpdateProjectPayload) =>
     invoke<void>("update_project", { id, patch }),
   deleteProject: (id: string) => invoke<void>("delete_project", { id }),
   recordInput: () => invoke<void>("record_input"),

@@ -51,6 +51,21 @@ export interface Project {
   created_at: string;
   task_total: number;
   task_done: number;
+  goal_tasks: number | null; // цель: задач за период
+  goal_mins: number | null; // цель: минут тайм-блоков за период
+  goal_period: "week" | "month";
+  goal_done_tasks: number; // прогресс за текущий период
+  goal_done_mins: number;
+}
+
+export interface UpdateProjectPayload {
+  name?: string;
+  color?: string;
+  target_date?: string; // пустая строка = убрать дату
+  archived?: boolean;
+  goal_tasks?: number; // 0 = снять цель
+  goal_mins?: number; // 0 = снять цель
+  goal_period?: "week" | "month";
 }
 
 export interface CreateTaskPayload {

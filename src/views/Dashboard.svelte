@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { api } from "../lib/api/tauri";
+  import { projectStore } from "../lib/stores/projects.svelte";
   import type { AppSettings } from "../lib/types";
 
   interface ActivityDay {
@@ -127,6 +128,8 @@
         ratio = await api.getActiveIdleRatio();
         settings = await api.getSettings();
         await loadAppUsage(1);
+        await projectStore.load(); // свежий прогресс целей за период
+
       } catch (e) {
         error = String(e);
       }
@@ -173,6 +176,14 @@
   function maxMinutes(days: ActivityDay[]) {
     return Math.max(...days.map(d => d.minutes), 1);
   }
+
+  // Цели проектов: активные проекты с заданной целью (задачи и/или минуты)
+  const goalProjects = $derived(
+    projectStore.active.filter(p => p.goal_tasks != null || p.goal_mins != null)
+  );
+
+  const goalPct = (done: number, target: number) =>
+    Math.min(100, Math.round((done / Math.max(target, 1)) * 100));
 </script>
 
 <div class="dash">
@@ -308,6 +319,46 @@
         </div>
       {/if}
     </section>
+
+    <!-- Цели проектов (только если у кого-то задана цель) -->
+    {#if goalProjects.length > 0}
+      <section class="card panel">
+        <h3 class="section-title">Цели проектов</h3>
+        <ul class="goals">
+          {#each goalProjects as p (p.id)}
+            <li class="goal-item">
+              <div class="goal-head">
+                <span class="goal-name">{p.name}</span>
+                <span class="muted">{p.goal_period === "month" ? "месяц" : "неделя"}</span>
+              </div>
+              {#if p.goal_tasks != null}
+                <div class="goal-row">
+                  <span class="goal-metric">задачи</span>
+                  <div class="track">
+                    <div class="fill" class:done={p.goal_done_tasks >= p.goal_tasks}
+                      style="width:{goalPct(p.goal_done_tasks, p.goal_tasks)}%;"></div>
+                  </div>
+                  <span class="goal-val muted">{p.goal_done_tasks}/{p.goal_tasks}</span>
+                </div>
+              {/if}
+              {#if p.goal_mins != null}
+                <div class="goal-row">
+                  <span class="goal-metric">минуты</span>
+                  <div class="track">
+                    <div class="fill" class:done={p.goal_done_mins >= p.goal_mins}
+                      style="width:{goalPct(p.goal_done_mins, p.goal_mins)}%;"></div>
+                  </div>
+                  <span class="goal-val muted">{p.goal_done_mins}/{p.goal_mins}</span>
+                </div>
+              {/if}
+            </li>
+          {/each}
+        </ul>
+        <p class="muted" style="font-size:11px;margin:8px 0 0 0;">
+          Минуты — по прошедшим тайм-блокам задач проекта за период.
+        </p>
+      </section>
+    {/if}
 
     <!-- Приложения (только если провайдер окон что-то записал) -->
     {#if appUsage.length > 0}
@@ -484,6 +535,50 @@
     height: 100%;
     background: var(--accent);
     border-radius: 3px;
+  }
+
+  .fill.done { background: var(--success); }
+
+  .goals {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .goal-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: 13px;
+    margin-bottom: 4px;
+  }
+
+  .goal-name { font-weight: 600; }
+
+  .goal-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 3px;
+  }
+
+  .goal-metric {
+    font-size: 11px;
+    color: var(--text-secondary);
+    width: 48px;
+    flex-shrink: 0;
+  }
+
+  .goal-row .track { flex: 1; }
+
+  .goal-val {
+    font-size: 11px;
+    min-width: 52px;
+    text-align: right;
+    flex-shrink: 0;
   }
 
   .ai-row {

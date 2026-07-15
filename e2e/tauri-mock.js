@@ -47,6 +47,11 @@
   }
   if (!db) db = { tasks: [], notes: [], projects: [], settings: { ...defaultSettings } };
   if (!db.projects) db.projects = [];
+  for (const p of db.projects) {
+    p.goal_period ??= "week";
+    p.goal_tasks ??= null;
+    p.goal_mins ??= null;
+  }
   // сид может задать только часть настроек
   db.settings = { ...defaultSettings, ...db.settings };
 
@@ -152,6 +157,11 @@
         ...p,
         task_total: db.tasks.filter((t) => t.project_id === p.id).length,
         task_done: db.tasks.filter((t) => t.project_id === p.id && t.completed_at).length,
+        // упрощение мока: весь прогресс считаем «в текущем периоде»
+        goal_done_tasks: db.tasks.filter((t) => t.project_id === p.id && t.completed_at).length,
+        goal_done_mins: db.tasks
+          .filter((t) => t.project_id === p.id && t.scheduled_at && new Date(t.scheduled_at) <= new Date())
+          .reduce((s, t) => s + (t.scheduled_mins ?? 60), 0),
       })),
     create_project: ({ project }) => {
       const full = {
@@ -159,18 +169,25 @@
         color: "",
         target_date: null,
         archived: false,
+        goal_tasks: null,
+        goal_mins: null,
+        goal_period: "week",
         ...project,
         created_at: now(),
       };
       db.projects.push(full);
       persist();
-      return { ...full, task_total: 0, task_done: 0 };
+      return { ...full, task_total: 0, task_done: 0, goal_done_tasks: 0, goal_done_mins: 0 };
     },
     update_project: ({ id, patch }) => {
       const p = db.projects.find((p) => p.id === id);
       if (!p) throw `Проект не найден: ${id}`;
       for (const [k, v] of Object.entries(patch)) {
-        if (v !== undefined) p[k] = k === "target_date" && v === "" ? null : v;
+        if (v === undefined) continue;
+        // конвенции бэкенда: пустая дата и цель <= 0 = снять
+        if (k === "target_date") p.target_date = v === "" ? null : v;
+        else if (k === "goal_tasks" || k === "goal_mins") p[k] = v > 0 ? v : null;
+        else p[k] = v;
       }
       persist();
     },

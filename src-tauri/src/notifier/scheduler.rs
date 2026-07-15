@@ -13,6 +13,7 @@ pub fn start_scheduler(app: tauri::AppHandle, pool: SqlitePool, work_mode: Arc<M
             let muted = crate::notifier::mute::muted_now(&pool, &mode).await;
             check_deadlines(&app, &pool, muted).await;
             check_blocks(&app, &pool, muted).await;
+            check_goals(&app, &pool, muted).await;
             tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
         }
     });
@@ -149,6 +150,65 @@ async fn check_blocks(app: &tauri::AppHandle, pool: &SqlitePool, muted: bool) {
     sweep_stale_blocks(pool, now, BLOCK_GRACE_MINS).await;
 }
 
+#[derive(Debug, PartialEq)]
+pub struct GoalDue {
+    pub id: String,
+    pub name: String,
+    pub body: String,
+    pub period_key: String, // чем пометить notified_goal после пуша
+}
+
+// Проекты, у которых цель текущего периода выполнена, а пуш за этот период
+// ещё не отправлялся. Если заданы обе части цели (задачи и минуты) —
+// выполнены должны быть обе.
+pub async fn goals_due(pool: &SqlitePool, now: chrono::DateTime<Utc>) -> Vec<GoalDue> {
+    use crate::commands::projects::{get_projects_at, period_key};
+    let projects = match get_projects_at(pool, now).await {
+        Ok(p) => p,
+        Err(_) => return vec![],
+    };
+
+    let mut due = vec![];
+    for p in projects {
+        if p.archived || (p.goal_tasks.is_none() && p.goal_mins.is_none()) {
+            continue;
+        }
+        let tasks_met = p.goal_tasks.is_none_or(|n| p.goal_done_tasks >= n);
+        let mins_met = p.goal_mins.is_none_or(|n| p.goal_done_mins >= n);
+        let key = period_key(now, &p.goal_period);
+        if !(tasks_met && mins_met) || p.notified_goal == key {
+            continue;
+        }
+        let mut parts = vec![];
+        if let Some(n) = p.goal_tasks { parts.push(format!("{} задач", n)); }
+        if let Some(n) = p.goal_mins { parts.push(format!("{} мин", n)); }
+        let period = if p.goal_period == "month" { "месяца" } else { "недели" };
+        due.push(GoalDue {
+            id: p.id,
+            name: p.name,
+            body: format!("Цель {} выполнена: {} 🎉", period, parts.join(" · ")),
+            period_key: key,
+        });
+    }
+    due
+}
+
+pub async fn mark_goal_notified(pool: &SqlitePool, id: &str, period_key: &str) {
+    let _ = sqlx::query("UPDATE projects SET notified_goal = ? WHERE id = ?")
+        .bind(period_key).bind(id).execute(pool).await;
+}
+
+async fn check_goals(app: &tauri::AppHandle, pool: &SqlitePool, muted: bool) {
+    let now = Utc::now();
+    for goal in goals_due(pool, now).await {
+        if !muted {
+            send_notification(app, &goal.name, &goal.body);
+        }
+        // Помечаем и в mute, чтобы после снятия глушилки не прилетала пачка
+        mark_goal_notified(pool, &goal.id, &goal.period_key).await;
+    }
+}
+
 pub fn send_notification(app: &tauri::AppHandle, title: &str, body: &str) {
     let _ = app.notification()
         .builder()
@@ -212,5 +272,54 @@ mod tests {
             "SELECT COUNT(*) FROM tasks WHERE notified_block = 0")
             .fetch_one(&pool).await.unwrap();
         assert_eq!(unnotified, 0);
+    }
+
+    #[tokio::test]
+    async fn goal_due_once_per_period_and_rearms_on_change() {
+        use crate::commands::projects::*;
+        let pool = test_pool().await;
+        let now = Utc::now();
+
+        let p = create_project_impl(&pool, CreateProject {
+            name: "Спорт".into(), color: "".into(), target_date: None,
+        }).await.unwrap();
+        update_project_impl(&pool, p.id.clone(), UpdateProject {
+            goal_tasks: Some(1), ..Default::default()
+        }).await.unwrap();
+
+        // цель ещё не выполнена — кандидатов нет
+        assert!(goals_due(&pool, now).await.is_empty());
+
+        // выполненная в этом периоде задача закрывает цель
+        sqlx::query(
+            "INSERT INTO tasks (id, title, status, priority, category, recurrence, tags, hidden,
+             created_at, updated_at, completed_at, project_id)
+             VALUES (?, 'т', 'Done', 'Medium', 'Work', 'None', '[]', 1, ?, ?, ?, ?)")
+            .bind(uuid::Uuid::new_v4().to_string())
+            .bind(now.to_rfc3339()).bind(now.to_rfc3339())
+            .bind((now - chrono::Duration::minutes(1)).to_rfc3339())
+            .bind(&p.id)
+            .execute(&pool).await.unwrap();
+
+        let due = goals_due(&pool, now).await;
+        assert_eq!(due.len(), 1);
+        assert_eq!(due[0].name, "Спорт");
+        assert!(due[0].body.contains("Цель недели"));
+
+        // после пометки — в этом периоде больше не кандидат
+        mark_goal_notified(&pool, &due[0].id, &due[0].period_key).await;
+        assert!(goals_due(&pool, now).await.is_empty());
+
+        // изменение цели перезаряжает пуш (notified_goal сброшен)
+        update_project_impl(&pool, p.id.clone(), UpdateProject {
+            goal_tasks: Some(1), ..Default::default()
+        }).await.unwrap();
+        assert_eq!(goals_due(&pool, now).await.len(), 1);
+
+        // архивный проект не уведомляется
+        update_project_impl(&pool, p.id, UpdateProject {
+            archived: Some(true), ..Default::default()
+        }).await.unwrap();
+        assert!(goals_due(&pool, now).await.is_empty());
     }
 }

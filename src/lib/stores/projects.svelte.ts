@@ -1,5 +1,5 @@
 import { api } from "../api/tauri";
-import type { Project } from "../types";
+import type { Project, UpdateProjectPayload } from "../types";
 
 let projects: Project[] = $state([]);
 let error: string | null = $state(null);
@@ -35,7 +35,7 @@ export const projectStore = {
     }
   },
 
-  async update(id: string, patch: { name?: string; color?: string; target_date?: string; archived?: boolean }) {
+  async update(id: string, patch: UpdateProjectPayload) {
     try {
       await api.updateProject(id, patch);
       await projectStore.load();
