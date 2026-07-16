@@ -1,9 +1,10 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import { listen } from "@tauri-apps/api/event";
   import { taskStore } from "../lib/stores/tasks.svelte";
   import { projectStore } from "../lib/stores/projects.svelte";
   import { api } from "../lib/api/tauri";
+  import { parseComposer, SUBTASK_PREFIX } from "../lib/composer";
   import TaskModal from "../lib/components/TaskModal.svelte";
   import type { Task, Category, CreateTaskPayload, UpdateTaskPayload, Project } from "../lib/types";
 
@@ -106,6 +107,66 @@
 
   async function handleCreate(data: CreateTaskPayload | UpdateTaskPayload) {
     await taskStore.create(data as CreateTaskPayload);
+  }
+
+  // --- Инлайн-композер: первая строка — название, Enter — перенос,
+  // Shift+Enter — строка-подзадача (☐), Ctrl+Enter — создать. ---
+  let composerText = $state("");
+  let composerEl: HTMLTextAreaElement | undefined = $state();
+  let composerBusy = $state(false);
+  const composerRows = $derived(Math.min(6, composerText.split("\n").length));
+
+  function composerInsertSubtaskLine() {
+    const el = composerEl;
+    if (!el) return;
+    const start = el.selectionStart;
+    const insert = "\n" + SUBTASK_PREFIX;
+    composerText = composerText.slice(0, start) + insert + composerText.slice(el.selectionEnd);
+    tick().then(() => {
+      el.setSelectionRange(start + insert.length, start + insert.length);
+    });
+  }
+
+  function composerKeydown(e: KeyboardEvent) {
+    if (e.key !== "Enter") return;
+    if (e.shiftKey) {
+      e.preventDefault();
+      composerInsertSubtaskLine();
+    } else if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      submitComposer();
+    }
+    // обычный Enter — дефолтный перенос строки
+  }
+
+  async function submitComposer() {
+    const draft = parseComposer(composerText);
+    if (!draft.title || composerBusy) return;
+    composerBusy = true;
+    try {
+      // Активный фильтр проекта — умный дефолт для новой задачи
+      const projectId = projectFilter !== "all" && projectFilter !== "none" ? projectFilter : null;
+      const task = await api.createTask({
+        title: draft.title,
+        description: draft.description || null,
+        status: "Todo",
+        priority: "Medium",
+        category: "Work",
+        deadline: null,
+        tags: [],
+        recurrence: "None",
+        project_id: projectId,
+      });
+      for (const sub of draft.subtasks) {
+        await api.addSubtask(task.id, sub);
+      }
+      composerText = "";
+      await taskStore.load();
+    } catch (e) {
+      aiError = typeof e === "string" ? e : "Не удалось создать задачу";
+    }
+    composerBusy = false;
+    composerEl?.focus();
   }
 
   async function handleEdit(data: CreateTaskPayload | UpdateTaskPayload) {
@@ -516,6 +577,24 @@
     </div>
   {/if}
 
+  {#if !searchQuery.trim()}
+    <div class="composer card">
+      <textarea
+        class="composer-input"
+        bind:this={composerEl}
+        bind:value={composerText}
+        onkeydown={composerKeydown}
+        rows={composerRows}
+        placeholder="Быстрая задача…  (Shift+Enter — подзадача, Ctrl+Enter — создать)"
+      ></textarea>
+      {#if parseComposer(composerText).title}
+        <button class="btn-primary btn-sm composer-send" disabled={composerBusy} onclick={submitComposer}>
+          {composerBusy ? "…" : "Создать"}
+        </button>
+      {/if}
+    </div>
+  {/if}
+
   {#if searchQuery.trim()}
     <div class="section-title">Результаты поиска</div>
     {#if isSearching}
@@ -697,6 +776,29 @@
     padding: 8px 12px;
     margin-bottom: 12px;
   }
+
+  .composer {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    padding: 8px 12px;
+    margin-bottom: 12px;
+  }
+
+  .composer-input {
+    flex: 1;
+    border: none;
+    outline: none;
+    resize: none;
+    background: transparent;
+    font-family: inherit;
+    font-size: 13px;
+    line-height: 1.5;
+    padding: 2px 0;
+  }
+  .composer-input:focus { outline: none; }
+
+  .composer-send { flex-shrink: 0; }
 
   .what-now {
     display: flex;

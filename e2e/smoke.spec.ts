@@ -74,6 +74,29 @@ test("задача: создание, редактирование, выполн
   await expect(page.getByText("переименованная задача")).toHaveCount(0);
 });
 
+test("композер: Shift+Enter — подзадачи, Ctrl+Enter — создать", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+
+  await page.locator(".composer-input").click();
+  await page.keyboard.type("быстрая задача");
+  await page.keyboard.press("Shift+Enter");
+  await page.keyboard.type("шаг раз");
+  await page.keyboard.press("Shift+Enter");
+  await page.keyboard.type("шаг два");
+  await page.keyboard.press("Control+Enter");
+
+  // задача в списке, две подзадачи в чипе, композер очищен
+  await expect(page.locator(".task-main", { hasText: "быстрая задача" })).toBeVisible();
+  await expect(page.locator(".chip-sub")).toHaveText(/0\/2/);
+  await expect(page.locator(".composer-input")).toHaveValue("");
+
+  // панель подзадач раскрывается и показывает обе
+  await page.locator(".chip-sub").click();
+  await expect(page.getByText("шаг раз")).toBeVisible();
+  await expect(page.getByText("шаг два")).toBeVisible();
+});
+
 test("календарь: клик по дню создаёт задачу с дедлайном этого дня", async ({ page }) => {
   await withMock(page);
   await page.goto("/");
