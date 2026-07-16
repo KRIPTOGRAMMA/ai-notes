@@ -57,6 +57,12 @@ test("задача: создание, редактирование, выполн
   await expect(page.getByText("переименованная задача")).toBeVisible();
   await expect(page.getByText("тестовая задача")).toHaveCount(0);
 
+  // подзадача добавляется у задачи без подзадач (чип «+» виден всегда — v0.6.1)
+  await page.locator(".chip-sub").click();
+  await page.getByPlaceholder("+ подзадача").fill("первый шаг");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".chip-sub")).toHaveText(/0\/1/);
+
   // выполнение — уходит из активных, появляется в истории
   await page.locator(".task-check").click();
   await expect(page.locator(".task-main", { hasText: "переименованная" })).toHaveCount(0);

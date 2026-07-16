@@ -304,13 +304,11 @@
     </div>
 
     <div class="task-meta">
-      {#if task.subtasks.length > 0}
-        <button
-          class="chip chip-sub"
-          onclick={() => expanded[task.id] = !expanded[task.id]}
-          title="Подзадачи"
-        >{expanded[task.id] ? "▾" : "▸"} {doneCount(task)}/{task.subtasks.length}</button>
-      {/if}
+      <button
+        class="chip chip-sub"
+        onclick={() => expanded[task.id] = !expanded[task.id]}
+        title={task.subtasks.length > 0 ? "Подзадачи" : "Добавить подзадачу"}
+      >{expanded[task.id] ? "▾" : "▸"} {task.subtasks.length > 0 ? `${doneCount(task)}/${task.subtasks.length}` : "+"}</button>
       {#each task.tags as tag}
         <span class="chip chip-tag">#{tag}</span>
       {/each}
@@ -351,7 +349,7 @@
     </li>
   {/if}
 
-  {#if task.subtasks.length > 0 && expanded[task.id]}
+  {#if expanded[task.id]}
     <li class="task-sub-panel">
       {#each task.subtasks as sub (sub.id)}
         <div class="sub-line">
