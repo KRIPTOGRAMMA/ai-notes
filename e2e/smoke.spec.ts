@@ -182,6 +182,39 @@ test("вики-заметки: автодополнение, [[ссылка]] о
   await expect(title).toHaveValue("Черновик");
 });
 
+test("вики-заметки: переименование обновляет ссылки в других заметках", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Заметки" }).click();
+  const title = page.getByPlaceholder("Название", { exact: true });
+  const editor = page.getByPlaceholder(/Начните писать/);
+
+  // целевая заметка
+  await page.getByRole("button", { name: "+ Новая заметка" }).click();
+  await title.fill("Идея");
+  await page.waitForTimeout(900); // дебаунс автосохранения (800мс)
+
+  // заметка со ссылкой (простой + с алиасом) на неё
+  await page.getByRole("button", { name: "+ Новая заметка" }).click();
+  await title.fill("Черновик");
+  await editor.fill("см. [[Идея]] и [[Идея|та самая]]");
+  await page.waitForTimeout(900);
+
+  // переименовываем целевую — тост появляется, ссылки в «Черновике» обновились
+  await page.locator(".note-item", { hasText: "Идея" }).click();
+  await title.fill("Идея v2");
+  await expect(page.locator(".rename-toast")).toHaveText("Обновлено ссылок: 1");
+
+  await page.locator(".note-item", { hasText: "Черновик" }).click();
+  await expect(editor).toHaveValue("см. [[Идея v2]] и [[Идея v2|та самая]]");
+
+  // клик по обновлённой ссылке всё ещё открывает ту же заметку
+  await page.getByRole("button", { name: "Превью" }).click();
+  await page.locator("a.wikilink", { hasText: "Идея v2" }).first().click();
+  await expect(title).toHaveValue("Идея v2");
+});
+
 test("Ctrl+K находит задачу и открывает раздел задач", async ({ page }) => {
   await withMock(page);
   await page.goto("/");

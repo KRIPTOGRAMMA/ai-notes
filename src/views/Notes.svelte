@@ -3,6 +3,7 @@
   import { noteStore } from "../lib/stores/notes.svelte";
   import { taskStore } from "../lib/stores/tasks.svelte";
   import { projectStore } from "../lib/stores/projects.svelte";
+  import { api } from "../lib/api/tauri";
   import { renderMarkdown, toggleTaskListItem, extractWikiLinks } from "../lib/markdown";
   import type { Note } from "../lib/types";
 
@@ -17,6 +18,8 @@
   let previewEl: HTMLDivElement | undefined = $state();
   let saveTimeout: ReturnType<typeof setTimeout> | null = null;
   let saving = $state(false);
+  let renameToast: string | null = $state(null);
+  let renameToastTimeout: ReturnType<typeof setTimeout> | null = null;
 
   const selected = $derived(noteStore.notes.find(n => n.id === selectedId) ?? null);
   const previewHtml = $derived(renderMarkdown(editContent));
@@ -36,6 +39,23 @@
     return noteStore.notes.find(n => n.title.trim().toLowerCase() === key) ?? null;
   }
 
+  // Пишет title/content и, если название реально изменилось, обновляет
+  // [[ссылки]] в остальных заметках (v0.6.7). oldTitle берём из stale-snapshot
+  // (selected.title до этого save) — не из editTitle, который уже новый.
+  async function persistNote(id: string, oldTitle: string, newTitle: string, content: string) {
+    await noteStore.update(id, { title: newTitle, content });
+    const trimmed = newTitle.trim();
+    if (trimmed && trimmed.toLowerCase() !== oldTitle.trim().toLowerCase()) {
+      const count = await api.renameNoteLinks(oldTitle, trimmed);
+      if (count > 0) {
+        await noteStore.load();
+        if (renameToastTimeout) clearTimeout(renameToastTimeout);
+        renameToast = `Обновлено ссылок: ${count}`;
+        renameToastTimeout = setTimeout(() => { renameToast = null; }, 4000);
+      }
+    }
+  }
+
   // Отложенное сохранение нельзя терять при смене заметки: сбрасываем таймер
   // и пишем сразу, пока selectedId/editContent ещё указывают на старую.
   async function flushPendingSave() {
@@ -43,7 +63,8 @@
     clearTimeout(saveTimeout);
     saveTimeout = null;
     if (selectedId) {
-      await noteStore.update(selectedId, { title: editTitle, content: editContent });
+      const before = selected?.title ?? editTitle;
+      await persistNote(selectedId, before, editTitle, editContent);
     }
     saving = false;
   }
@@ -88,8 +109,10 @@
     if (!selectedId) return;
     if (saveTimeout) clearTimeout(saveTimeout);
     saving = true;
+    const id = selectedId;
+    const before = selected?.title ?? editTitle;
     saveTimeout = setTimeout(async () => {
-      await noteStore.update(selectedId!, { title: editTitle, content: editContent });
+      await persistNote(id, before, editTitle, editContent);
       saving = false;
     }, 800);
   }
@@ -303,6 +326,9 @@
         {#if saving}
           <span class="muted" style="font-size:11px;">Сохранение…</span>
         {/if}
+        {#if renameToast}
+          <span class="rename-toast">{renameToast}</span>
+        {/if}
         <div class="seg">
           <button class:active={!previewMode} onclick={() => previewMode = false}>Редактировать</button>
           <button class:active={previewMode} onclick={() => previewMode = true}>Превью</button>
@@ -477,6 +503,15 @@
     padding: 4px 0;
   }
   .title-input:focus { outline: none; }
+
+  .rename-toast {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: var(--radius);
+    background: color-mix(in srgb, var(--accent) 15%, transparent);
+    color: var(--accent);
+    white-space: nowrap;
+  }
 
   .editor-meta {
     display: flex;

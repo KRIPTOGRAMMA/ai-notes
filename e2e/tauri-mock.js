@@ -312,6 +312,28 @@
         .filter((n) => n.title.toLowerCase().includes(q) || n.content.toLowerCase().includes(q))
         .map((n) => ({ ...n }));
     },
+    rename_note_links: ({ oldTitle, newTitle }) => {
+      const oldT = (oldTitle ?? "").trim();
+      const newT = (newTitle ?? "").trim();
+      if (!oldT || oldT.toLowerCase() === newT.toLowerCase()) return 0;
+      // Зеркало бэкенда: [[old]] / [[old|alias]] → [[new]] / [[new|alias]], без учёта регистра
+      const re = /\[\[([^\[\]]+)\]\]/g;
+      let count = 0;
+      for (const n of db.notes) {
+        let changed = false;
+        n.content = n.content.replace(re, (m, inner) => {
+          const pipeIdx = inner.indexOf("|");
+          const target = pipeIdx >= 0 ? inner.slice(0, pipeIdx) : inner;
+          const alias = pipeIdx >= 0 ? inner.slice(pipeIdx + 1) : null;
+          if (target.trim().toLowerCase() !== oldT.toLowerCase()) return m;
+          changed = true;
+          return alias !== null ? `[[${newT}|${alias}]]` : `[[${newT}]]`;
+        });
+        if (changed) { n.updated_at = now(); count++; }
+      }
+      if (count > 0) persist();
+      return count;
+    },
 
     // --- дашборд / ИИ / модель ---
     get_activity_by_day: () => [],

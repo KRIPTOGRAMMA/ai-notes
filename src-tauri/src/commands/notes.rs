@@ -167,6 +167,95 @@ pub async fn update_note_impl(pool: &SqlitePool, id: String, patch: UpdateNote) 
     Ok(row_to_note(row))
 }
 
+// Вики-ссылка на переименованную заметку: [[old]] или [[old|алиас]] → [[new]] /
+// [[new|алиас]] — только цель меняется, алиас (если был) остаётся как есть.
+// Регистронезависимо; заголовок в [[...]] может содержать любые символы кроме
+// '[', ']', '|' (см. WIKILINK_RE в src/lib/markdown.ts — зеркалим тот же формат).
+fn rewrite_links(content: &str, old_title: &str, new_title: &str) -> (String, bool) {
+    let old_lower = old_title.to_lowercase();
+    let mut out = String::with_capacity(content.len());
+    let mut changed = false;
+    let mut rest = content;
+
+    while let Some(start) = rest.find("[[") {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 2..];
+        let Some(end) = after.find("]]") else {
+            // Незакрытая ссылка до конца строки — остаток копируем как есть
+            out.push_str(&rest[start..]);
+            rest = "";
+            break;
+        };
+        let inner = &after[..end];
+        let (target, alias) = match inner.find('|') {
+            Some(p) => (&inner[..p], Some(&inner[p + 1..])),
+            None => (inner, None),
+        };
+
+        if target.trim().to_lowercase() == old_lower {
+            changed = true;
+            out.push_str("[[");
+            out.push_str(new_title);
+            if let Some(a) = alias {
+                out.push('|');
+                out.push_str(a);
+            }
+            out.push_str("]]");
+        } else {
+            out.push_str("[[");
+            out.push_str(inner);
+            out.push_str("]]");
+        }
+        rest = &after[end + 2..];
+    }
+    out.push_str(rest);
+    (out, changed)
+}
+
+#[tauri::command]
+pub async fn rename_note_links(
+    pool: State<'_, SqlitePool>,
+    old_title: String,
+    new_title: String,
+) -> AppResult<i64> {
+    rename_note_links_impl(pool.inner(), old_title, new_title).await
+}
+
+// Переписывает [[old_title]]/[[old_title|alias]] во всех заметках на new_title.
+// Возвращает число обновлённых заметок. Пустой/неизменившийся old_title — no-op
+// (переименование "Без названия" → "Без названия" не должно ничего переписывать).
+pub async fn rename_note_links_impl(pool: &SqlitePool, old_title: String, new_title: String) -> AppResult<i64> {
+    let old_title = old_title.trim();
+    let new_title = new_title.trim();
+    // eq_ignore_ascii_case не покрывает кириллицу и другой не-ASCII — сравниваем
+    // через to_lowercase (Юникодная свёртка регистра).
+    if old_title.is_empty() || old_title.to_lowercase() == new_title.to_lowercase() {
+        return Ok(0);
+    }
+
+    let rows = sqlx::query("SELECT id, content FROM notes")
+        .fetch_all(pool)
+        .await?;
+
+    let mut updated = 0i64;
+    let now = Utc::now().to_rfc3339();
+    for row in rows {
+        let id: String = row.get("id");
+        let content: String = row.get("content");
+        let (new_content, changed) = rewrite_links(&content, old_title, new_title);
+        if changed {
+            sqlx::query("UPDATE notes SET content = ?, updated_at = ? WHERE id = ?")
+                .bind(&new_content)
+                .bind(&now)
+                .bind(&id)
+                .execute(pool)
+                .await?;
+            updated += 1;
+        }
+    }
+    Ok(updated)
+}
+
 #[tauri::command]
 pub async fn search_notes(pool: State<'_, SqlitePool>, query: String) -> AppResult<Vec<Note>> {
     search_notes_impl(pool.inner(), query).await
@@ -287,6 +376,80 @@ mod tests {
         delete_note_impl(&pool, note.id).await.unwrap();
         assert!(search_notes_impl(&pool, "плов".into()).await.unwrap().is_empty());
         assert!(search_notes_impl(&pool, "борщ".into()).await.unwrap().is_empty());
+    }
+
+    #[test]
+    fn rewrite_links_covers_alias_case_and_self_link() {
+        // Простая ссылка
+        let (out, changed) = rewrite_links("см. [[Идея]] тут", "Идея", "Новая идея");
+        assert_eq!(out, "см. [[Новая идея]] тут");
+        assert!(changed);
+
+        // Алиас сохраняется, меняется только цель
+        let (out, changed) = rewrite_links("[[Идея|вот тут]]", "Идея", "Новая идея");
+        assert_eq!(out, "[[Новая идея|вот тут]]");
+        assert!(changed);
+
+        // Регистронезависимо
+        let (out, changed) = rewrite_links("[[идея]]", "Идея", "Новая идея");
+        assert_eq!(out, "[[Новая идея]]");
+        assert!(changed);
+
+        // Несколько ссылок, только совпадающие переписываются
+        let (out, changed) = rewrite_links("[[Идея]] и [[Другая]] и снова [[Идея|та же]]", "Идея", "X");
+        assert_eq!(out, "[[X]] и [[Другая]] и снова [[X|та же]]");
+        assert!(changed);
+
+        // Без совпадений — не менялось
+        let (out, changed) = rewrite_links("[[Другая]] заметка", "Идея", "X");
+        assert_eq!(out, "[[Другая]] заметка");
+        assert!(!changed);
+
+        // Самоссылка [[Идея]] → [[X]] переписывается как обычная ссылка
+        let (out, changed) = rewrite_links("это [[Идея]] сама на себя", "Идея", "X");
+        assert_eq!(out, "это [[X]] сама на себя");
+        assert!(changed);
+
+        // Незакрытая ссылка не роняет парсинг
+        let (out, changed) = rewrite_links("текст [[Идея без закрытия", "Идея", "X");
+        assert_eq!(out, "текст [[Идея без закрытия");
+        assert!(!changed);
+    }
+
+    #[tokio::test]
+    async fn rename_note_links_updates_across_notes_and_counts() {
+        let pool = test_pool().await;
+
+        let target = create_note_impl(&pool, CreateNote {
+            title: "Идея".into(), content: "исходная".into(),
+            tags: vec![], linked_task_id: None, project_id: None,
+        }).await.unwrap();
+        let referrer1 = create_note_impl(&pool, CreateNote {
+            title: "Черновик".into(), content: "см. [[Идея]]".into(),
+            tags: vec![], linked_task_id: None, project_id: None,
+        }).await.unwrap();
+        let referrer2 = create_note_impl(&pool, CreateNote {
+            title: "Заметки".into(), content: "[[идея|та самая]] и [[Другая]]".into(),
+            tags: vec![], linked_task_id: None, project_id: None,
+        }).await.unwrap();
+        let unrelated = create_note_impl(&pool, CreateNote {
+            title: "Не связана".into(), content: "просто текст".into(),
+            tags: vec![], linked_task_id: None, project_id: None,
+        }).await.unwrap();
+
+        let count = rename_note_links_impl(&pool, "Идея".into(), "Идея v2".into()).await.unwrap();
+        assert_eq!(count, 2); // referrer1 и referrer2; target и unrelated не считаются
+
+        let all = get_notes_impl(&pool).await.unwrap();
+        let by_id = |id: &str| all.iter().find(|n| n.id == id).unwrap().content.clone();
+        assert_eq!(by_id(&referrer1.id), "см. [[Идея v2]]");
+        assert_eq!(by_id(&referrer2.id), "[[Идея v2|та самая]] и [[Другая]]");
+        assert_eq!(by_id(&unrelated.id), "просто текст");
+        assert_eq!(by_id(&target.id), "исходная"); // содержимое цели не переписывается
+
+        // Пустой old_title и неизменившийся регистр — no-op
+        assert_eq!(rename_note_links_impl(&pool, "".into(), "X".into()).await.unwrap(), 0);
+        assert_eq!(rename_note_links_impl(&pool, "Идея v2".into(), "идея v2".into()).await.unwrap(), 0);
     }
 
     #[tokio::test]
