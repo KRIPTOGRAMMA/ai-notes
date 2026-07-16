@@ -9,3 +9,4 @@ pub mod subtasks;
 pub mod projects;
 pub mod planner;
 pub mod categories;
+pub mod pomodoro;

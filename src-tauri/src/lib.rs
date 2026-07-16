@@ -221,6 +221,9 @@ pub fn run() {
                         commands::categories::create_category,
                         commands::categories::update_category,
                         commands::categories::delete_category,
+                        commands::pomodoro::get_pomodoro_state,
+                        commands::pomodoro::pomodoro_toggle_pause,
+                        commands::pomodoro::pomodoro_skip,
                         open_quick_capture,
                         get_quick_mode,
                         is_wayland,
@@ -232,6 +235,8 @@ pub fn run() {
                         commands::monitor::get_activity_by_day,
                         commands::monitor::get_task_completions_by_day,
                         commands::monitor::get_app_usage,
+                        commands::monitor::get_completions_for_day,
+                        commands::monitor::get_hourly_activity,
                         commands::monitor::get_app_category_time,
                         commands::monitor::get_category_distribution,
                         commands::monitor::get_active_idle_ratio,
@@ -281,8 +286,11 @@ pub fn run() {
                         true,
                         &[&quiet_30, &quiet_60, &quiet_120, &quiet_inf, &quiet_off],
                     )?;
+                    let pomo_pause = MenuItem::with_id(app, "pomo_pause", "Помодоро: пауза/продолжить", true, None::<&str>)?;
+                    let pomo_skip = MenuItem::with_id(app, "pomo_skip", "Помодоро: пропустить фазу", true, None::<&str>)?;
+                    let pomo_menu = Submenu::with_items(app, "Помодоро", true, &[&pomo_pause, &pomo_skip])?;
                     let quit = MenuItem::with_id(app, "quit", "Выход", true, None::<&str>)?;
-                    let menu = Menu::with_items(app, &[&open, &mode_menu, &quiet_menu, &quit])?;
+                    let menu = Menu::with_items(app, &[&open, &mode_menu, &quiet_menu, &pomo_menu, &quit])?;
 
                     let mode_items: ModeItems = Arc::new(Mutex::new(vec![mode_light, mode_focus, mode_study]));
                     app.manage(mode_items);
@@ -333,6 +341,18 @@ pub fn run() {
                                 tauri::async_runtime::spawn(async move {
                                     let _ = commands::settings::persist_work_mode(&pool, &mode).await;
                                 });
+                            }
+                            // PomodoroCmdTx управляется позже в run() (после сборки app),
+                            // но к моменту клика по трею приложение уже запущено.
+                            "pomo_pause" => {
+                                if let Some(tx) = app.try_state::<commands::pomodoro::PomodoroCmdTx>() {
+                                    let _ = tx.0.send(notifier::pomodoro::PomodoroCmd::TogglePause);
+                                }
+                            }
+                            "pomo_skip" => {
+                                if let Some(tx) = app.try_state::<commands::pomodoro::PomodoroCmdTx>() {
+                                    let _ = tx.0.send(notifier::pomodoro::PomodoroCmd::Skip);
+                                }
                             }
                             _ => {}
                         })
@@ -490,7 +510,8 @@ pub fn run() {
             notifier::scheduler::start_scheduler(app.app_handle().clone(), pool.clone(), work_mode.clone());
             notifier::nudge::start_nudger(app.app_handle().clone(), pool.clone(), work_mode.clone());
             notifier::triggers::start_triggers(app.app_handle().clone(), pool.clone(), work_mode.clone());
-            notifier::pomodoro::start_pomodoro(app.app_handle().clone(), work_mode, pool);
+            let pomodoro_tx = notifier::pomodoro::start_pomodoro(app.app_handle().clone(), work_mode, pool);
+            app.manage(commands::pomodoro::PomodoroCmdTx(pomodoro_tx));
             app.run(|_, _| {});
         });
 }

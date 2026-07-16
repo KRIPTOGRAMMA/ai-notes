@@ -86,6 +86,12 @@
   window.__unknownInvokes = [];
 
   const findTask = (id) => db.tasks.find((t) => t.id === id);
+  // Локальная дата YYYY-MM-DD из ISO-метки (зеркало 'localtime' в SQLite)
+  const localDayKey = (iso) => {
+    const d = new Date(iso);
+    const p = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  };
 
   const commands = {
     // --- настройки / окружение ---
@@ -309,7 +315,32 @@
 
     // --- дашборд / ИИ / модель ---
     get_activity_by_day: () => [],
-    get_task_completions_by_day: () => [],
+    get_task_completions_by_day: () => {
+      // Локальные сутки, как date(completed_at,'localtime') в бэкенде
+      const byDay = {};
+      for (const t of db.tasks) {
+        if (!t.completed_at) continue;
+        const k = localDayKey(t.completed_at);
+        byDay[k] = (byDay[k] ?? 0) + 1;
+      }
+      return Object.entries(byDay).sort().map(([date, completed]) => ({ date, completed }));
+    },
+    get_completions_for_day: ({ date }) =>
+      db.tasks.filter((t) => t.completed_at && localDayKey(t.completed_at) === date).map((t) => t.title),
+    get_hourly_activity: () => [],
+    // Помодоро: мок не гоняет реальный цикл (Study-режим не в скоупе e2e) —
+    // фиксированное "off", тесты виджета переопределяют через db.pomodoro при сидировании.
+    get_pomodoro_state: () => db.pomodoro ?? { phase: "off", until: null },
+    pomodoro_toggle_pause: () => {
+      if (!db.pomodoro) return;
+      db.pomodoro.phase = db.pomodoro.phase === "paused" ? "work" : "paused";
+      persist();
+    },
+    pomodoro_skip: () => {
+      if (!db.pomodoro) return;
+      db.pomodoro.phase = db.pomodoro.phase === "work" ? "break" : "work";
+      persist();
+    },
     get_category_distribution: () => [],
     get_active_idle_ratio: () => ({ today_active: 0, today_idle: 0, week_active: 0, week_idle: 0 }),
     get_app_usage: () => [],

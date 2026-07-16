@@ -327,6 +327,49 @@ test("ИИ-планировщик: план дня — призрак → при
   await expect(page.locator(".backlog-item", { hasText: "важное дело" })).toHaveCount(0);
 });
 
+test("помодоро: виджет виден при активной фазе, пауза/продолжить и пропуск фазы", async ({ page }) => {
+  const until = new Date(Date.now() + 12 * 60 * 1000).toISOString();
+  await seedDb(page, {
+    tasks: [], notes: [], settings: { onboarding_complete: true },
+    pomodoro: { phase: "work", until },
+  });
+  await withMock(page);
+  await page.goto("/");
+
+  const widget = page.locator(".pomo");
+  await expect(widget).toBeVisible();
+  await expect(widget.locator(".pomo-label")).toHaveText("🍅 Фокус");
+
+  await widget.getByTitle("Пауза").click();
+  await expect(widget.locator(".pomo-label")).toHaveText("🍅 Пауза");
+
+  await widget.getByTitle("Продолжить").click();
+  await expect(widget.locator(".pomo-label")).toHaveText("🍅 Фокус");
+
+  await widget.getByTitle("Пропустить фазу").click();
+  await expect(widget.locator(".pomo-label")).toHaveText("☕ Перерыв");
+});
+
+test("дашборд: годовой календарь — квадрат сегодняшнего дня, hover показывает задачи", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+
+  await createTask(page, "сделанное дело");
+  await page.locator(".task-check").click();
+
+  await page.getByRole("button", { name: "Дашборд" }).click();
+  const p = (n: number) => String(n).padStart(2, "0");
+  const now = new Date();
+  const today = `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}`;
+
+  const cell = page.locator(`.cal-cell[data-date="${today}"]`);
+  await expect(cell).toHaveAttribute("data-count", "1");
+
+  await cell.hover();
+  await expect(page.locator(".cal-tip")).toContainText("выполнено: 1");
+  await expect(page.locator(".cal-tip")).toContainText("сделанное дело");
+});
+
 test("сортировка: drag строки меняет порядок, порядок переживает перезагрузку", async ({ page }) => {
   await withMock(page);
   await page.goto("/");

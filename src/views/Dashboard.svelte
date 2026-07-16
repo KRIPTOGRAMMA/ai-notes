@@ -124,6 +124,76 @@
     return total > 0 ? Math.round((active / total) * 100) : null;
   }
 
+  // --- Год в квадратиках (v0.6.5): выполненные задачи по локальным дням ---
+  const YEAR_DAYS = 365;
+
+  function localKey(d: Date): string {
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  }
+
+  const calendar = $derived.by(() => {
+    const byDate = new Map(taskCompletions.map(c => [c.date, c.completed]));
+    const today = new Date();
+    const days: { date: string; count: number }[] = [];
+    for (let i = YEAR_DAYS - 1; i >= 0; i--) {
+      const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i);
+      const key = localKey(d);
+      days.push({ date: key, count: byDate.get(key) ?? 0 });
+    }
+    // Пустые ячейки в начале, чтобы колонки-недели начинались с понедельника
+    const first = new Date(today.getFullYear(), today.getMonth(), today.getDate() - (YEAR_DAYS - 1));
+    const lead = (first.getDay() + 6) % 7;
+    return { lead, days };
+  });
+
+  const calMax = $derived(Math.max(1, ...taskCompletions.map(c => c.completed)));
+  const CAL_MIX = [0, 25, 45, 70, 95]; // проценты акцента по уровням
+
+  function calLevel(count: number): number {
+    if (count <= 0) return 0;
+    const r = count / calMax;
+    return r > 0.75 ? 4 : r > 0.5 ? 3 : r > 0.25 ? 2 : 1;
+  }
+
+  function fmtDay(date: string): string {
+    return new Date(date + "T00:00:00").toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
+  }
+
+  // Тултип: список выполненных задач дня подгружается по наведению и кэшируется
+  let calTip: { date: string; count: number; titles: string[]; x: number; y: number } | null = $state(null);
+  const dayTitlesCache = new Map<string, string[]>();
+
+  async function showCalTip(e: MouseEvent, day: { date: string; count: number }) {
+    const cell = e.currentTarget as HTMLElement;
+    const x = cell.offsetLeft;
+    const y = cell.offsetTop;
+    let titles: string[] = [];
+    if (day.count > 0) {
+      titles = dayTitlesCache.get(day.date) ?? await api.getCompletionsForDay(day.date).catch(() => []);
+      dayTitlesCache.set(day.date, titles);
+    }
+    calTip = { date: day.date, count: day.count, titles, x, y };
+  }
+
+  // --- Heatmap «час × день недели» (v0.6.5) ---
+  let hourly: { weekday: number; hour: number; minutes: number }[] = $state([]);
+  const HOURS = Array.from({ length: 24 }, (_, i) => i);
+  const WEEKDAY_LABELS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+  const heatMax = $derived(Math.max(1, ...hourly.map(c => c.minutes)));
+
+  // row 0 = Пн; в данных weekday по strftime('%w'): 0 = Вс
+  function heatMinutes(row: number, hour: number): number {
+    const w = (row + 1) % 7;
+    return hourly.find(c => c.weekday === w && c.hour === hour)?.minutes ?? 0;
+  }
+
+  function heatStyle(mins: number): string {
+    if (mins <= 0) return "";
+    const p = Math.round(10 + (mins / heatMax) * 85);
+    return `background: color-mix(in srgb, var(--accent) ${p}%, transparent);`;
+  }
+
   onMount(() => {
     const unlisteners: UnlistenFn[] = [];
 
@@ -137,6 +207,7 @@
         await loadAppUsage(1);
         await projectStore.load(); // свежий прогресс целей за период
         await categoryStore.load(); // имена/цвета категорий задач для пончика
+        hourly = await api.getHourlyActivity(56); // heatmap: последние 8 недель
 
       } catch (e) {
         error = String(e);
@@ -431,24 +502,66 @@
       {/if}
     </section>
 
-    <!-- Выполненные задачи по дням -->
+    <!-- Год в квадратиках: выполненные задачи -->
     <section class="card panel wide">
-      <h3 class="section-title">Выполненные задачи по дням</h3>
+      <h3 class="section-title">Выполненные задачи за год</h3>
 
       {#if taskCompletions.length === 0}
         <div class="empty">Нет данных</div>
       {:else}
-        <div class="rows">
-          {#each taskCompletions.slice(-30) as day (day.date)}
-            <div class="bar-row">
-              <span class="bar-date">{day.date}</span>
-              <div class="dots">
-                {#each Array(day.completed) as _}
-                  <span class="dot"></span>
-                {/each}
-              </div>
-              <span class="muted">{day.completed}</span>
+        <div class="cal-wrap" onmouseleave={() => calTip = null} role="presentation">
+          <div class="cal-grid">
+            {#each Array(calendar.lead) as _, i (i)}
+              <span class="cal-cell lead"></span>
+            {/each}
+            {#each calendar.days as day (day.date)}
+              <span
+                class="cal-cell"
+                data-date={day.date}
+                data-count={day.count}
+                style={day.count > 0
+                  ? `background: color-mix(in srgb, var(--accent) ${CAL_MIX[calLevel(day.count)]}%, transparent);`
+                  : ""}
+                onmouseenter={(e) => showCalTip(e, day)}
+                role="img"
+                aria-label="{fmtDay(day.date)}: {day.count}"
+              ></span>
+            {/each}
+          </div>
+          {#if calTip}
+            <div class="cal-tip" style="left:{Math.min(calTip.x, 640)}px; top:{calTip.y + 16}px;">
+              <div class="cal-tip-head">{fmtDay(calTip.date)} — {calTip.count > 0 ? `выполнено: ${calTip.count}` : "пусто"}</div>
+              {#each calTip.titles as t (t)}
+                <div class="cal-tip-item">• {t}</div>
+              {/each}
             </div>
+          {/if}
+        </div>
+      {/if}
+    </section>
+
+    <!-- Heatmap: в какие часы реально работается -->
+    <section class="card panel wide">
+      <h3 class="section-title">Активность по часам (8 недель)</h3>
+
+      {#if hourly.length === 0}
+        <div class="empty">Нет данных</div>
+      {:else}
+        <div class="heat">
+          {#each WEEKDAY_LABELS as label, row (label)}
+            <span class="heat-label">{label}</span>
+            {#each HOURS as h (h)}
+              {@const mins = heatMinutes(row, h)}
+              <span
+                class="heat-cell"
+                style={heatStyle(mins)}
+                title="{label} {String(h).padStart(2, '0')}:00 — {mins} мин"
+              ></span>
+            {/each}
+          {/each}
+          <span class="heat-label"></span>
+          {#each HOURS as h (h)}
+            <span class="heat-hour">{h % 6 === 0 ? h : ""}</span>
           {/each}
         </div>
       {/if}
@@ -478,6 +591,78 @@
 
   @media (max-width: 720px) {
     .grid { grid-template-columns: 1fr; }
+  }
+
+  /* Год в квадратиках: колонки-недели, строки Пн..Вс */
+  .cal-wrap {
+    position: relative;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+
+  .cal-grid {
+    display: grid;
+    grid-auto-flow: column;
+    grid-template-rows: repeat(7, 10px);
+    gap: 2px;
+    width: max-content;
+  }
+
+  .cal-cell {
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    background: var(--bg-secondary);
+  }
+
+  .cal-cell.lead { background: transparent; }
+
+  .cal-tip {
+    position: absolute;
+    z-index: 5;
+    max-width: 280px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+    padding: 6px 10px;
+    font-size: 12px;
+    pointer-events: none;
+  }
+
+  .cal-tip-head { font-weight: 600; }
+
+  .cal-tip-item {
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Heatmap час × день недели */
+  .heat {
+    display: grid;
+    grid-template-columns: 24px repeat(24, 1fr);
+    gap: 2px;
+    align-items: center;
+  }
+
+  .heat-label {
+    font-size: 10px;
+    color: var(--text-secondary);
+  }
+
+  .heat-cell {
+    aspect-ratio: 1 / 1;
+    min-width: 0;
+    border-radius: 2px;
+    background: var(--bg-secondary);
+  }
+
+  .heat-hour {
+    font-size: 9px;
+    color: var(--text-secondary);
+    text-align: left;
   }
 
   .donut-row {

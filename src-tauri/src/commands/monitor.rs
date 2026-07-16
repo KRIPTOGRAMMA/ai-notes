@@ -49,11 +49,14 @@ pub async fn get_task_completions_by_day(pool: State<'_, SqlitePool>) -> AppResu
 }
 
 pub async fn get_task_completions_by_day_impl(pool: &SqlitePool) -> AppResult<Vec<TaskCompletion>> {
+    // Локальные сутки: completed_at хранится в UTC, а «день» для пользователя —
+    // локальный (иначе вечерние задачи уезжают на завтра). Так же группирует
+    // календарь-«квадратики» и get_completions_for_day.
     let rows = sqlx::query(
-      "SELECT date(completed_at) as date, COUNT(*) as completed
+      "SELECT date(completed_at, 'localtime') as date, COUNT(*) as completed
        FROM tasks
        WHERE completed_at IS NOT NULL
-       GROUP BY date(completed_at)"
+       GROUP BY date(completed_at, 'localtime')"
     )
     .fetch_all(pool)
     .await?;
@@ -250,6 +253,58 @@ pub async fn get_app_category_time_impl(
     Ok(out)
 }
 
+// ===== Дашборд-аналитика (v0.6.5) =====
+
+// Выполненные задачи конкретного локального дня (для тултипа календаря).
+#[tauri::command]
+pub async fn get_completions_for_day(pool: State<'_, SqlitePool>, date: String) -> AppResult<Vec<String>> {
+    get_completions_for_day_impl(pool.inner(), date).await
+}
+
+pub async fn get_completions_for_day_impl(pool: &SqlitePool, date: String) -> AppResult<Vec<String>> {
+    let rows = sqlx::query(
+        "SELECT title FROM tasks
+         WHERE completed_at IS NOT NULL AND date(completed_at, 'localtime') = ?
+         ORDER BY completed_at",
+    )
+    .bind(&date)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.iter().map(|r| r.get("title")).collect())
+}
+
+#[derive(Debug, serde::Serialize, PartialEq)]
+pub struct HourCell {
+    pub weekday: i64, // 0 = воскресенье … 6 = суббота (strftime %w)
+    pub hour: i64,    // 0–23, локальное время
+    pub minutes: i64,
+}
+
+// Heatmap «час × день недели»: активные минуты за последние N дней.
+#[tauri::command]
+pub async fn get_hourly_activity(pool: State<'_, SqlitePool>, days: i64) -> AppResult<Vec<HourCell>> {
+    get_hourly_activity_impl(pool.inner(), days).await
+}
+
+pub async fn get_hourly_activity_impl(pool: &SqlitePool, days: i64) -> AppResult<Vec<HourCell>> {
+    let since = format!("-{} days", days.max(1));
+    let rows = sqlx::query(
+        "SELECT CAST(strftime('%w', timestamp, 'localtime') AS INTEGER) AS weekday,
+                CAST(strftime('%H', timestamp, 'localtime') AS INTEGER) AS hour,
+                SUM(duration_secs) / 60 AS minutes
+         FROM activity_log
+         WHERE state = 'Active' AND date(timestamp) >= date('now', ?)
+         GROUP BY weekday, hour",
+    )
+    .bind(&since)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .iter()
+        .map(|r| HourCell { weekday: r.get("weekday"), hour: r.get("hour"), minutes: r.get("minutes") })
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -304,6 +359,55 @@ mod tests {
         assert_eq!(days.len(), 2);
         assert_eq!((days[0].date.as_str(), days[0].completed), ("2026-07-01", 2));
         assert_eq!((days[1].date.as_str(), days[1].completed), ("2026-07-02", 1));
+    }
+
+    #[tokio::test]
+    async fn completions_for_day_returns_titles_of_local_day() {
+        use chrono::{Local, TimeZone, Duration};
+        let pool = test_pool().await;
+
+        let today_noon = Local::now().date_naive().and_hms_opt(12, 0, 0).unwrap();
+        let today_utc = Local.from_local_datetime(&today_noon).single().unwrap().to_utc();
+        for (id, title, at) in [
+            ("d1", "сегодняшняя", today_utc),
+            ("d2", "вчерашняя", today_utc - Duration::days(1)),
+        ] {
+            sqlx::query(
+                "INSERT INTO tasks (id, title, status, priority, category, tags, recurrence, hidden, created_at, updated_at, completed_at)
+                 VALUES (?, ?, 'Done', 'Medium', 'Work', '[]', 'None', 1, ?, ?, ?)")
+                .bind(id).bind(title)
+                .bind(at.to_rfc3339()).bind(at.to_rfc3339()).bind(at.to_rfc3339())
+                .execute(&pool).await.unwrap();
+        }
+
+        let key = Local::now().date_naive().format("%Y-%m-%d").to_string();
+        let titles = get_completions_for_day_impl(&pool, key).await.unwrap();
+        assert_eq!(titles, vec!["сегодняшняя"]);
+        assert!(get_completions_for_day_impl(&pool, "1999-01-01".into()).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn hourly_activity_groups_by_local_hour_and_window() {
+        use chrono::{Datelike, Timelike, Duration, Local, Utc};
+        let pool = test_pool().await;
+
+        // Стабильный момент внутри часа: -3ч от «сейчас», минута 10
+        let t = (Utc::now() - Duration::hours(3))
+            .with_minute(10).unwrap()
+            .with_second(0).unwrap()
+            .with_nanosecond(0).unwrap();
+        log(&pool, &t.to_rfc3339(), "Active", 600).await; // 10 мин
+        log(&pool, &(t + Duration::minutes(5)).to_rfc3339(), "Active", 300).await; // +5 мин, тот же час
+        log(&pool, &t.to_rfc3339(), "Idle", 600).await; // не считается
+        log(&pool, &(Utc::now() - Duration::days(100)).to_rfc3339(), "Active", 600).await; // вне окна
+
+        let cells = get_hourly_activity_impl(&pool, 7).await.unwrap();
+        let local = t.with_timezone(&Local);
+        assert_eq!(cells, vec![HourCell {
+            weekday: local.weekday().num_days_from_sunday() as i64,
+            hour: local.hour() as i64,
+            minutes: 15,
+        }]);
     }
 
     async fn insert_task(pool: &SqlitePool, id: &str, category: &str, completed_at: Option<&str>) {

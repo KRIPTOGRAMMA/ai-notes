@@ -126,8 +126,24 @@ pub async fn status_payload(pool: &SqlitePool, now: DateTime<Utc>) -> Result<Sta
     };
     let work_mode = setting("work_mode").await.unwrap_or_else(|| "Light".into());
     let quiet_until = setting("quiet_until").await.unwrap_or_default();
+    let pomo_phase = setting("pomodoro_phase").await.unwrap_or_else(|| "off".into());
+    let pomo_until = setting("pomodoro_until")
+        .await
+        .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
+        .map(|t| t.with_timezone(&Utc));
 
-    let (text, class) = if let Some(b) = current {
+    // Помодоро — самое сиюминутное состояние (v0.6.6: раньше не показывалось,
+    // т.к. фаза жила только в рантайме и короткоживущий CLI её не видел).
+    let pomo_label = match (pomo_phase.as_str(), pomo_until) {
+        ("work", Some(t)) if t > now => Some(format!("🍅 до {}", hhmm(t))),
+        ("break", Some(t)) if t > now => Some(format!("☕ до {}", hhmm(t))),
+        ("paused", _) => Some("🍅 пауза".to_string()),
+        _ => None,
+    };
+
+    let (text, class) = if let Some(label) = &pomo_label {
+        (label.clone(), "pomodoro")
+    } else if let Some(b) = current {
         (format!("▶ {} до {}", ellipsize(&b.title, TITLE_MAX), hhmm(b.end)), "block")
     } else if let Some(b) = next {
         (format!("⏱ {} {}", hhmm(b.start), ellipsize(&b.title, TITLE_MAX)), "next")
@@ -140,6 +156,15 @@ pub async fn status_payload(pool: &SqlitePool, now: DateTime<Utc>) -> Result<Sta
     };
 
     let mut tip: Vec<String> = Vec::new();
+    if pomo_label.is_some() {
+        let phase_ru = match pomo_phase.as_str() {
+            "work" => "работа",
+            "break" => "перерыв",
+            "paused" => "на паузе",
+            _ => "",
+        };
+        tip.push(format!("Помодоро: {phase_ru}"));
+    }
     if let Some(b) = current {
         tip.push(format!("Идёт: {} (до {})", b.title, hhmm(b.end)));
     }
@@ -243,6 +268,54 @@ mod tests {
         .execute(pool)
         .await
         .unwrap();
+    }
+
+    #[tokio::test]
+    async fn pomodoro_takes_priority_over_everything() {
+        let pool = test_pool().await;
+        let now = noon_utc();
+        // Идущий блок есть, но помодоро всё равно должно выиграть приоритет
+        insert_task(&pool, "писать отчёт", "Todo", None, Some(now - Duration::minutes(30)), Some(60)).await;
+
+        for (k, v) in [
+            ("pomodoro_phase", "work".to_string()),
+            ("pomodoro_until", (now + Duration::minutes(12)).to_rfc3339()),
+        ] {
+            sqlx::query("INSERT INTO settings (key, value) VALUES (?, ?)")
+                .bind(k).bind(v).execute(&pool).await.unwrap();
+        }
+        let p = status_payload(&pool, now).await.unwrap();
+        assert_eq!(p.class, "pomodoro");
+        assert!(p.text.starts_with("🍅 до "), "text: {}", p.text);
+        assert!(p.tooltip.contains("Помодоро: работа"));
+
+        // Перерыв — другой символ и метка
+        sqlx::query("UPDATE settings SET value = 'break' WHERE key = 'pomodoro_phase'")
+            .execute(&pool).await.unwrap();
+        let p = status_payload(&pool, now).await.unwrap();
+        assert!(p.text.starts_with("☕ до "), "text: {}", p.text);
+        assert!(p.tooltip.contains("Помодоро: перерыв"));
+
+        // Пауза — без времени
+        sqlx::query("UPDATE settings SET value = 'paused' WHERE key = 'pomodoro_phase'")
+            .execute(&pool).await.unwrap();
+        let p = status_payload(&pool, now).await.unwrap();
+        assert_eq!(p.text, "🍅 пауза");
+
+        // Истёкшая фаза (цикл ещё не тикнул) не должна перекрывать блок
+        sqlx::query("UPDATE settings SET value = 'work' WHERE key = 'pomodoro_phase'")
+            .execute(&pool).await.unwrap();
+        sqlx::query("UPDATE settings SET value = ? WHERE key = 'pomodoro_until'")
+            .bind((now - Duration::minutes(1)).to_rfc3339())
+            .execute(&pool).await.unwrap();
+        let p = status_payload(&pool, now).await.unwrap();
+        assert_eq!(p.class, "block");
+
+        // "off" — не показывается вовсе
+        sqlx::query("UPDATE settings SET value = 'off' WHERE key = 'pomodoro_phase'")
+            .execute(&pool).await.unwrap();
+        let p = status_payload(&pool, now).await.unwrap();
+        assert_eq!(p.class, "block");
     }
 
     #[tokio::test]

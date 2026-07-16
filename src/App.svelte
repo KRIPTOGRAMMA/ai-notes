@@ -14,6 +14,7 @@
   import Dashboard from "./views/Dashboard.svelte";
   import Calendar from "./views/Calendar.svelte";
   import SearchOverlay from "./lib/components/SearchOverlay.svelte";
+  import PomodoroWidget from "./lib/components/PomodoroWidget.svelte";
   import "./app.css";
 
   type View = "tasks" | "notes" | "dashboard" | "calendar" | "settings";
@@ -131,6 +132,8 @@
         </button>
       {/each}
     </nav>
+
+    <PomodoroWidget />
 
     <button class="nav-item search-item" onclick={() => showSearch = true} title="Поиск (Ctrl+K)">
       <svg viewBox="0 0 24 24" width="16" height="16" fill="none"
