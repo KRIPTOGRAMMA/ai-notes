@@ -5,6 +5,7 @@ mod commands;
 mod notifier;
 mod monitor;
 mod ai;
+mod status;
 
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager};
@@ -169,6 +170,14 @@ fn update_quiet_labels(app: &tauri::AppHandle, active_id: &str, remaining_mins: 
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // `ai-notes --status` — короткоживущий CLI для статус-баров (waybar):
+    // печатает JSON и выходит, не поднимая Tauri. Проверяется до всего
+    // остального, чтобы не задеть single-instance работающего приложения.
+    if std::env::args().any(|a| a == "--status") {
+        status::print_status();
+        return;
+    }
+
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()

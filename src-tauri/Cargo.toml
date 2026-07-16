@@ -32,6 +32,9 @@ uuid = { version = "1", features = ["v4", "serde"] }
 sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio", "chrono", "migrate", "uuid"] }
 tokio = { version = "1", features = ["full"] }
 sysinfo = "0.33"
+# Путь к данным для CLI-режима --status (без AppHandle); тот же крейт,
+# которым tauri резолвит app_data_dir — пути совпадают на всех ОС.
+dirs = "6"
 zip = "8.6.0"
 tauri-plugin-dialog = "2.7.1"
 thiserror = "2.0.18"
