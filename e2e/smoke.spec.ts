@@ -327,6 +327,29 @@ test("ИИ-планировщик: план дня — призрак → при
   await expect(page.locator(".backlog-item", { hasText: "важное дело" })).toHaveCount(0);
 });
 
+test("сортировка: drag строки меняет порядок, порядок переживает перезагрузку", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+
+  for (const title of ["первая", "вторая", "третья"]) {
+    await page.locator(".composer-input").click();
+    await page.keyboard.type(title);
+    await page.keyboard.press("Control+Enter");
+    await expect(page.locator(".task-main", { hasText: title })).toBeVisible();
+  }
+  const titles = page.locator(".task-list .task-title");
+  await expect(titles).toHaveText(["первая", "вторая", "третья"]);
+
+  // тащим «первую» на «третью» → уходит в конец
+  await page.locator(".task-row", { hasText: "первая" })
+    .dragTo(page.locator(".task-row", { hasText: "третья" }));
+  await expect(titles).toHaveText(["вторая", "третья", "первая"]);
+
+  // порядок сохранён в «БД» и переживает перезагрузку
+  await page.reload();
+  await expect(page.locator(".task-list .task-title")).toHaveText(["вторая", "третья", "первая"]);
+});
+
 test("категории: создание в настройках, назначение задаче, удаление с переназначением", async ({ page }) => {
   await withMock(page);
   await page.goto("/");

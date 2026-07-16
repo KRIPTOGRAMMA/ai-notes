@@ -19,10 +19,15 @@ pub async fn create_task_impl(pool: &SqlitePool, task: CreateTask) -> Result<Tas
   let mut new_task = task.into_task();
   // Неизвестная категория тихо становится фолбэком (прежняя семантика enum)
   new_task.category = crate::commands::categories::valid_or_fallback(pool, &new_task.category).await;
+  // Новая задача — в конец списка
+  new_task.sort_order = sqlx::query_scalar::<_, i64>("SELECT COALESCE(MAX(sort_order), 0) + 1 FROM tasks")
+    .fetch_one(pool)
+    .await
+    .map_err(|e| e.to_string())?;
 
   sqlx::query(
-    "INSERT INTO tasks (id, title, description, status, priority, category, deadline, tags, recurrence, hidden, created_at, updated_at, project_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    "INSERT INTO tasks (id, title, description, status, priority, category, deadline, tags, recurrence, hidden, created_at, updated_at, project_id, sort_order)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   )
   .bind(&new_task.id)
   .bind(&new_task.title)
@@ -37,6 +42,7 @@ pub async fn create_task_impl(pool: &SqlitePool, task: CreateTask) -> Result<Tas
   .bind(new_task.created_at.to_rfc3339())
   .bind(new_task.updated_at.to_rfc3339())
   .bind(&new_task.project_id)
+  .bind(new_task.sort_order)
   .execute(pool)
   .await
   .map_err(|e| e.to_string())?;
@@ -52,7 +58,7 @@ pub async fn get_tasks(
 }
 
 pub async fn get_tasks_impl(pool: &SqlitePool) -> Result<Vec<Task>, String> {
-    let rows = sqlx::query_as::<_, TaskRow>("SELECT * FROM tasks")
+    let rows = sqlx::query_as::<_, TaskRow>("SELECT * FROM tasks ORDER BY sort_order")
         .fetch_all(pool)
         .await
         .map_err(|e| e.to_string())?;
@@ -261,6 +267,44 @@ pub async fn complete_task_impl(pool: &SqlitePool, id: String) -> Result<Task, S
 }
 
 #[tauri::command]
+pub async fn reorder_tasks(pool: State<'_, SqlitePool>, ids: Vec<String>) -> Result<(), String> {
+    reorder_tasks_impl(pool.inner(), ids).await
+}
+
+// Ручной порядок: фронт присылает id видимого списка в новом порядке.
+// Мы переиспользуем те же значения sort_order, что уже были у этих задач,
+// раздав их по новому порядку, — задачи вне списка не сдвигаются, а
+// коллизий с чужими значениями не возникает.
+pub async fn reorder_tasks_impl(pool: &SqlitePool, ids: Vec<String>) -> Result<(), String> {
+    if ids.len() < 2 {
+        return Ok(());
+    }
+    let placeholders = vec!["?"; ids.len()].join(",");
+    let sql = format!("SELECT id, sort_order FROM tasks WHERE id IN ({placeholders})");
+    let mut q = sqlx::query_as::<_, (String, i64)>(&sql);
+    for id in &ids {
+        q = q.bind(id);
+    }
+    let rows = q.fetch_all(pool).await.map_err(|e| e.to_string())?;
+    let existing: std::collections::HashSet<&str> = rows.iter().map(|(id, _)| id.as_str()).collect();
+    let mut orders: Vec<i64> = rows.iter().map(|(_, o)| *o).collect();
+    orders.sort_unstable();
+
+    // Неизвестные id (гонка с удалением) выбрасываем ДО zip — иначе значения
+    // раздались бы со сдвигом не тем задачам.
+    let live_ids = ids.iter().filter(|id| existing.contains(id.as_str()));
+    for (id, ord) in live_ids.zip(orders) {
+        sqlx::query("UPDATE tasks SET sort_order = ? WHERE id = ?")
+            .bind(ord)
+            .bind(id)
+            .execute(pool)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn search_tasks(
   pool: State<'_, SqlitePool>,
   query: String,
@@ -342,6 +386,35 @@ mod tests {
     async fn create_rejects_empty_title() {
         let pool = test_pool().await;
         assert!(create_task_impl(&pool, new_task("   ")).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn reorder_permutes_only_given_ids() {
+        let pool = test_pool().await;
+        let a = create_task_impl(&pool, new_task("а")).await.unwrap();
+        let b = create_task_impl(&pool, new_task("б")).await.unwrap();
+        let c = create_task_impl(&pool, new_task("в")).await.unwrap();
+        let d = create_task_impl(&pool, new_task("г")).await.unwrap();
+
+        // Новые задачи идут в конец: а, б, в, г
+        let titles = |tasks: &[Task]| tasks.iter().map(|t| t.title.clone()).collect::<Vec<_>>();
+        assert_eq!(titles(&get_tasks_impl(&pool).await.unwrap()), ["а", "б", "в", "г"]);
+
+        // Переставляем первые три: в, а, б — «г» не трогаем
+        reorder_tasks_impl(&pool, vec![c.id.clone(), a.id.clone(), b.id.clone()]).await.unwrap();
+        assert_eq!(titles(&get_tasks_impl(&pool).await.unwrap()), ["в", "а", "б", "г"]);
+
+        // Значения sort_order — та же тройка, что была (перестановка, не перенумерация)
+        let orders: Vec<i64> = get_tasks_impl(&pool).await.unwrap().iter().map(|t| t.sort_order).collect();
+        assert_eq!(orders, [1, 2, 3, 4]);
+
+        // Исчезнувший id не ломает раздачу значений остальным
+        delete_task_impl(&pool, a.id.clone()).await.unwrap();
+        reorder_tasks_impl(&pool, vec![b.id.clone(), a.id.clone(), c.id.clone()]).await.unwrap();
+        assert_eq!(titles(&get_tasks_impl(&pool).await.unwrap()), ["б", "в", "г"]);
+
+        // Один id — no-op без ошибки
+        reorder_tasks_impl(&pool, vec![d.id.clone()]).await.unwrap();
     }
 
     #[tokio::test]

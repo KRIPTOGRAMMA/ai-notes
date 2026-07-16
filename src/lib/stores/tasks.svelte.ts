@@ -67,6 +67,15 @@ export const taskStore = {
     }
   },
 
+  async reorder(ids: string[]) {
+    try {
+      await api.reorderTasks(ids);
+      await taskStore.load();
+    } catch (e) {
+      error = describeError(e);
+    }
+  },
+
   async search(query: string): Promise<Task[]> {
     if (!query.trim()) return [];
     try {

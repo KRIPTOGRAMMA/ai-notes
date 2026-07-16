@@ -48,6 +48,7 @@ export interface Task {
   project_id: string | null;
   scheduled_at: string | null; // тайм-блок: начало (RFC3339)
   scheduled_mins: number | null; // тайм-блок: длительность
+  sort_order: number; // ручной порядок в списке (drag)
   subtasks: Subtask[];
 }
 

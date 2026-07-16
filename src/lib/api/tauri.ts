@@ -8,6 +8,7 @@ export const api = {
   deleteTask: (id: string) => invoke<void>("delete_task", { id }),
   completeTask: (id: string) => invoke<Task>("complete_task", { id }),
   searchTasks: (query: string) => invoke<Task[]>("search_tasks", { query }),
+  reorderTasks: (ids: string[]) => invoke<void>("reorder_tasks", { ids }),
   getProjects: () => invoke<Project[]>("get_projects"),
   createProject: (project: { name: string; color?: string; target_date?: string | null }) =>
     invoke<Project>("create_project", { project }),

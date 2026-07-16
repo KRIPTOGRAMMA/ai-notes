@@ -48,6 +48,9 @@ pub struct Task {
   pub scheduled_at: Option<DateTime<Utc>>,
   #[serde(default)]
   pub scheduled_mins: Option<i64>,
+  // Ручной порядок в списке (drag); назначается на создании и в reorder_tasks
+  #[serde(default)]
+  pub sort_order: i64,
   #[serde(default)]
   pub subtasks: Vec<Subtask>,
 }
@@ -79,6 +82,7 @@ pub struct TaskRow {
     pub project_id: Option<String>,
     pub scheduled_at: Option<String>,
     pub scheduled_mins: Option<i64>,
+    pub sort_order: i64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -208,6 +212,7 @@ impl CreateTask {
             project_id: self.project_id.filter(|p| !p.is_empty()),
             scheduled_at: None,
             scheduled_mins: None,
+            sort_order: 0, // create_task_impl назначает max+1 перед вставкой
             subtasks: Vec::new(),
         }
     }
@@ -248,6 +253,7 @@ impl TaskRow {
                 .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
                 .map(|d| d.with_timezone(&Utc)),
             scheduled_mins: self.scheduled_mins,
+            sort_order: self.sort_order,
             subtasks: Vec::new(),
         }
     }
@@ -274,6 +280,7 @@ mod tests {
             project_id: None,
             scheduled_at: None,
             scheduled_mins: None,
+            sort_order: 0,
         };
         overrides(&mut r);
         r

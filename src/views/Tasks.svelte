@@ -231,6 +231,45 @@
   }
 
   let expanded = $state<Record<string, boolean>>({});
+
+  // --- Ручная сортировка: drag строки в пределах своего списка (группы) ---
+  let dragTaskId: string | null = $state(null);
+  let dropTargetId: string | null = $state(null);
+
+  function listForTask(task: Task): Task[] {
+    if (grouped) {
+      const g = grouped.find(g => g.tasks.some(t => t.id === task.id));
+      return g ? g.tasks : [];
+    }
+    return filteredActive;
+  }
+
+  function rowDragStart(e: DragEvent, task: Task) {
+    dragTaskId = task.id;
+    e.dataTransfer?.setData("text/plain", task.id);
+    if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+  }
+
+  function rowDragOver(e: DragEvent, task: Task) {
+    if (!dragTaskId || dragTaskId === task.id) return;
+    e.preventDefault();
+    dropTargetId = task.id;
+  }
+
+  async function rowDrop(e: DragEvent, target: Task) {
+    e.preventDefault();
+    const sourceId = dragTaskId ?? e.dataTransfer?.getData("text/plain");
+    dragTaskId = null;
+    dropTargetId = null;
+    if (!sourceId || sourceId === target.id) return;
+    const ids = listForTask(target).map(t => t.id);
+    const from = ids.indexOf(sourceId);
+    const to = ids.indexOf(target.id);
+    if (from < 0 || to < 0) return; // перетаскивание между группами — не сортировка
+    ids.splice(from, 1);
+    ids.splice(to, 0, sourceId);
+    await taskStore.reorder(ids);
+  }
   const doneCount = (t: Task) => t.subtasks.filter((s) => s.done).length;
 
   async function classifyTask(id: string, title: string) {
@@ -335,7 +374,17 @@
 
 {#snippet taskRow(task: Task)}
   {@const busy = aiLoadingId === task.id}
-  <li class="task-row" style="--prio: var(--prio-{task.priority.toLowerCase()});">
+  <li
+    class="task-row"
+    style="--prio: var(--prio-{task.priority.toLowerCase()});"
+    class:dragging={dragTaskId === task.id}
+    class:drop-target={dropTargetId === task.id}
+    draggable={!searchQuery.trim() && !task.hidden}
+    ondragstart={(e) => rowDragStart(e, task)}
+    ondragover={(e) => rowDragOver(e, task)}
+    ondrop={(e) => rowDrop(e, task)}
+    ondragend={() => { dragTaskId = null; dropTargetId = null; }}
+  >
     <button
       class="task-check"
       onclick={async () => { await taskStore.complete(task.id); projectStore.load(); }}
@@ -774,6 +823,9 @@
     padding: 8px 12px;
     margin-bottom: 12px;
   }
+
+  .task-row.dragging { opacity: 0.5; }
+  .task-row.drop-target { box-shadow: inset 0 2px 0 var(--accent); }
 
   .composer {
     display: flex;

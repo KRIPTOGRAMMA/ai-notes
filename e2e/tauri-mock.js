@@ -52,6 +52,8 @@
     p.goal_tasks ??= null;
     p.goal_mins ??= null;
   }
+  // Ручной порядок: сид мог не проставить sort_order
+  db.tasks.forEach((t, i) => { t.sort_order ??= i + 1; });
   // Категории задач: зеркало посева миграции 0015
   if (!db.categories) {
     db.categories = [
@@ -103,7 +105,16 @@
     get_quick_mode: () => db.quickMode ?? "task",
 
     // --- задачи ---
-    get_tasks: () => db.tasks.map((t) => ({ ...t })),
+    get_tasks: () =>
+      [...db.tasks].sort((a, b) => a.sort_order - b.sort_order).map((t) => ({ ...t })),
+    reorder_tasks: ({ ids }) => {
+      // Зеркало бэкенда: та же тройка значений раздаётся по новому порядку
+      const byId = new Map(db.tasks.map((t) => [t.id, t]));
+      const live = ids.filter((id) => byId.has(id));
+      const orders = live.map((id) => byId.get(id).sort_order).sort((a, b) => a - b);
+      live.forEach((id, i) => { byId.get(id).sort_order = orders[i]; });
+      persist();
+    },
     create_task: ({ task }) => {
       const full = {
         id: uuid(),
@@ -116,6 +127,7 @@
         project_id: null,
         scheduled_at: null,
         scheduled_mins: null,
+        sort_order: Math.max(0, ...db.tasks.map((t) => t.sort_order)) + 1,
         subtasks: [],
         ...task,
         created_at: now(),

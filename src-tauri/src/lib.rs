@@ -212,6 +212,7 @@ pub fn run() {
                         commands::tasks::update_task,
                         commands::tasks::complete_task,
                         commands::tasks::search_tasks,
+                        commands::tasks::reorder_tasks,
                         commands::projects::get_projects,
                         commands::projects::create_project,
                         commands::projects::update_project,
