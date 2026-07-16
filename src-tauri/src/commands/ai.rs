@@ -12,9 +12,6 @@ const SYSTEM_REWRITE: &str =
 const SYSTEM_SUBTASKS: &str =
     "You are a task planner. Split the task into 3-7 subtasks. Reply ONLY with a JSON array of strings, nothing else. Example: [\"subtask 1\", \"subtask 2\", \"subtask 3\"]";
 
-const SYSTEM_CLASSIFY: &str =
-    "Категория задачи: Work/Study/Home/Health/Other. Ответь одним словом.";
-
 const SYSTEM_INSIGHT: &str =
     "Ты ассистент по продуктивности. Дай 1–3 коротких предложения про продуктивность пользователя, по-русски. Только текст, без пояснений и списков.";
 
@@ -177,9 +174,29 @@ pub async fn ai_subtasks(app: tauri::AppHandle, task_id: String, title: String) 
 }
 
 #[tauri::command]
-pub async fn ai_classify(app: tauri::AppHandle, task_id: String, title: String) -> Result<(), String> {
+pub async fn ai_classify(
+    app: tauri::AppHandle,
+    pool: tauri::State<'_, sqlx::SqlitePool>,
+    task_id: String,
+    title: String,
+) -> Result<(), String> {
+    let pool = pool.inner().clone();
     tokio::spawn(async move {
-        let r = ask_ai(&app, SYSTEM_CLASSIFY, &title).await;
+        // Категории пользовательские (v0.6.3): промпт строится из таблицы,
+        // ответ модели сопоставляется с ней и наружу уходит id категории.
+        let r = async {
+            let cats = crate::commands::categories::get_categories_impl(&pool)
+                .await
+                .map_err(|e| e.to_string())?;
+            let names: Vec<&str> = cats.iter().map(|c| c.name.as_str()).collect();
+            let system = format!(
+                "Категория задачи — одна из: {}. Ответь одним словом из списка, без пояснений.",
+                names.join(", ")
+            );
+            let answer = ask_ai(&app, &system, &title).await?;
+            crate::commands::categories::match_category(&cats, &answer)
+                .ok_or_else(|| format!("Модель ответила «{}» — категория не распознана", answer.trim()))
+        }.await;
         let _ = app.emit("ai-result", into_payload(task_id, "classify", r));
     });
     Ok(())

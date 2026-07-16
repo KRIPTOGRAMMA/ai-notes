@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { save as saveDialog, open as openDialog } from "@tauri-apps/plugin-dialog";
   import { api } from "../lib/api/tauri";
+  import { categoryStore } from "../lib/stores/categories.svelte";
   import type { AppSettings, AppCategoryRule } from "../lib/types";
   import { applyTheme } from "../lib/theme";
   import ModelDownloader from "../lib/components/ModelDownloader.svelte";
@@ -95,7 +96,19 @@
     }
     trackingMode = await api.getTrackingMode().catch(() => null);
     windowTracking = await api.getWindowTracking().catch(() => null);
+    categoryStore.load();
   });
+
+  // --- Категории задач (CRUD сохраняется сразу, без кнопки «Сохранить») ---
+  let newCatName = $state("");
+  let newCatColor = $state("#2a78d6");
+
+  async function addCategory() {
+    const name = newCatName.trim();
+    if (!name) return;
+    await categoryStore.create(name, newCatColor);
+    newCatName = "";
+  }
 
   async function save() {
     saving = true;
@@ -357,6 +370,47 @@
   </section>
 
   <section class="card panel">
+    <h3 class="section-title">Категории задач</h3>
+    {#each categoryStore.categories as c (c.id)}
+      <div class="rule-row">
+        <input
+          type="color"
+          class="cat-color"
+          value={c.color}
+          title="Цвет категории"
+          onchange={(e) => categoryStore.update(c.id, { color: e.currentTarget.value })}
+        />
+        <input
+          value={c.name}
+          onchange={(e) => {
+            const name = e.currentTarget.value.trim();
+            if (name && name !== c.name) categoryStore.update(c.id, { name });
+            else e.currentTarget.value = c.name;
+          }}
+        />
+        {#if c.id !== "Other"}
+          <button class="btn-icon btn-danger" title="Удалить (задачи перейдут в «Другое»)"
+            onclick={() => categoryStore.remove(c.id)}>✕</button>
+        {:else}
+          <span class="hint" style="margin:0;">фолбэк</span>
+        {/if}
+      </div>
+    {/each}
+    <div class="rule-row">
+      <input type="color" class="cat-color" bind:value={newCatColor} title="Цвет новой категории" />
+      <input bind:value={newCatName} placeholder="Новая категория"
+        onkeydown={(e) => { if (e.key === "Enter") addCategory(); }} />
+      <button class="btn-sm" onclick={addCategory} disabled={!newCatName.trim()}>Добавить</button>
+    </div>
+    {#if categoryStore.error}
+      <p class="hint" style="color:var(--danger, #d33);">{categoryStore.error}</p>
+    {/if}
+    <p class="hint">
+      Изменения сохраняются сразу. При удалении категории её задачи переходят в «Другое».
+    </p>
+  </section>
+
+  <section class="card panel">
     <h3 class="section-title">Уведомления</h3>
     <div class="pair">
       <label class="field">
@@ -492,6 +546,14 @@
   .rule-row input {
     flex: 1;
     min-width: 0;
+  }
+
+  .rule-row input.cat-color {
+    flex: 0 0 34px;
+    width: 34px;
+    height: 26px;
+    padding: 1px 2px;
+    cursor: pointer;
   }
 
   .key-ok {

@@ -327,6 +327,39 @@ test("ИИ-планировщик: план дня — призрак → при
   await expect(page.locator(".backlog-item", { hasText: "важное дело" })).toHaveCount(0);
 });
 
+test("категории: создание в настройках, назначение задаче, удаление с переназначением", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+
+  // создать категорию «Спорт» в настройках
+  await page.getByRole("button", { name: "Настройки" }).click();
+  const catSection = page.locator("section").filter({ hasText: "Категории задач" });
+  await page.getByPlaceholder("Новая категория").fill("Спорт");
+  await page.getByRole("button", { name: "Добавить" }).click();
+  // 5 посевных + «Спорт» + строка добавления
+  await expect(catSection.locator(".rule-row")).toHaveCount(7);
+  const sportInput = catSection.locator(".rule-row input:not(.cat-color)").nth(5);
+  await expect(sportInput).toHaveValue("Спорт");
+
+  // создать задачу с этой категорией
+  await page.getByRole("button", { name: "Задачи" }).click();
+  await page.getByRole("button", { name: "+ Новая", exact: true }).click();
+  await page.getByPlaceholder("Название задачи").fill("пробежка");
+  await page.getByLabel("Категория").selectOption({ label: "Спорт" });
+  await page.getByRole("button", { name: "Создать" }).click();
+  await expect(page.locator(".chip-cat", { hasText: "Спорт" })).toBeVisible();
+
+  // удалить категорию — задача переезжает в «Другое»
+  await page.getByRole("button", { name: "Настройки" }).click();
+  const sportRow = catSection.locator(".rule-row").nth(5);
+  await expect(sportRow.locator("input:not(.cat-color)")).toHaveValue("Спорт");
+  await sportRow.getByTitle("Удалить (задачи перейдут в «Другое»)").click();
+  await expect(catSection.locator(".rule-row")).toHaveCount(6);
+
+  await page.getByRole("button", { name: "Задачи" }).click();
+  await expect(page.locator(".chip-cat", { hasText: "Другое" })).toBeVisible();
+});
+
 test("тёмная тема применяется и переживает перезагрузку", async ({ page }) => {
   await withMock(page);
   await page.goto("/");

@@ -8,3 +8,4 @@ pub mod model;
 pub mod subtasks;
 pub mod projects;
 pub mod planner;
+pub mod categories;

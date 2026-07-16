@@ -16,7 +16,9 @@ pub async fn create_task_impl(pool: &SqlitePool, task: CreateTask) -> Result<Tas
     return Err("Название задачи не может быть пустым".into());
   }
 
-  let new_task = task.into_task();
+  let mut new_task = task.into_task();
+  // Неизвестная категория тихо становится фолбэком (прежняя семантика enum)
+  new_task.category = crate::commands::categories::valid_or_fallback(pool, &new_task.category).await;
 
   sqlx::query(
     "INSERT INTO tasks (id, title, description, status, priority, category, deadline, tags, recurrence, hidden, created_at, updated_at, project_id)
@@ -27,7 +29,7 @@ pub async fn create_task_impl(pool: &SqlitePool, task: CreateTask) -> Result<Tas
   .bind(&new_task.description)
   .bind(format!("{:?}", new_task.status))
   .bind(format!("{:?}", new_task.priority))
-  .bind(format!("{:?}", new_task.category))
+  .bind(&new_task.category)
   .bind(new_task.deadline.map(|d| d.to_rfc3339()))
   .bind(serde_json::to_string(&new_task.tags).unwrap_or_else(|_| "[]".into()))
   .bind(new_task.recurrence.to_db()) 
@@ -120,7 +122,9 @@ pub async fn update_task_impl(pool: &SqlitePool, id: String, patch: UpdateTask) 
     if let Some(desc) = patch.description   { task.description = Some(desc); }
     if let Some(status) = patch.status      { task.status = status; }
     if let Some(priority) = patch.priority  { task.priority = priority; }
-    if let Some(category) = patch.category  { task.category = category; }
+    if let Some(category) = patch.category {
+        task.category = crate::commands::categories::valid_or_fallback(pool, &category).await;
+    }
     if let Some(tags) = patch.tags          { task.tags = tags; }
     if let Some(recurrence) = patch.recurrence { task.recurrence = recurrence; }
 
@@ -177,7 +181,7 @@ pub async fn update_task_impl(pool: &SqlitePool, id: String, patch: UpdateTask) 
     .bind(&task.description)
     .bind(format!("{:?}", task.status))
     .bind(format!("{:?}", task.priority))
-    .bind(format!("{:?}", task.category))
+    .bind(&task.category)
     .bind(task.deadline.map(|d| d.to_rfc3339()))
     .bind(serde_json::to_string(&task.tags).unwrap_or_else(|_| "[]".into()))
     .bind(task.recurrence.to_db())
@@ -297,7 +301,7 @@ pub async fn search_tasks_impl(pool: &SqlitePool, query: String) -> Result<Vec<T
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::task::{Priority, Category, Recurrence, RecurrenceUnit};
+    use crate::core::task::{Priority, Recurrence, RecurrenceUnit};
 
     async fn test_pool() -> SqlitePool {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
@@ -311,7 +315,7 @@ mod tests {
             description: Some("desc".into()),
             status: TaskStatus::Todo,
             priority: Priority::Medium,
-            category: Category::Work,
+            category: "Work".into(),
             deadline: Some(Utc::now() + chrono::Duration::days(3)),
             tags: vec!["a".into(), "b".into()],
             recurrence: None,

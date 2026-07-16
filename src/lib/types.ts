@@ -4,8 +4,17 @@
 
 export type TaskStatus = "Todo" | "InProgress" | "Done" | "Archived";
 export type Priority = "Low" | "Medium" | "High" | "Critical";
-export type Category = "Work" | "Study" | "Home" | "Health" | "Other";
+// С v0.6.3 категория — id строки в таблице categories (пользовательские),
+// а не фиксированный набор. Имя/цвет — через CategoryInfo.
+export type Category = string;
 export type RecurrenceUnit = "Minutes" | "Hours" | "Days" | "Weeks";
+
+export interface CategoryInfo {
+  id: string;
+  name: string;
+  color: string;
+  position: number;
+}
 
 export type Recurrence =
   | "None"

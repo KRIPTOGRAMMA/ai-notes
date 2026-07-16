@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Task, CreateTaskPayload, UpdateTaskPayload, Priority, Category, Recurrence, RecurrenceUnit, TaskStatus } from "../types";
   import { projectStore } from "../stores/projects.svelte";
+  import { categoryStore } from "../stores/categories.svelte";
 
   type Props = {
     task?: Task | null;
@@ -13,11 +14,15 @@
 
   const isEdit = !!task;
 
+  // Модалку открывают и разделы, не грузившие категории (Календарь)
+  if (categoryStore.categories.length === 0) categoryStore.load();
+
   let title = $state(task?.title ?? "");
   let description = $state(task?.description ?? "");
   let status = $state<TaskStatus>(task?.status ?? "Todo");
   let priority = $state<Priority>(task?.priority ?? "Medium");
-  let category = $state<Category>(task?.category ?? "Work");
+  // "Other" — фолбэк-категория, существует всегда (в отличие от Work — её можно удалить)
+  let category = $state<Category>(task?.category ?? "Other");
   let tagsInput = $state((task?.tags ?? []).join(", "));
   // "" = без проекта; в патче пустая строка отвязывает
   let projectId = $state(task?.project_id ?? "");
@@ -164,11 +169,9 @@
       <label class="field">
         <span class="label">Категория</span>
         <select bind:value={category}>
-          <option value="Work">Работа</option>
-          <option value="Study">Учёба</option>
-          <option value="Home">Дом</option>
-          <option value="Health">Здоровье</option>
-          <option value="Other">Другое</option>
+          {#each categoryStore.categories as c (c.id)}
+            <option value={c.id}>{c.name}</option>
+          {/each}
         </select>
       </label>
     </div>

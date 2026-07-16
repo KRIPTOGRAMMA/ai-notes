@@ -52,6 +52,16 @@
     p.goal_tasks ??= null;
     p.goal_mins ??= null;
   }
+  // Категории задач: зеркало посева миграции 0015
+  if (!db.categories) {
+    db.categories = [
+      { id: "Work", name: "Работа", color: "#2a78d6", position: 0 },
+      { id: "Study", name: "Учёба", color: "#1baf7a", position: 1 },
+      { id: "Home", name: "Дом", color: "#eda100", position: 2 },
+      { id: "Health", name: "Здоровье", color: "#008300", position: 3 },
+      { id: "Other", name: "Другое", color: "#4a3aa7", position: 4 },
+    ];
+  }
   // сид может задать только часть настроек
   db.settings = { ...defaultSettings, ...db.settings };
 
@@ -215,6 +225,35 @@
     },
     delete_subtask: ({ id }) => {
       for (const t of db.tasks) t.subtasks = t.subtasks.filter((s) => s.id !== id);
+      persist();
+    },
+
+    // --- категории задач ---
+    get_categories: () => [...db.categories].sort((a, b) => a.position - b.position).map((c) => ({ ...c })),
+    create_category: ({ name, color }) => {
+      const trimmed = (name ?? "").trim();
+      if (!trimmed) throw "Название категории не может быть пустым";
+      const cat = {
+        id: uuid(),
+        name: trimmed,
+        color: color || "#888888",
+        position: Math.max(-1, ...db.categories.map((c) => c.position)) + 1,
+      };
+      db.categories.push(cat);
+      persist();
+      return { ...cat };
+    },
+    update_category: ({ id, patch }) => {
+      const c = db.categories.find((c) => c.id === id);
+      if (!c) throw `Категория не найдена: ${id}`;
+      if (patch.name !== undefined && patch.name !== null) c.name = patch.name;
+      if (patch.color !== undefined && patch.color !== null) c.color = patch.color;
+      persist();
+    },
+    delete_category: ({ id }) => {
+      if (id === "Other") throw "Категорию «Другое» нельзя удалить — это фолбэк";
+      for (const t of db.tasks) if (t.category === id) t.category = "Other";
+      db.categories = db.categories.filter((c) => c.id !== id);
       persist();
     },
 

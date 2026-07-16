@@ -3,6 +3,7 @@
   import { listen } from "@tauri-apps/api/event";
   import { taskStore } from "../lib/stores/tasks.svelte";
   import { projectStore } from "../lib/stores/projects.svelte";
+  import { categoryStore } from "../lib/stores/categories.svelte";
   import { api } from "../lib/api/tauri";
   import { parseComposer, SUBTASK_PREFIX } from "../lib/composer";
   import TaskModal from "../lib/components/TaskModal.svelte";
@@ -21,6 +22,7 @@
 
   onMount(() => {
     projectStore.load();
+    categoryStore.load();
     // Капабилити-детект: при выключенном ИИ кнопка «Что сейчас?» просто скрыта
     api.getSettings().then(s => aiEnabled = s.ai_provider !== "none").catch(() => {});
   });
@@ -151,7 +153,7 @@
         description: draft.description || null,
         status: "Todo",
         priority: "Medium",
-        category: "Work",
+        category: "Other", // фолбэк-категория: всегда существует (Work можно удалить)
         deadline: null,
         tags: [],
         recurrence: "None",
@@ -236,10 +238,6 @@
     aiError = null;
     await api.aiClassify(id, title);
   }
-
-  const CATEGORY_LABELS: Record<string, string> = {
-    Work: "Работа", Study: "Учёба", Home: "Дом", Health: "Здоровье", Other: "Другое",
-  };
 
   const PRIORITY_LABELS: Record<string, string> = {
     Low: "Низкий", Medium: "Средний", High: "Высокий", Critical: "Критический",
@@ -373,7 +371,7 @@
       {#each task.tags as tag}
         <span class="chip chip-tag">#{tag}</span>
       {/each}
-      <span class="chip chip-cat cat-{task.category.toLowerCase()}">{CATEGORY_LABELS[task.category] ?? task.category}</span>
+      <span class="chip chip-cat" style="--cat: {categoryStore.color(task.category)}">{categoryStore.name(task.category)}</span>
       {#if task.deadline}
         {@const dl = deadlineInfo(task.deadline)}
         <span class="chip" class:chip-danger={dl.overdue}>⚑ {dl.label}</span>

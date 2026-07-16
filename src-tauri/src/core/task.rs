@@ -18,14 +18,9 @@ pub enum TaskStatus {
   Archived,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum Category {
-  Work,
-  Study,
-  Home,
-  Health,
-  Other,
-}
+// Категория задачи — с v0.6.3 это id строки в таблице categories
+// (пользовательские категории), а не enum. Валидация — на записи
+// (commands::categories::valid_or_fallback), чтение — как есть.
 
 // Внимание: Task НЕ читается из БД напрямую через FromRow — там разные
 // представления enum'ов/Vec, и query_as::<_, Task> никогда не вызывается.
@@ -38,7 +33,7 @@ pub struct Task {
   pub description: Option<String>,
   pub status: TaskStatus,
   pub priority: Priority,
-  pub category: Category,
+  pub category: String,
   pub deadline: Option<DateTime<Utc>>,
   pub tags: Vec<String>,
   pub created_at: DateTime<Utc>,
@@ -92,7 +87,7 @@ pub struct CreateTask {
   pub description: Option<String>,
   pub status: TaskStatus,
   pub priority: Priority,
-  pub category: Category,
+  pub category: String,
   pub deadline: Option<DateTime<Utc>>,
   pub tags: Vec<String>,
   pub recurrence: Option<Recurrence>,
@@ -106,7 +101,7 @@ pub struct UpdateTask {
     pub description: Option<String>,
     pub status: Option<TaskStatus>,
     pub priority: Option<Priority>,
-    pub category: Option<Category>,
+    pub category: Option<String>,
     pub deadline: Option<String>,
     pub tags: Option<Vec<String>>,
     pub recurrence: Option<Recurrence>,
@@ -236,13 +231,7 @@ impl TaskRow {
                 "Critical" => Priority::Critical,
                 _          => Priority::Medium,
             },
-            category: match self.category.as_str() {
-                "Work"   => Category::Work,
-                "Study"  => Category::Study,
-                "Home"   => Category::Home,
-                "Health" => Category::Health,
-                _        => Category::Other,
-            },
+            category: self.category,
             deadline: self.deadline
                 .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
                 .map(|d| d.with_timezone(&Utc)),
@@ -337,7 +326,7 @@ mod tests {
 
         assert_eq!(task.status, TaskStatus::InProgress);
         assert_eq!(task.priority, Priority::Critical);
-        assert_eq!(task.category, Category::Health);
+        assert_eq!(task.category, "Health");
         assert_eq!(task.tags, vec!["a", "b"]);
         assert!(task.deadline.is_some());
     }
@@ -356,7 +345,8 @@ mod tests {
 
         assert_eq!(task.status, TaskStatus::Todo);
         assert_eq!(task.priority, Priority::Medium);
-        assert_eq!(task.category, Category::Other);
+        // Категория с v0.6.3 читается как есть (валидация — на записи, по таблице)
+        assert_eq!(task.category, "???");
         assert!(task.tags.is_empty());
         assert_eq!(task.deadline, None);
         // Битая дата не роняет парсинг — подставляется "сейчас"

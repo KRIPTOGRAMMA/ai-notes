@@ -3,6 +3,7 @@
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { api } from "../lib/api/tauri";
   import { projectStore } from "../lib/stores/projects.svelte";
+  import { categoryStore } from "../lib/stores/categories.svelte";
   import type { AppSettings } from "../lib/types";
 
   interface ActivityDay {
@@ -70,8 +71,8 @@
   let summaryPending: "day" | "week" | null = $state(null);
   let summaryKind: "day" | "week" | null = $state(null);
 
-  // Фиксированный порядок категорий = порядок слотов палитры (CVD-безопасный).
-  const CATEGORY_ORDER = ["Work", "Study", "Home", "Health", "Other"] as const;
+  // Метки для КАТЕГОРИЙ ПРИЛОЖЕНИЙ (glob-правила трекинга — фиксированный набор).
+  // Категории задач с v0.6.3 пользовательские и берутся из categoryStore.
   const CATEGORY_LABELS: Record<string, string> = {
     Work: "Работа",
     Study: "Учёба",
@@ -80,15 +81,21 @@
     Other: "Другое",
   };
 
-  const donutData = $derived(
-    CATEGORY_ORDER
-      .map(cat => ({
-        category: cat,
-        label: CATEGORY_LABELS[cat],
-        count: categories.find(c => c.category === cat)?.count ?? 0,
-      }))
-      .filter(d => d.count > 0)
-  );
+  const donutData = $derived.by(() => {
+    // Порядок и цвета — из таблицы категорий; легаси-значения (категория
+    // удалена, задачи в истории остались) — в хвост серым.
+    const known = categoryStore.categories.map(c => ({
+      category: c.id,
+      label: c.name,
+      color: c.color,
+      count: categories.find(x => x.category === c.id)?.count ?? 0,
+    }));
+    const knownIds = new Set(categoryStore.categories.map(c => c.id));
+    const legacy = categories
+      .filter(x => !knownIds.has(x.category))
+      .map(x => ({ category: x.category, label: x.category, color: "#888888", count: x.count }));
+    return [...known, ...legacy].filter(d => d.count > 0);
+  });
   const donutTotal = $derived(donutData.reduce((s, d) => s + d.count, 0));
 
   const R = 45;
@@ -129,6 +136,7 @@
         settings = await api.getSettings();
         await loadAppUsage(1);
         await projectStore.load(); // свежий прогресс целей за период
+        await categoryStore.load(); // имена/цвета категорий задач для пончика
 
       } catch (e) {
         error = String(e);
@@ -208,7 +216,7 @@
                 <circle
                   cx="60" cy="60" r={R}
                   fill="none"
-                  stroke="var(--cat-{seg.category.toLowerCase()})"
+                  stroke={seg.color}
                   stroke-width="16"
                   stroke-dasharray="{seg.dash} {CIRC - seg.dash}"
                   stroke-dashoffset={seg.offset}
@@ -224,7 +232,7 @@
           <ul class="legend">
             {#each donutSegments as seg (seg.category)}
               <li>
-                <span class="swatch" style="background:var(--cat-{seg.category.toLowerCase()});"></span>
+                <span class="swatch" style="background:{seg.color};"></span>
                 <span>{seg.label}</span>
                 <span class="muted">{seg.count} · {seg.percent}%</span>
               </li>

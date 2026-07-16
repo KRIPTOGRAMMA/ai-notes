@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Task, Subtask, CreateTaskPayload, UpdateTaskPayload, Note, CreateNotePayload, UpdateNotePayload, AppSettings, Project, UpdateProjectPayload } from "../types";
+import type { Task, Subtask, CreateTaskPayload, UpdateTaskPayload, Note, CreateNotePayload, UpdateNotePayload, AppSettings, Project, UpdateProjectPayload, CategoryInfo } from "../types";
 
 export const api = {
   getTasks: () => invoke<Task[]>("get_tasks"),
@@ -14,6 +14,11 @@ export const api = {
   updateProject: (id: string, patch: UpdateProjectPayload) =>
     invoke<void>("update_project", { id, patch }),
   deleteProject: (id: string) => invoke<void>("delete_project", { id }),
+  getCategories: () => invoke<CategoryInfo[]>("get_categories"),
+  createCategory: (name: string, color: string) => invoke<CategoryInfo>("create_category", { name, color }),
+  updateCategory: (id: string, patch: { name?: string; color?: string }) =>
+    invoke<void>("update_category", { id, patch }),
+  deleteCategory: (id: string) => invoke<void>("delete_category", { id }),
   recordInput: () => invoke<void>("record_input"),
   openQuickCapture: (mode: "task" | "note") => invoke<void>("open_quick_capture", { mode }),
   getQuickMode: () => invoke<"task" | "note">("get_quick_mode"),

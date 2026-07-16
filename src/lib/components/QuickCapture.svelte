@@ -3,6 +3,7 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { emit, listen } from "@tauri-apps/api/event";
   import { api } from "../api/tauri";
+  import { categoryStore } from "../stores/categories.svelte";
   import { applyCachedTheme } from "../theme";
   import "../../app.css";
 
@@ -13,7 +14,7 @@
   let title = $state("");
   let description = $state("");
   let priority = $state("Medium");
-  let category = $state("Work");
+  let category = $state("Other"); // фолбэк-категория существует всегда
   let showDescription = $state(false);
 
   // Заметка
@@ -28,6 +29,7 @@
     // Начальный режим — из managed-state (покрывает случай, когда окно уже было
     // смонтировано до эмита события).
     api.getQuickMode().then((m) => { mode = m; }).catch(() => {});
+    categoryStore.load();
     // Живая смена режима, пока окно открыто.
     const un = listen<string>("quick-mode", (e) => {
       mode = e.payload === "note" ? "note" : "task";
@@ -36,7 +38,7 @@
   });
 
   function reset() {
-    title = ""; description = ""; priority = "Medium"; category = "Work"; showDescription = false;
+    title = ""; description = ""; priority = "Medium"; category = "Other"; showDescription = false;
     noteTitle = ""; noteContent = "";
     errorMsg = null;
   }
@@ -130,11 +132,9 @@
         <option value="Critical">Критический</option>
       </select>
       <select bind:value={category}>
-        <option value="Work">Работа</option>
-        <option value="Study">Учёба</option>
-        <option value="Home">Дом</option>
-        <option value="Health">Здоровье</option>
-        <option value="Other">Другое</option>
+        {#each categoryStore.categories as c (c.id)}
+          <option value={c.id}>{c.name}</option>
+        {/each}
       </select>
       <button class="desc-toggle" onclick={() => showDescription = !showDescription}>
         {showDescription ? "−" : "+ описание"}
