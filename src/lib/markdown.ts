@@ -3,6 +3,64 @@ import DOMPurify from "dompurify";
 
 marked.setOptions({ gfm: true, breaks: true });
 
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+// Вики-ссылки: [[Название]] или [[Название|текст]]. Расширение marked, а не
+// пре-процессинг текста — так [[...]] внутри `кода` и ```блоков``` остаётся
+// текстом. Резолвинг по названию делает UI (data-wikilink), рендер лишь метит.
+const WIKILINK_RE = /^\[\[([^\[\]|]+)(?:\|([^\[\]]+))?\]\]/;
+
+marked.use({
+  extensions: [
+    {
+      name: "wikilink",
+      level: "inline",
+      start(src: string) {
+        const i = src.indexOf("[[");
+        return i < 0 ? undefined : i;
+      },
+      tokenizer(src: string) {
+        const m = WIKILINK_RE.exec(src);
+        if (!m) return undefined;
+        const title = m[1].trim();
+        if (!title) return undefined;
+        return {
+          type: "wikilink",
+          raw: m[0],
+          title,
+          label: (m[2] ?? m[1]).trim(),
+        };
+      },
+      renderer(token) {
+        const t = token as unknown as { title: string; label: string };
+        return `<a href="#" class="wikilink" data-wikilink="${escapeHtml(t.title)}">${escapeHtml(t.label)}</a>`;
+      },
+    },
+  ],
+});
+
+// Названия заметок, на которые ссылается текст (для бэклинков). Работает по
+// сырому markdown — ссылки в code-блоках тоже попадут, для бэклинков это ок.
+export function extractWikiLinks(src: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const m of (src ?? "").matchAll(/\[\[([^\[\]|]+)(?:\|[^\[\]]+)?\]\]/g)) {
+    const title = m[1].trim();
+    const key = title.toLowerCase();
+    if (title && !seen.has(key)) {
+      seen.add(key);
+      out.push(title);
+    }
+  }
+  return out;
+}
+
 // Рендер Markdown в безопасный HTML. Санитизация обязательна: контент может
 // прийти из импорта/вставки, а не только из ручного ввода.
 export function renderMarkdown(src: string): string {

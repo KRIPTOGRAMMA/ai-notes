@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { renderMarkdown, taskLineIndices, toggleTaskListItem } from "./markdown";
+import { renderMarkdown, taskLineIndices, toggleTaskListItem, extractWikiLinks } from "./markdown";
 
 describe("renderMarkdown", () => {
   it("рендерит gfm-чекбоксы", () => {
@@ -19,6 +19,50 @@ describe("renderMarkdown", () => {
   it("пустой и null-вход не падают", () => {
     expect(renderMarkdown("")).toBe("");
     expect(renderMarkdown(null as unknown as string)).toBe("");
+  });
+
+  it("рендерит вики-ссылку с data-wikilink", () => {
+    const html = renderMarkdown("см. [[Моя заметка]]");
+    expect(html).toContain('class="wikilink"');
+    expect(html).toContain('data-wikilink="Моя заметка"');
+    expect(html).toContain(">Моя заметка</a>");
+  });
+
+  it("вики-ссылка с алиасом: текст — алиас, цель — название", () => {
+    const html = renderMarkdown("[[Идея|вот тут]]");
+    expect(html).toContain('data-wikilink="Идея"');
+    expect(html).toContain(">вот тут</a>");
+  });
+
+  it("[[...]] внутри кода остаётся текстом", () => {
+    const inline = renderMarkdown("код `[[не ссылка]]`");
+    expect(inline).not.toContain("wikilink");
+    const block = renderMarkdown("```\n[[тоже не ссылка]]\n```");
+    expect(block).not.toContain("wikilink");
+  });
+
+  it("HTML в названии ссылки не становится элементом", () => {
+    const html = renderMarkdown('[[<img src=x onerror="alert(1)">]]');
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    expect(doc.querySelector("img")).toBeNull();
+    // Название целиком ушло в data-атрибут как строка
+    expect(doc.querySelector("a.wikilink")?.getAttribute("data-wikilink"))
+      .toBe('<img src=x onerror="alert(1)">');
+  });
+});
+
+describe("extractWikiLinks", () => {
+  it("извлекает названия, алиас отбрасывает, дубли схлопывает без учёта регистра", () => {
+    expect(extractWikiLinks("[[А]] и [[Б|текст]], снова [[а]]")).toEqual(["А", "Б"]);
+  });
+
+  it("одиночные скобки и пустые ссылки игнорирует", () => {
+    expect(extractWikiLinks("[не ссылка] [[]] [[  ]] текст")).toEqual([]);
+    expect(extractWikiLinks("")).toEqual([]);
+  });
+
+  it("тримит пробелы вокруг названия", () => {
+    expect(extractWikiLinks("[[ Заметка ]]")).toEqual(["Заметка"]);
   });
 });
 

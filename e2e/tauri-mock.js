@@ -248,6 +248,13 @@
       db.notes = db.notes.filter((n) => n.id !== id);
       persist();
     },
+    search_notes: ({ query }) => {
+      const q = (query ?? "").trim().toLowerCase();
+      if (!q) return [];
+      return db.notes
+        .filter((n) => n.title.toLowerCase().includes(q) || n.content.toLowerCase().includes(q))
+        .map((n) => ({ ...n }));
+    },
 
     // --- дашборд / ИИ / модель ---
     get_activity_by_day: () => [],

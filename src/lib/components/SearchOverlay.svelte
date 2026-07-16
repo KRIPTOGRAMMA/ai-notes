@@ -1,6 +1,6 @@
 <script lang="ts">
   import { taskStore } from "../stores/tasks.svelte";
-  import { noteStore } from "../stores/notes.svelte";
+  import { api } from "../api/tauri";
   import type { Task, Note } from "../types";
 
   let { onClose, onSelectTask, onSelectNote }: {
@@ -11,24 +11,17 @@
 
   let query = $state("");
   let taskResults: Task[] = $state([]);
+  let noteResults: Note[] = $state([]);
   let inputEl: HTMLInputElement | undefined = $state();
 
-  // Заметки ищем клиентски (FTS для заметок нет), задачи — через готовый FTS.
-  const noteResults = $derived.by<Note[]>(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return [];
-    return noteStore.notes.filter(
-      n => n.title.toLowerCase().includes(q) || n.content.toLowerCase().includes(q)
-    );
-  });
-
+  // И задачи, и заметки — через FTS-бэкенд; токен отбрасывает устаревшие ответы.
   let searchToken = 0;
   async function runSearch() {
     const q = query.trim();
     const token = ++searchToken;
-    if (!q) { taskResults = []; return; }
-    const res = await taskStore.search(q);
-    if (token === searchToken) taskResults = res;
+    if (!q) { taskResults = []; noteResults = []; return; }
+    const [tasks, notes] = await Promise.all([taskStore.search(q), api.searchNotes(q)]);
+    if (token === searchToken) { taskResults = tasks; noteResults = notes; }
   }
 
   $effect(() => { inputEl?.focus(); });

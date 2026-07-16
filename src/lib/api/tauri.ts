@@ -26,6 +26,7 @@ export const api = {
   createNote: (note: CreateNotePayload) => invoke<Note>("create_note", { note }),
   updateNote: (id: string, patch: UpdateNotePayload) => invoke<Note>("update_note", { id, patch }),
   deleteNote: (id: string) => invoke<void>("delete_note", { id }),
+  searchNotes: (query: string) => invoke<Note[]>("search_notes", { query }),
   getActivityByDay: () => invoke<{ date: string; minutes: number }[]>("get_activity_by_day"),
   getTaskCompletionsByDay: () => invoke<{ date: string; completed: number }[]>("get_task_completions_by_day"),
   getCategoryDistribution: () => invoke<{ category: string; count: number }[]>("get_category_distribution"),

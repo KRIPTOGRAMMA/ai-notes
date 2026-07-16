@@ -106,6 +106,53 @@ test("заметки: превью рендерит чек-лист, клик п
   await expect(editor).toHaveValue("план:\n- [x] первый пункт\n- [ ] второй пункт");
 });
 
+test("вики-заметки: автодополнение, [[ссылка]] открывает/создаёт, бэклинки, поиск", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Заметки" }).click();
+  const title = page.getByPlaceholder("Название", { exact: true });
+
+  // заметка-цель
+  await page.getByRole("button", { name: "+ Новая заметка" }).click();
+  await title.fill("Идея");
+
+  // вторая заметка: автодополнение по "[["
+  await page.getByRole("button", { name: "+ Новая заметка" }).click();
+  await title.fill("Черновик");
+  const editor = page.getByPlaceholder(/Начните писать/);
+  await editor.fill("См. [[Ид");
+  await expect(page.locator(".ac-item", { hasText: "Идея" })).toBeVisible();
+  await page.keyboard.press("Enter");
+  await expect(editor).toHaveValue("См. [[Идея]]");
+
+  // превью: живая ссылка + битая (dashed)
+  await editor.fill("См. [[Идея]] и [[Новая мысль]]");
+  await page.getByRole("button", { name: "Превью" }).click();
+  const good = page.locator("a.wikilink", { hasText: "Идея" });
+  await expect(good).toBeVisible();
+  await expect(page.locator("a.wikilink.missing", { hasText: "Новая мысль" })).toBeVisible();
+
+  // клик открывает целевую заметку; бэклинк ведёт обратно
+  await good.click();
+  await expect(title).toHaveValue("Идея");
+  const backlink = page.locator(".backlink", { hasText: "Черновик" });
+  await expect(backlink).toBeVisible();
+  await backlink.click();
+  await expect(title).toHaveValue("Черновик");
+
+  // клик по битой ссылке создаёт заметку с этим названием
+  await page.getByRole("button", { name: "Превью" }).click();
+  await page.locator("a.wikilink.missing", { hasText: "Новая мысль" }).click();
+  await expect(title).toHaveValue("Новая мысль");
+
+  // Ctrl+K находит заметку по содержимому (search_notes)
+  await page.keyboard.press("Control+k");
+  await page.getByPlaceholder("Поиск задач и заметок...").fill("Идея]] и");
+  await page.locator(".result", { hasText: "Черновик" }).click();
+  await expect(title).toHaveValue("Черновик");
+});
+
 test("Ctrl+K находит задачу и открывает раздел задач", async ({ page }) => {
   await withMock(page);
   await page.goto("/");

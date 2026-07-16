@@ -168,6 +168,36 @@ pub async fn update_note_impl(pool: &SqlitePool, id: String, patch: UpdateNote) 
 }
 
 #[tauri::command]
+pub async fn search_notes(pool: State<'_, SqlitePool>, query: String) -> AppResult<Vec<Note>> {
+    search_notes_impl(pool.inner(), query).await
+}
+
+pub async fn search_notes_impl(pool: &SqlitePool, query: String) -> AppResult<Vec<Note>> {
+    let trimmed = query.trim();
+    if trimmed.is_empty() {
+        return Ok(vec![]);
+    }
+
+    // Как в search_tasks: сырой ввод — не синтаксис FTS5, оборачиваем в
+    // quoted-phrase-prefix, кавычки удваиваем.
+    let escaped = trimmed.replace('"', "\"\"");
+    let fts_query = format!("\"{}\"*", escaped);
+
+    let rows = sqlx::query(
+        "SELECT n.id, n.title, n.content, n.tags, n.linked_task_id, n.project_id, n.created_at, n.updated_at
+         FROM notes n
+         INNER JOIN notes_fts ON notes_fts.rowid = n.rowid
+         WHERE notes_fts MATCH ?
+         ORDER BY rank"
+    )
+    .bind(fts_query)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows.into_iter().map(row_to_note).collect())
+}
+
+#[tauri::command]
 pub async fn delete_note(pool: State<'_, SqlitePool>, id: String) -> AppResult<()> {
     delete_note_impl(pool.inner(), id).await
 }
@@ -218,6 +248,45 @@ mod tests {
 
         delete_note_impl(&pool, note.id).await.unwrap();
         assert!(get_notes_impl(&pool).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn fts_search_finds_and_stays_in_sync() {
+        let pool = test_pool().await;
+
+        let note = create_note_impl(&pool, CreateNote {
+            title: "Рецепт борща".into(),
+            content: "свёкла, капуста".into(),
+            tags: vec!["еда".into()],
+            linked_task_id: None,
+            project_id: None,
+        }).await.unwrap();
+
+        // По заголовку, по содержимому, по тегу; префиксно.
+        assert_eq!(search_notes_impl(&pool, "борщ".into()).await.unwrap().len(), 1);
+        assert_eq!(search_notes_impl(&pool, "капуст".into()).await.unwrap().len(), 1);
+        assert_eq!(search_notes_impl(&pool, "еда".into()).await.unwrap().len(), 1);
+        assert!(search_notes_impl(&pool, "плов".into()).await.unwrap().is_empty());
+
+        // Спецсимволы FTS5 в запросе не роняют MATCH.
+        assert!(search_notes_impl(&pool, "борщ-2 \"AND (x:y)".into()).await.unwrap().is_empty());
+        assert!(search_notes_impl(&pool, "   ".into()).await.unwrap().is_empty());
+
+        // После UPDATE индекс видит новый текст и не видит старый.
+        update_note_impl(&pool, note.id.clone(), UpdateNote {
+            title: None,
+            content: Some("теперь про плов".into()),
+            tags: None,
+            linked_task_id: None,
+            project_id: None,
+        }).await.unwrap();
+        assert_eq!(search_notes_impl(&pool, "плов".into()).await.unwrap().len(), 1);
+        assert!(search_notes_impl(&pool, "капуст".into()).await.unwrap().is_empty());
+
+        // После DELETE ничего не находится.
+        delete_note_impl(&pool, note.id).await.unwrap();
+        assert!(search_notes_impl(&pool, "плов".into()).await.unwrap().is_empty());
+        assert!(search_notes_impl(&pool, "борщ".into()).await.unwrap().is_empty());
     }
 
     #[tokio::test]

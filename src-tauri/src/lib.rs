@@ -233,6 +233,7 @@ pub fn run() {
                         commands::notes::create_note,
                         commands::notes::update_note,
                         commands::notes::delete_note,
+                        commands::notes::search_notes,
                         commands::settings::get_settings,
                         commands::settings::save_settings,
                         commands::backup::export,
