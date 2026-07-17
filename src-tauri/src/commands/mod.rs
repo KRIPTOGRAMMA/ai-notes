@@ -10,3 +10,4 @@ pub mod projects;
 pub mod planner;
 pub mod categories;
 pub mod pomodoro;
+pub mod note_links;

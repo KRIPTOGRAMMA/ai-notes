@@ -35,6 +35,7 @@ export const api = {
   searchNotes: (query: string) => invoke<Note[]>("search_notes", { query }),
   renameNoteLinks: (oldTitle: string, newTitle: string) =>
     invoke<number>("rename_note_links", { oldTitle, newTitle }),
+  aiSuggestLinks: (noteId: string) => invoke<void>("ai_suggest_links", { noteId }),
   getActivityByDay: () => invoke<{ date: string; minutes: number }[]>("get_activity_by_day"),
   getTaskCompletionsByDay: () => invoke<{ date: string; completed: number }[]>("get_task_completions_by_day"),
   getCategoryDistribution: () => invoke<{ category: string; count: number }[]>("get_category_distribution"),

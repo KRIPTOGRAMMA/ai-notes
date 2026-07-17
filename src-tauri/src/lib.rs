@@ -254,6 +254,7 @@ pub fn run() {
                         commands::notes::delete_note,
                         commands::notes::search_notes,
                         commands::notes::rename_note_links,
+                        commands::note_links::ai_suggest_links,
                         commands::settings::get_settings,
                         commands::settings::save_settings,
                         commands::backup::export,

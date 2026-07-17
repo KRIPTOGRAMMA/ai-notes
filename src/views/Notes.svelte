@@ -1,10 +1,12 @@
 <script lang="ts">
-  import { onMount, tick } from "svelte";
+  import { onMount } from "svelte";
+  import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { noteStore } from "../lib/stores/notes.svelte";
   import { taskStore } from "../lib/stores/tasks.svelte";
   import { projectStore } from "../lib/stores/projects.svelte";
   import { api } from "../lib/api/tauri";
-  import { renderMarkdown, toggleTaskListItem, extractWikiLinks } from "../lib/markdown";
+  import { extractWikiLinks } from "../lib/markdown";
+  import LiveMarkdownEditor from "../lib/components/LiveMarkdownEditor.svelte";
   import type { Note } from "../lib/types";
 
   let selectedId: string | null = $state(null);
@@ -14,15 +16,14 @@
   let editLinkedTaskId: string | null = $state(null);
   let editProjectId: string | null = $state(null);
   let tagInput = $state("");
-  let previewMode = $state(false);
-  let previewEl: HTMLDivElement | undefined = $state();
   let saveTimeout: ReturnType<typeof setTimeout> | null = null;
   let saving = $state(false);
   let renameToast: string | null = $state(null);
   let renameToastTimeout: ReturnType<typeof setTimeout> | null = null;
+  let editorRef: LiveMarkdownEditor | undefined = $state();
 
   const selected = $derived(noteStore.notes.find(n => n.id === selectedId) ?? null);
-  const previewHtml = $derived(renderMarkdown(editContent));
+  const otherTitles = $derived(noteStore.notes.filter(n => n.id !== selectedId).map(n => n.title));
 
   // Заметки, ссылающиеся на текущую через [[название]] (без учёта регистра).
   const backlinks = $derived.by<Note[]>(() => {
@@ -71,15 +72,25 @@
 
   async function selectNote(note: Note) {
     await flushPendingSave();
+    suppressNextContentSave = true;
     selectedId = note.id;
     editTitle = note.title;
     editContent = note.content;
     editTags = [...note.tags];
     editLinkedTaskId = note.linked_task_id;
     editProjectId = note.project_id;
-    previewMode = false;
-    acOpen = false;
+    linkSuggestions = null;
   }
+
+  // CodeMirror меняет editContent напрямую через bind:value (без oninput-хука),
+  // поэтому автосохранение вешаем на $effect. suppressNextContentSave гасит
+  // срабатывание, вызванное самим selectNote (программная подмена, не ввод).
+  let suppressNextContentSave = false;
+  $effect(() => {
+    editContent;
+    if (suppressNextContentSave) { suppressNextContentSave = false; return; }
+    scheduleSave();
+  });
 
   async function openWikiLink(title: string) {
     const existing = findByTitle(title);
@@ -150,7 +161,6 @@
     // Отложенное сохранение удаляемой заметки не нужно — просто гасим таймер.
     if (saveTimeout) { clearTimeout(saveTimeout); saveTimeout = null; }
     saving = false;
-    acOpen = false;
     await noteStore.remove(selectedId);
     selectedId = null;
     editTitle = "";
@@ -158,126 +168,6 @@
     editTags = [];
     editLinkedTaskId = null;
   }
-
-  // --- Автодополнение по "[[" в редакторе ---
-  let textareaEl: HTMLTextAreaElement | undefined = $state();
-  let acOpen = $state(false);
-  let acItems: string[] = $state([]);
-  let acIndex = $state(0);
-  let acPos = $state({ left: 0, top: 0 });
-  let acStart = 0; // позиция в editContent сразу после "[["
-
-  // Координаты каретки в textarea: зеркальный div с той же типографикой,
-  // маркер-span на месте каретки даёт offsetTop/offsetLeft.
-  function caretCoords(ta: HTMLTextAreaElement): { left: number; top: number } {
-    const mirror = document.createElement("div");
-    const s = getComputedStyle(ta);
-    for (const p of [
-      "font-family", "font-size", "font-weight", "line-height", "letter-spacing",
-      "padding-top", "padding-right", "padding-bottom", "padding-left",
-    ]) {
-      mirror.style.setProperty(p, s.getPropertyValue(p));
-    }
-    mirror.style.position = "absolute";
-    mirror.style.visibility = "hidden";
-    mirror.style.whiteSpace = "pre-wrap";
-    mirror.style.overflowWrap = "break-word";
-    mirror.style.width = `${ta.clientWidth}px`;
-    mirror.textContent = ta.value.slice(0, ta.selectionStart);
-    const marker = document.createElement("span");
-    marker.textContent = "​";
-    mirror.appendChild(marker);
-    ta.parentElement!.appendChild(mirror);
-    const lineHeight = parseFloat(s.lineHeight) || 21;
-    const pos = {
-      left: Math.min(marker.offsetLeft, ta.clientWidth - 180),
-      top: marker.offsetTop + lineHeight - ta.scrollTop,
-    };
-    mirror.remove();
-    return pos;
-  }
-
-  function checkAutocomplete() {
-    if (!textareaEl) { acOpen = false; return; }
-    const caret = textareaEl.selectionStart;
-    const m = /\[\[([^\[\]\n]*)$/.exec(editContent.slice(0, caret));
-    if (!m) { acOpen = false; return; }
-    const q = m[1].toLowerCase();
-    const items = noteStore.notes
-      .filter(n => n.id !== selectedId && n.title.toLowerCase().includes(q))
-      .map(n => n.title)
-      .slice(0, 8);
-    if (items.length === 0) { acOpen = false; return; }
-    acStart = caret - m[1].length;
-    acItems = items;
-    acIndex = 0;
-    acPos = caretCoords(textareaEl);
-    acOpen = true;
-  }
-
-  function acPick(title: string) {
-    if (!textareaEl) return;
-    const caret = textareaEl.selectionStart;
-    const closing = editContent.slice(caret).startsWith("]]") ? "" : "]]";
-    editContent = editContent.slice(0, acStart) + title + closing + editContent.slice(caret);
-    acOpen = false;
-    const newPos = acStart + title.length + 2; // каретка после "]]"
-    tick().then(() => {
-      textareaEl?.focus();
-      textareaEl?.setSelectionRange(newPos, newPos);
-    });
-    scheduleSave();
-  }
-
-  function onEditorKeydown(e: KeyboardEvent) {
-    if (!acOpen) return;
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      acIndex = (acIndex + 1) % acItems.length;
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      acIndex = (acIndex - 1 + acItems.length) % acItems.length;
-    } else if (e.key === "Enter" || e.key === "Tab") {
-      e.preventDefault();
-      acPick(acItems[acIndex]);
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      e.stopPropagation();
-      acOpen = false;
-    }
-  }
-
-  // Интерактивные чек-листы: после рендера превью снимаем disabled с чекбоксов
-  // и по клику переключаем соответствующую строку в самом markdown-тексте.
-  // Здесь же оживляем вики-ссылки: клик открывает заметку (или создаёт её),
-  // несуществующие цели помечаются классом missing.
-  $effect(() => {
-    // зависимости: перечитываем при смене html/режима/списка заметок
-    previewHtml; previewMode; noteStore.notes;
-    if (!previewMode || !previewEl) return;
-    tick().then(() => {
-      if (!previewEl) return;
-      const boxes = previewEl.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
-      boxes.forEach((box, idx) => {
-        box.disabled = false;
-        box.onchange = () => {
-          editContent = toggleTaskListItem(editContent, idx);
-          scheduleSave();
-        };
-      });
-      const links = previewEl.querySelectorAll<HTMLAnchorElement>("a.wikilink");
-      links.forEach(a => {
-        const target = a.dataset.wikilink ?? "";
-        const exists = findByTitle(target) !== null;
-        a.classList.toggle("missing", !exists);
-        a.title = exists ? target : `Создать «${target}»`;
-        a.onclick = (e) => {
-          e.preventDefault();
-          openWikiLink(target);
-        };
-      });
-    });
-  });
 
   function formatDate(iso: string) {
     return new Date(iso).toLocaleDateString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
@@ -287,9 +177,44 @@
     editLinkedTaskId ? taskStore.tasks.find(t => t.id === editLinkedTaskId) ?? null : null
   );
 
+  // --- ИИ-автолинковка (v0.6.8): «Предложить связи» ---
+  let aiEnabled = $state(false);
+  let linkSuggesting = $state(false);
+  let linkSuggestions: { noteId: string; titles: string[]; error: string | null } | null = $state(null);
+
+  async function suggestLinks() {
+    if (!selectedId) return;
+    linkSuggesting = true;
+    linkSuggestions = null;
+    try {
+      await api.aiSuggestLinks(selectedId);
+    } catch (e) {
+      linkSuggesting = false;
+      linkSuggestions = { noteId: selectedId, titles: [], error: String(e) };
+    }
+  }
+
+  function acceptLinkSuggestion(title: string) {
+    const sep = editContent && !editContent.endsWith("\n") ? "\n" : "";
+    editContent = `${editContent}${sep}[[${title}]]`; // сохранение — через $effect на editContent
+    linkSuggestions = linkSuggestions
+      ? { ...linkSuggestions, titles: linkSuggestions.titles.filter(t => t !== title) }
+      : null;
+  }
+
   onMount(() => {
     noteStore.load();
     taskStore.load();
+    // Капабилити-детект: при выключенном ИИ кнопка «Предложить связи» скрыта
+    api.getSettings().then(s => aiEnabled = s.ai_provider !== "none").catch(() => {});
+    const unlisteners: UnlistenFn[] = [];
+    (async () => {
+      unlisteners.push(await listen<{ note_id: string; titles: string[]; error: string | null }>("ai-links", (e) => {
+        linkSuggesting = false;
+        linkSuggestions = { noteId: e.payload.note_id, titles: e.payload.titles, error: e.payload.error };
+      }));
+    })();
+    return () => unlisteners.forEach(u => u());
   });
 </script>
 
@@ -329,12 +254,30 @@
         {#if renameToast}
           <span class="rename-toast">{renameToast}</span>
         {/if}
-        <div class="seg">
-          <button class:active={!previewMode} onclick={() => previewMode = false}>Редактировать</button>
-          <button class:active={previewMode} onclick={() => previewMode = true}>Превью</button>
-        </div>
+        {#if aiEnabled}
+          <button class="btn-icon" disabled={linkSuggesting} title="ИИ предложит заметки для связи"
+            onclick={suggestLinks}>{linkSuggesting ? "…" : "🔗✨"}</button>
+        {/if}
         <button class="btn-icon btn-danger" title="Удалить заметку" onclick={deleteSelected}>✕</button>
       </div>
+
+      {#if linkSuggestions && linkSuggestions.noteId === selectedId}
+        <div class="link-suggest">
+          {#if linkSuggestions.error}
+            <span class="alert" style="margin:0;">{linkSuggestions.error}</span>
+          {:else if linkSuggestions.titles.length === 0}
+            <span class="muted">Связей не найдено</span>
+          {:else}
+            <span class="muted">Связанные:</span>
+            {#each linkSuggestions.titles as t (t)}
+              <button class="chip link-chip" onclick={() => acceptLinkSuggestion(t)} title="Добавить [[{t}]] в заметку">
+                + {t}
+              </button>
+            {/each}
+          {/if}
+          <button class="btn-icon" title="Закрыть" onclick={() => linkSuggestions = null}>✕</button>
+        </div>
+      {/if}
 
       <!-- Мета: привязка к задаче + теги -->
       <div class="editor-meta">
@@ -374,31 +317,15 @@
       </div>
 
       <div class="editor-body">
-        {#if previewMode}
-          <div bind:this={previewEl} class="md-preview">{@html previewHtml}</div>
-        {:else}
-          <textarea
-            class="content-input"
-            bind:this={textareaEl}
-            bind:value={editContent}
-            oninput={() => { scheduleSave(); checkAutocomplete(); }}
-            onkeydown={onEditorKeydown}
-            onclick={checkAutocomplete}
-            onblur={() => acOpen = false}
-            placeholder="Начните писать... (Markdown, чек-листы: - [ ] пункт, ссылки: [[заметка]])"
-          ></textarea>
-          {#if acOpen}
-            <div class="ac-panel" style="left:{acPos.left}px; top:{acPos.top}px;">
-              {#each acItems as item, i (item)}
-                <button
-                  class="ac-item"
-                  class:active={i === acIndex}
-                  onmousedown={(e) => { e.preventDefault(); acPick(item); }}
-                >{item}</button>
-              {/each}
-            </div>
-          {/if}
-        {/if}
+        <LiveMarkdownEditor
+          bind:this={editorRef}
+          bind:value={editContent}
+          placeholder="Начните писать... (Markdown, чек-листы: - [ ] пункт, ссылки: [[заметка]])"
+          knownTitles={otherTitles}
+          resolveExists={(t) => findByTitle(t) !== null}
+          onWikiLinkClick={openWikiLink}
+          onSubmitShortcut={() => {}}
+        />
       </div>
 
       {#if backlinks.length > 0}
@@ -504,6 +431,23 @@
   }
   .title-input:focus { outline: none; }
 
+  .link-suggest {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .link-chip {
+    border: none;
+    cursor: pointer;
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+  }
+  .link-chip:hover { background: color-mix(in srgb, var(--accent) 20%, transparent); }
+
   .rename-toast {
     font-size: 11px;
     padding: 2px 8px;
@@ -572,40 +516,6 @@
     overflow: hidden;
   }
 
-  .ac-panel {
-    position: absolute;
-    z-index: 10;
-    min-width: 160px;
-    max-width: 280px;
-    background: var(--bg-primary);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
-    padding: 3px;
-    display: flex;
-    flex-direction: column;
-  }
-
-  .ac-item {
-    display: block;
-    width: 100%;
-    text-align: left;
-    border: none;
-    background: transparent;
-    border-radius: calc(var(--radius) - 2px);
-    padding: 5px 8px;
-    font-size: 12px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .ac-item:hover { background: var(--bg-hover); }
-  .ac-item.active {
-    background: color-mix(in srgb, var(--accent) 14%, transparent);
-    color: var(--accent);
-  }
-
   .backlinks {
     display: flex;
     align-items: center;
@@ -626,59 +536,4 @@
     color: var(--accent);
   }
   .backlink:hover { text-decoration: underline; }
-
-  .content-input {
-    flex: 1;
-    padding: 12px 14px;
-    border: none;
-    outline: none;
-    resize: none;
-    font-size: 13px;
-    line-height: 1.6;
-    font-family: inherit;
-    background: transparent;
-  }
-  .content-input:focus { outline: none; }
-
-  .md-preview {
-    flex: 1;
-    overflow-y: auto;
-    padding: 12px 14px;
-    font-size: 13px;
-    line-height: 1.6;
-  }
-  .md-preview :global(h1),
-  .md-preview :global(h2),
-  .md-preview :global(h3) { margin: 0.6em 0 0.3em; }
-  .md-preview :global(ul),
-  .md-preview :global(ol) { padding-left: 1.4em; margin: 0.4em 0; }
-  .md-preview :global(li) { margin: 0.15em 0; }
-  .md-preview :global(input[type="checkbox"]) { margin-right: 6px; cursor: pointer; }
-  .md-preview :global(code) {
-    background: var(--bg-secondary);
-    padding: 1px 4px;
-    border-radius: 4px;
-    font-size: 0.9em;
-  }
-  .md-preview :global(pre) {
-    background: var(--bg-secondary);
-    padding: 10px;
-    border-radius: var(--radius);
-    overflow-x: auto;
-  }
-  .md-preview :global(a) { color: var(--accent); }
-  .md-preview :global(a.wikilink) {
-    text-decoration: none;
-    border-bottom: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
-  }
-  .md-preview :global(a.wikilink.missing) {
-    color: var(--text-secondary);
-    border-bottom-style: dashed;
-  }
-  .md-preview :global(blockquote) {
-    border-left: 3px solid var(--border);
-    padding-left: 10px;
-    color: var(--text-secondary);
-    margin: 0.4em 0;
-  }
 </style>

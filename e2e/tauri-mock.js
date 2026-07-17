@@ -391,6 +391,15 @@
     ai_rewrite: () => {},
     ai_subtasks: () => {},
     ai_classify: () => {},
+    // Автолинковка: детерминированный «ИИ» — предлагает все остальные заметки (до 5)
+    ai_suggest_links: ({ noteId }) => {
+      const titles = db.notes.filter((n) => n.id !== noteId).map((n) => n.title).slice(0, 5);
+      setTimeout(() => window.__mockEmit("ai-links", {
+        note_id: noteId,
+        titles,
+        error: titles.length === 0 ? "Больше нет заметок, с которыми можно связать эту" : null,
+      }), 0);
+    },
     model_status: () => ({ exists: false, size_bytes: 0 }),
     default_model_url: () => "",
     export: () => {},
