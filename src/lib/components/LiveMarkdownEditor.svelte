@@ -17,10 +17,14 @@
   } from "@codemirror/view";
   import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
   import { markdown } from "@codemirror/lang-markdown";
+  import { syntaxTree } from "@codemirror/language";
   import {
     autocompletion, completionKeymap,
     type CompletionContext, type CompletionResult,
   } from "@codemirror/autocomplete";
+  import { convertFileSrc } from "@tauri-apps/api/core";
+  import { api } from "../api/tauri";
+  import { IMAGE_RE, imageMarkdown, extImageExt } from "../markdown";
 
   let {
     value = $bindable(""),
@@ -114,9 +118,76 @@
     ignoreEvent() { return false; }
   }
 
-  function headingLevel(text: string): number {
-    const m = /^(#{1,6})\s/.exec(text);
-    return m ? m[1].length : 0;
+  // Абсолютный путь к папке images резолвится один раз при монтировании
+  // (get_images_dir) — convertFileSrc() требует абсолютный путь, а markdown
+  // хранит только имя файла (см. paste-обработчик ниже).
+  let imagesDir: string | null = null;
+  api.getImagesDir().then(d => { imagesDir = d; forceRebuild = true; view?.dispatch({}); }).catch(() => {});
+
+  // Картинки, у которых сейчас кликом раскрыта markdown-ссылка рядом с
+  // рендером (по умолчанию видна только картинка). Ключ — "from:to" диапазона
+  // ![](...) в документе; переживает только пока сам диапазон не меняется
+  // (правка текста выше по документу сдвинет позиции — раскрытые вернутся
+  // к дефолту, что нормально для редких кликов).
+  const revealedImages = new Set<string>();
+
+  class ImageWidget extends WidgetType {
+    filename: string;
+    dir: string | null;
+    key: string;
+    constructor(filename: string, from: number, to: number) {
+      super();
+      this.filename = filename;
+      this.dir = imagesDir;
+      this.key = `${from}:${to}`;
+    }
+    // imagesDir резолвится асинхронно после монтирования (см. ниже) — включаем
+    // снимок dir в eq(), иначе CodeMirror переиспользует DOM-узел, созданный ДО
+    // того, как путь стал известен, и src так и останется пустым до следующей правки.
+    eq(other: ImageWidget) { return other.filename === this.filename && other.dir === this.dir && other.key === this.key; }
+    toDOM() {
+      const img = document.createElement("img");
+      img.className = "cm-note-image";
+      if (this.dir) {
+        img.src = convertFileSrc(`${this.dir}/${this.filename}`);
+      }
+      img.alt = this.filename;
+      img.onerror = () => img.classList.add("broken");
+      img.title = "Клик — показать/скрыть ссылку";
+      img.onmousedown = (e) => e.preventDefault();
+      img.onclick = () => {
+        if (revealedImages.has(this.key)) revealedImages.delete(this.key);
+        else revealedImages.add(this.key);
+        forceRebuild = true;
+        view?.dispatch({});
+      };
+      return img;
+    }
+    ignoreEvent() { return false; }
+  }
+
+  // Собирает Lezer-диапазоны кода (FencedCode, InlineCode), чтобы
+  // не применять инлайн-стили и вики-ссылки внутри них.
+  function codeRanges(state: EditorState): Set<number> {
+    const set = new Set<number>();
+    let depth = 0;
+    syntaxTree(state).iterate({
+      from: 0,
+      to: state.doc.length,
+      enter: (node) => {
+        if (node.name === "FencedCode" || node.name === "InlineCode") {
+          depth++;
+          for (let p = node.from; p < node.to; p++) set.add(p);
+          return false;
+        }
+        return undefined;
+      },
+    });
+    return set;
+  }
+
+  function inCode(pos: number, set: Set<number>): boolean {
+    return set.has(pos);
   }
 
   // Строит decoration-набор для всего документа: строка с курсором показывает
@@ -125,8 +196,7 @@
   // прятал бы виджеты в однострочных заметках), остальные — отрендеренный вид.
   function buildDecorations(state: EditorState, hasFocus: boolean): DecorationSet {
     const cursorLine = hasFocus ? state.doc.lineAt(state.selection.main.head).number : -1;
-    // Decoration.set() сортирует сам (в отличие от ручного RangeSetBuilder,
-    // где порядок на равном `from` легко перепутать между line/mark/replace).
+    const codePositions = codeRanges(state);
     const items: { from: number; to: number; deco: Decoration }[] = [];
 
     for (let i = 1; i <= state.doc.lines; i++) {
@@ -135,7 +205,7 @@
       const text = line.text;
 
       // Заголовки: строку целиком метим классом размера, маркер '#' скрываем
-      const hLevel = headingLevel(text);
+      const hLevel = text.startsWith("#") ? /^#{1,6}/.exec(text)?.[0].length ?? 0 : 0;
       if (hLevel > 0) {
         items.push({
           from: line.from, to: line.from,
@@ -149,8 +219,7 @@
         }
       }
 
-      // Чекбоксы: "- [ ] " / "- [x] " → виджет, независимо от raw/rendered
-      // (переключать чекбокс удобно в любом состоянии строки)
+      // Чекбоксы: "- [ ] " / "- [x] " → виджет
       const cbMatch = /^(\s*[-*+]\s+)\[( |x|X)\]/.exec(text);
       if (cbMatch) {
         const markStart = line.from + cbMatch[1].length;
@@ -162,48 +231,98 @@
         });
       }
 
+      // Картинки ![alt](filename) — НЕ внутри кода. По умолчанию видна только
+      // отрендеренная картинка (markdown-ссылка скрыта); клик по картинке
+      // раскрывает ссылку рядом с ней (revealedImages), повторный клик —
+      // прячет обратно. Картинка — Decoration.widget (side: 1) сразу после
+      // текста, а не replace: сама ссылка отдельно скрывается/показывается
+      // через Decoration.replace по тому же диапазону.
+      for (const m of text.matchAll(IMAGE_RE)) {
+        const from = line.from + m.index!;
+        const to = from + m[0].length;
+        if (inCode(from, codePositions)) continue;
+        const filename = m[2].trim();
+        if (!filename) continue;
+        const key = `${from}:${to}`;
+        if (!revealedImages.has(key)) {
+          items.push({ from, to, deco: Decoration.replace({}) });
+        }
+        items.push({
+          from: to, to,
+          deco: Decoration.widget({ widget: new ImageWidget(filename, from, to), side: 1 }),
+        });
+      }
+
       if (!raw) {
-        // Жирный **text** и курсив *text*/_text_ — маркеры скрываем, текст красим классом
-        for (const m of text.matchAll(/\*\*([^*\n]+)\*\*/g)) {
-          const from = line.from + m.index!;
-          const to = from + m[0].length;
-          items.push({ from, to: from + 2, deco: Decoration.replace({}) });
-          items.push({ from: from + 2, to: to - 2, deco: Decoration.mark({ class: "cm-strong" }) });
-          items.push({ from: to - 2, to, deco: Decoration.replace({}) });
-        }
-        for (const m of text.matchAll(/(?<!\*)\*([^*\n]+)\*(?!\*)|(?<!_)_([^_\n]+)_(?!_)/g)) {
-          const from = line.from + m.index!;
-          const to = from + m[0].length;
-          items.push({ from, to: from + 1, deco: Decoration.replace({}) });
-          items.push({ from: from + 1, to: to - 1, deco: Decoration.mark({ class: "cm-em" }) });
-          items.push({ from: to - 1, to, deco: Decoration.replace({}) });
-        }
-        // Инлайн-код `code`
-        for (const m of text.matchAll(/`([^`\n]+)`/g)) {
-          const from = line.from + m.index!;
-          const to = from + m[0].length;
-          items.push({ from, to: from + 1, deco: Decoration.replace({}) });
-          items.push({ from: from + 1, to: to - 1, deco: Decoration.mark({ class: "cm-code" }) });
-          items.push({ from: to - 1, to, deco: Decoration.replace({}) });
-        }
-        // Вики-ссылки [[target]] / [[target|label]] → кликабельный виджет
-        for (const m of text.matchAll(/\[\[([^\[\]|]+)(?:\|([^\[\]]+))?\]\]/g)) {
-          const from = line.from + m.index!;
-          const to = from + m[0].length;
-          const target = m[1].trim();
-          const label = (m[2] ?? m[1]).trim();
-          if (!target) continue;
-          items.push({
-            from, to,
-            deco: Decoration.replace({ widget: new WikiLinkWidget(target, label) }),
-          });
+        const lineStart = line.from;
+
+        // Жирный **text** — только не внутри кода
+        if (!inCode(lineStart, codePositions)) {
+          for (const m of text.matchAll(/\*\*([^*\n]+)\*\*/g)) {
+            const from = lineStart + m.index!;
+            const to = from + m[0].length;
+            items.push({ from, to: from + 2, deco: Decoration.replace({}) });
+            items.push({ from: from + 2, to: to - 2, deco: Decoration.mark({ class: "cm-strong" }) });
+            items.push({ from: to - 2, to, deco: Decoration.replace({}) });
+          }
+          // Курсив *text*/_text_ — только не внутри кода
+          for (const m of text.matchAll(/(?<!\*)\*([^*\n]+)\*(?!\*)|(?<!_)_([^_\n]+)_(?!_)/g)) {
+            const from = lineStart + m.index!;
+            const to = from + m[0].length;
+            items.push({ from, to: from + 1, deco: Decoration.replace({}) });
+            items.push({ from: from + 1, to: to - 1, deco: Decoration.mark({ class: "cm-em" }) });
+            items.push({ from: to - 1, to, deco: Decoration.replace({}) });
+          }
+          // Инлайн-код `code`
+          for (const m of text.matchAll(/`([^`\n]+)`/g)) {
+            const from = lineStart + m.index!;
+            const to = from + m[0].length;
+            items.push({ from, to: from + 1, deco: Decoration.replace({}) });
+            items.push({ from: from + 1, to: to - 1, deco: Decoration.mark({ class: "cm-code" }) });
+            items.push({ from: to - 1, to, deco: Decoration.replace({}) });
+          }
+          // Вики-ссылки [[target]] / [[target|label]] — НЕ внутри кода
+          for (const m of text.matchAll(/\[\[([^\[\]|]+)(?:\|([^\[\]]+))?\]\]/g)) {
+            const from = lineStart + m.index!;
+            const to = from + m[0].length;
+            if (inCode(from, codePositions)) continue;
+            const target = m[1].trim();
+            const label = (m[2] ?? m[1]).trim();
+            if (!target) continue;
+            items.push({
+              from, to,
+              deco: Decoration.replace({ widget: new WikiLinkWidget(target, label) }),
+            });
+          }
         }
       }
     }
 
+    // FencedCode → CodeText: моноширинный фон через Lezer-дерево
+    syntaxTree(state).iterate({
+      from: 0,
+      to: state.doc.length,
+      enter: (node) => {
+        if (node.name === "FencedCode") {
+          let child = node.node.firstChild;
+          while (child) {
+            if (child.name === "CodeText") {
+              items.push({
+                from: child.from, to: child.to,
+                deco: Decoration.mark({ class: "cm-code" }),
+              });
+            }
+            child = child.nextSibling;
+          }
+          return false;
+        }
+        return undefined;
+      },
+    });
+
     return Decoration.set(
       items.map(it => it.deco.range(it.from, it.to)),
-      true, // sort
+      true,
     );
   }
 
@@ -272,7 +391,117 @@
     },
     ".cm-task-checkbox": { marginRight: "4px", cursor: "pointer", verticalAlign: "middle" },
     ".cm-placeholder": { color: "var(--text-secondary)" },
+    ".cm-note-image": {
+      display: "block",
+      maxWidth: "100%",
+      marginTop: "4px",
+      borderRadius: "6px",
+    },
+    ".cm-note-image.broken": {
+      display: "inline-block",
+      minWidth: "80px",
+      minHeight: "40px",
+      background: "var(--bg-secondary)",
+      border: "1px dashed var(--border)",
+    },
   });
+
+  // Вставка картинки из буфера: перехватываем paste, если среди файлов буфера
+  // есть image/* — сохраняем через save_note_image и вставляем ![](имя) на
+  // месте курсора вместо стандартной вставки текста/пустоты.
+  function fileToBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function handleImagePaste(ev: ClipboardEvent, v: EditorView): Promise<boolean> {
+    const items = ev.clipboardData?.items;
+    // items.length === 0 — DOM ничего не увидел (WebKitGTK на Linux не прокидывает
+    // изображения через ClipboardEvent вообще, даже когда в буфере реально image/png:
+    // types и items приходят пустыми). Отличаем от «в буфере правда только текст» —
+    // там items не пуст, просто type начинается не с "image/". Только для пустого
+    // items имеет смысл идти в обходной путь через нативный буфер.
+    if (!items || items.length === 0) {
+      return pasteImageFromClipboard(ev, v);
+    }
+    const imageItem = Array.from(items).find(it => it.type.startsWith("image/"));
+    if (!imageItem) return false;
+    const file = imageItem.getAsFile();
+    if (!file) return false;
+
+    ev.preventDefault();
+    try {
+      const dataUrl = await fileToBase64(file);
+      const ext = extImageExt(file.type || file.name || "png");
+      const filename = await api.saveNoteImage(dataUrl, ext);
+      const markdown = imageMarkdown(filename);
+      const pos = v.state.selection.main.head;
+      v.dispatch({
+        changes: { from: pos, insert: markdown },
+        selection: { anchor: pos + markdown.length },
+      });
+    } catch {
+      // Сохранение не удалось (диск/права/мусор в буфере) — тихо ничего не вставляем.
+    }
+    return true;
+  }
+
+  // WebKitGTK на Linux (в т.ч. под Wayland/Hyprland) не прокидывает изображения
+  // через ClipboardEvent.clipboardData — DOM paste-событие приходит пустым
+  // (types: [], items: []), даже когда в буфере реально лежит image/png (проверено
+  // вручную через `wl-paste --list-types`, показывает image/png; DOM-событие при
+  // этом всё равно даёт items: []). Это ограничение самого WebKitGTK, а не кода
+  // приложения. Обходим через нативный доступ к буферу — tauri-plugin-clipboard-manager
+  // читает буфер через GTK API в обход DOM, но отдаёт сырой RGBA (Image.rgba() +
+  // size()), не PNG — кодируем в PNG сами через canvas (toBlob), т.к. готового
+  // PNG-энкодера в JS без доп. библиотек нет.
+  async function rgbaToPngDataUrl(rgba: Uint8Array, width: number, height: number): Promise<string> {
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("canvas 2d context unavailable");
+    ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba), width, height), 0, 0);
+    return new Promise((resolve, reject) => {
+      canvas.toBlob(blob => {
+        if (!blob) { reject(new Error("toBlob failed")); return; }
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(blob);
+      }, "image/png");
+    });
+  }
+
+  // Возвращает true, только если реально вставили картинку (paste-обработчик
+  // сверху решает, звать ли ev.preventDefault() — до этого момента буфер мог
+  // содержать текст, который должен пройти обычной вставкой без перехвата).
+  async function pasteImageFromClipboard(ev: ClipboardEvent, v: EditorView): Promise<boolean> {
+    try {
+      const { readImage } = await import("@tauri-apps/plugin-clipboard-manager");
+      const image = await readImage();
+      const [rgba, size] = await Promise.all([image.rgba(), image.size()]);
+      ev.preventDefault();
+      const dataUrl = await rgbaToPngDataUrl(rgba, size.width, size.height);
+      const filename = await api.saveNoteImage(dataUrl, "png");
+      const markdown = imageMarkdown(filename);
+      const pos = v.state.selection.main.head;
+      v.dispatch({
+        changes: { from: pos, insert: markdown },
+        selection: { anchor: pos + markdown.length },
+      });
+      return true;
+    } catch {
+      // В буфере не изображение (текст/пусто) или плагин недоступен — тихо
+      // пропускаем, обычный Ctrl+V для текста проходит как есть (preventDefault
+      // ещё не вызывался на этом пути, если readImage() упал раньше).
+      return false;
+    }
+  }
 
   onMount(() => {
     if (!hostEl) return;
@@ -295,6 +524,15 @@
       theme,
       EditorView.lineWrapping,
       cmPlaceholder(placeholderText),
+      EditorView.domEventHandlers({
+        paste: (event, v) => {
+          void handleImagePaste(event, v);
+          // Возврат из domEventHandlers не отменяет вставку сам по себе —
+          // отмена делается через event.preventDefault() внутри handleImagePaste
+          // (только когда среди буфера реально нашлась картинка).
+          return false;
+        },
+      }),
       EditorView.updateListener.of(update => {
         if (update.docChanged) {
           value = update.state.doc.toString();

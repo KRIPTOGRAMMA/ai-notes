@@ -2,9 +2,11 @@
   import { onMount } from "svelte";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { taskStore } from "../lib/stores/tasks.svelte";
+  import { routineStore } from "../lib/stores/routines.svelte";
   import { api } from "../lib/api/tauri";
   import TaskModal from "../lib/components/TaskModal.svelte";
-  import type { Task, CreateTaskPayload } from "../lib/types";
+  import RoutinesModal from "../lib/components/RoutinesModal.svelte";
+  import type { Task, CreateTaskPayload, RoutineBlock } from "../lib/types";
 
   let { onOpenTask }: { onOpenTask: (id: string) => void } = $props();
 
@@ -20,9 +22,22 @@
   let planError: string | null = $state(null);
 
   let aiEnabled = $state(false);
+  let showRoutinesModal = $state(false);
+
+  // Сигнал «спланировать день» из командной палитры (Ctrl+K): переключить на
+  // неделю и запустить планировщик, как кнопка «⚡ Спланировать день».
+  let planDayKey = $state(0);
+  $effect(() => {
+    planDayKey;
+    if (taskStore.planDayRequested === 0) return;
+    planDayKey = taskStore.planDayRequested;
+    viewMode = "week";
+    if (aiEnabled) planDay();
+  });
 
   onMount(() => {
     taskStore.load();
+    routineStore.load();
     // Капабилити-детект: при выключенном ИИ планировщик просто скрыт
     api.getSettings().then(s => aiEnabled = s.ai_provider !== "none").catch(() => {});
     const unlisteners: UnlistenFn[] = [];
@@ -196,6 +211,22 @@
     return map;
   });
 
+  // Рутины по дням недели: для каждого дня недели проверяем маску
+  const routinesByDay = $derived.by(() => {
+    const map = new Map<string, { title: string; start_mins: number; duration_mins: number }[]>();
+    for (const d of weekDays) {
+      const dayOfWeek = d.date.getDay() === 0 ? 6 : d.date.getDay() - 1; // 0=пн
+      const blocks: RoutineBlock[] = [];
+      for (const r of routineStore.active) {
+        if (r.days_mask & (1 << dayOfWeek)) {
+          blocks.push({ title: r.title, start_mins: r.start_mins, duration_mins: r.duration_mins });
+        }
+      }
+      if (blocks.length > 0) map.set(d.key, blocks);
+    }
+    return map;
+  });
+
   // Бэклог: активные задачи без блока (Todo/InProgress)
   const backlog = $derived(
     taskStore.activeTasks.filter(t => !t.scheduled_at && (t.status === "Todo" || t.status === "InProgress"))
@@ -313,6 +344,9 @@
     <span class="month-label">{viewMode === "week" ? weekLabel : `${MONTHS[month]} ${year}`}</span>
     <button class="btn-icon" onclick={() => shiftMonth(1)} title={viewMode === "week" ? "Следующая неделя" : "Следующий месяц"}>→</button>
     <button class="btn-sm" onclick={goToday}>Сегодня</button>
+    {#if viewMode === "week"}
+      <button class="btn-sm" onclick={() => showRoutinesModal = true}>Рутины</button>
+    {/if}
   </div>
 
   {#if viewMode === "week"}
@@ -357,6 +391,20 @@
                   </button>
                   <button class="block-x" title="Снять блок" onclick={(e) => { e.stopPropagation(); unschedule(t.id); }}>✕</button>
                   <div class="resize-handle" role="presentation" onmousedown={(e) => startResize(e, t)}></div>
+                </div>
+              {/each}
+
+              {#each routinesByDay.get(d.key) ?? [] as rb, ri (ri)}
+                <div
+                  class="block routine"
+                  role="presentation"
+                  style="top:{(rb.start_mins / 60) * HOUR_H}px; height:{Math.max((rb.duration_mins / 60) * HOUR_H, 18)}px;"
+                  title="{rb.title}"
+                >
+                  <div class="block-body">
+                    <span class="block-time">{String(Math.floor(rb.start_mins / 60)).padStart(2, "0")}:{String(rb.start_mins % 60).padStart(2, "0")}–{String(Math.floor((rb.start_mins + rb.duration_mins) / 60)).padStart(2, "0")}:{String((rb.start_mins + rb.duration_mins) % 60).padStart(2, "0")}</span>
+                    <span class="block-title">{rb.title}</span>
+                  </div>
                 </div>
               {/each}
 
@@ -469,6 +517,10 @@
     onSave={handleCreate}
     onClose={() => createFor = null}
   />
+{/if}
+
+{#if showRoutinesModal}
+  <RoutinesModal onClose={() => showRoutinesModal = false} />
 {/if}
 
 <style>
@@ -684,6 +736,26 @@
   }
 
   /* Предложение ИИ: полупрозрачный пунктирный «призрак» до подтверждения */
+  /* Рутина: полупрозрачный блок без интерактивности */
+  .block.routine {
+    background: color-mix(in srgb, var(--accent) 8%, var(--bg-primary));
+    border: 1px dashed var(--accent);
+    border-left-width: 3px;
+    cursor: default;
+    opacity: 0.6;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .block.routine .block-body {
+    padding-right: 5px;
+    cursor: default;
+  }
+
+  .block.routine .block-time {
+    color: var(--text-secondary);
+  }
+
   .block.ghost {
     background: color-mix(in srgb, var(--accent) 7%, var(--bg-primary));
     border: 1.5px dashed var(--accent);

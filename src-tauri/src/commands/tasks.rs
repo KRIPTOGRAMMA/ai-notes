@@ -1,5 +1,6 @@
 use tauri::State;
-use sqlx::SqlitePool;
+use sqlx::{SqlitePool, Row};
+use serde::Serialize;
 use chrono::{DateTime, Utc};
 use crate::core::task::{CreateTask, Task, TaskRow, UpdateTask, TaskStatus};
 
@@ -237,6 +238,9 @@ pub async fn complete_task_impl(pool: &SqlitePool, id: String) -> Result<Task, S
     }
     Some(duration) => {
       task.deadline = Some(now + duration);
+      if let Some(scheduled) = &task.scheduled_at {
+        task.scheduled_at = Some(*scheduled + duration);
+      }
       reset_notifications = true;
     }
   }
@@ -244,10 +248,11 @@ pub async fn complete_task_impl(pool: &SqlitePool, id: String) -> Result<Task, S
   task.updated_at = now;
 
   sqlx::query(
-    "UPDATE tasks SET status=?, hidden=?, deadline=?, completed_at=?, updated_at=?,
+    "UPDATE tasks SET status=?, hidden=?, deadline=?, completed_at=?, updated_at=?, scheduled_at=?,
      notified_24h = CASE WHEN ? THEN 0 ELSE notified_24h END,
      notified_1h = CASE WHEN ? THEN 0 ELSE notified_1h END,
-     notified_deadline = CASE WHEN ? THEN 0 ELSE notified_deadline END
+     notified_deadline = CASE WHEN ? THEN 0 ELSE notified_deadline END,
+     notified_block = CASE WHEN ? THEN 0 ELSE notified_block END
      WHERE id=?"
   )
   .bind(format!("{:?}", task.status))
@@ -255,6 +260,8 @@ pub async fn complete_task_impl(pool: &SqlitePool, id: String) -> Result<Task, S
   .bind(task.deadline.map(|d| d.to_rfc3339()))
   .bind(task.completed_at.map(|d| d.to_rfc3339()))
   .bind(task.updated_at.to_rfc3339())
+  .bind(task.scheduled_at.map(|d| d.to_rfc3339()))
+  .bind(reset_notifications)
   .bind(reset_notifications)
   .bind(reset_notifications)
   .bind(reset_notifications)
@@ -340,6 +347,70 @@ pub async fn search_tasks_impl(pool: &SqlitePool, query: String) -> Result<Vec<T
   let mut tasks: Vec<Task> = rows.into_iter().map(|r| r.into_task()).collect();
   crate::commands::subtasks::attach_subtasks(pool, &mut tasks).await?;
   Ok(tasks)
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct TaskSnippet {
+  pub item: Task,
+  pub snippet: String,
+}
+
+#[tauri::command]
+pub async fn search_tasks_snippet(pool: State<'_, SqlitePool>, query: String) -> Result<Vec<TaskSnippet>, String> {
+  search_tasks_snippet_impl(pool.inner(), query).await
+}
+
+pub async fn search_tasks_snippet_impl(pool: &SqlitePool, query: String) -> Result<Vec<TaskSnippet>, String> {
+  let trimmed = query.trim();
+  if trimmed.is_empty() {
+    return Ok(vec![]);
+  }
+
+  let escaped = trimmed.replace('"', "\"\"");
+  let fts_query = format!("\"{}\"*", escaped);
+
+  let rows = sqlx::query(
+    "SELECT t.*,
+            snippet(tasks_fts, 2, '<mark>', '</mark>', '…', 32) AS snippet
+     FROM tasks t
+     INNER JOIN tasks_fts ON tasks_fts.rowid = t.rowid
+     WHERE tasks_fts MATCH ?
+       AND t.hidden = 0
+     ORDER BY rank"
+  )
+  .bind(fts_query)
+  .fetch_all(pool)
+  .await
+  .map_err(|e| e.to_string())?;
+
+  let mut snippets: Vec<TaskSnippet> = Vec::with_capacity(rows.len());
+  for row in rows {
+    let snippet: Option<String> = row.get("snippet");
+    let snippet = snippet.unwrap_or_default();
+    let task_row = TaskRow {
+      id: row.get("id"),
+      title: row.get("title"),
+      description: row.get("description"),
+      status: row.get("status"),
+      priority: row.get("priority"),
+      category: row.get("category"),
+      deadline: row.get("deadline"),
+      tags: row.get("tags"),
+      created_at: row.get("created_at"),
+      updated_at: row.get("updated_at"),
+      completed_at: row.get("completed_at"),
+      recurrence: row.get("recurrence"),
+      hidden: row.get("hidden"),
+      project_id: row.get("project_id"),
+      scheduled_at: row.get("scheduled_at"),
+      scheduled_mins: row.get("scheduled_mins"),
+      sort_order: row.get("sort_order"),
+    };
+    let mut task = task_row.into_task();
+    task.subtasks = crate::commands::subtasks::get_subtasks_impl(pool, &task.id).await?;
+    snippets.push(TaskSnippet { item: task, snippet });
+  }
+  Ok(snippets)
 }
 
 #[cfg(test)]
@@ -455,6 +526,34 @@ mod tests {
             "SELECT notified_24h, notified_1h FROM tasks WHERE id = ?")
             .bind(&t.id).fetch_one(&pool).await.unwrap();
         assert_eq!(row, (false, false));
+    }
+
+    #[tokio::test]
+    async fn complete_recurring_shifts_scheduled_block() {
+        let pool = test_pool().await;
+        let before = Utc::now() - chrono::Duration::minutes(1);
+        let scheduled = before + chrono::Duration::hours(2);
+        let mut ct = new_task("ежедневная с блоком");
+        ct.recurrence = Some(Recurrence::Daily);
+        let t = create_task_impl(&pool, ct).await.unwrap();
+        sqlx::query("UPDATE tasks SET scheduled_at = ?, scheduled_mins = 30 WHERE id = ?")
+            .bind(scheduled.to_rfc3339()).bind(&t.id)
+            .execute(&pool).await.unwrap();
+
+        let done = complete_task_impl(&pool, t.id.clone()).await.unwrap();
+
+        // scheduled_at должен сдвинуться на +1 день от исходного, не от now
+        let expected = scheduled + chrono::Duration::days(1);
+        let got = done.scheduled_at.unwrap();
+        assert!((got - expected).num_seconds().abs() < 2,
+            "expected {expected}, got {got}");
+        assert_eq!(done.scheduled_mins, Some(30)); // не тронут
+
+        // notified_block сброшен (recurring — reset_notifications=true)
+        let (block_flag,): (bool,) = sqlx::query_as(
+            "SELECT notified_block FROM tasks WHERE id = ?")
+            .bind(&t.id).fetch_one(&pool).await.unwrap();
+        assert!(!block_flag, "notified_block should be reset");
     }
 
     #[tokio::test]

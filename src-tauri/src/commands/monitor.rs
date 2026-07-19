@@ -140,7 +140,19 @@ pub struct CategoryRule {
     pub category: String,
 }
 
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct AppLimit {
+    pub category: String,
+    pub daily_mins: i64, // 0/отсутствие правила = без лимита
+}
+
 const KNOWN_CATEGORIES: [&str; 5] = ["Work", "Study", "Home", "Health", "Other"];
+
+// Лимиты времени на категории приложений: JSON в settings под ключом
+// app_limits: [{"category":"Other","daily_mins":60}, ...]. Мусор/пустая строка — нет лимитов.
+pub fn parse_app_limits(json: &str) -> Vec<AppLimit> {
+    serde_json::from_str(json).unwrap_or_default()
+}
 
 // Правила категоризации приложений: JSON в settings под ключом
 // app_category_rules: [{"pattern":"kitty","category":"Work"}, ...].

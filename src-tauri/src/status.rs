@@ -3,12 +3,13 @@
 // читать параллельно с работающим приложением), печатает одну строку JSON в
 // stdout и выходит — Tauri не поднимается, single-instance не задевается.
 //
-// Приоритет текста: идущий тайм-блок → следующий блок сегодня → задача
-// InProgress → счётчик задач с дедлайном на сегодня → «свободно». Режим работы
-// и пауза уведомлений — в tooltip. Помодоро-таймер — рантайм-состояние
-// приложения, в БД его нет, поэтому в статусе не показывается.
+// Приоритет текста: активная сессия трекинга → идущий тайм-блок → идущая
+// рутина → следующий блок → следующая рутина → задача InProgress → счётчик
+// задач с дедлайном на сегодня → «свободно». Режим работы и пауза уведомлений —
+// в tooltip. Помодоро-таймер — рантайм-состояние приложения, в БД его нет,
+// поэтому в статусе не показывается.
 
-use chrono::{DateTime, Duration, Local, TimeZone, Utc};
+use chrono::{DateTime, Datelike, Duration, Local, NaiveTime, TimeZone, Utc};
 use serde::Serialize;
 use sqlx::{Row, SqlitePool};
 
@@ -18,7 +19,7 @@ const TITLE_MAX: usize = 28;
 pub struct StatusPayload {
     pub text: String,
     pub tooltip: String,
-    // Для стилизации в waybar: block | next | task | due | idle | off
+    // Для стилизации в waybar: tracking | block | next | task | due | idle | off
     pub class: String,
     // Режим работы (Light | Study | Focus) — для format-icons
     pub alt: String,
@@ -82,6 +83,37 @@ pub async fn status_payload(pool: &SqlitePool, now: DateTime<Utc>) -> Result<Sta
     let current = blocks.iter().filter(|b| b.start <= now && now < b.end).last();
     let next = blocks.iter().find(|b| b.start > now);
 
+    // Рутины на сегодня: время в минутах от полуночи → абсолютное время сегодня
+    let routine_rows = sqlx::query(
+        "SELECT title, start_mins, duration_mins FROM routines
+         WHERE active = 1 AND (days_mask & ?) != 0
+         ORDER BY start_mins"
+    )
+    .bind(1i64 << today.weekday().num_days_from_monday())
+    .fetch_all(pool)
+    .await?;
+
+    let mut routine_blocks: Vec<Block> = routine_rows.iter().filter_map(|r| {
+        let start_mins: i64 = r.get("start_mins");
+        let dur: i64 = r.get("duration_mins");
+        let start = Local
+            .from_local_datetime(&today.and_time(NaiveTime::from_hms_opt(
+                (start_mins / 60) as u32,
+                (start_mins % 60) as u32,
+                0,
+            )?))
+            .single()?
+            .with_timezone(&Utc);
+        Some(Block {
+            title: r.get("title"),
+            start,
+            end: start + Duration::minutes(dur),
+        })
+    }).collect();
+    routine_blocks.sort_by_key(|b| b.start);
+    let routine_current = routine_blocks.iter().filter(|b| b.start <= now && now < b.end).last();
+    let routine_next = routine_blocks.iter().find(|b| b.start > now);
+
     let in_progress: Option<String> = sqlx::query(
         "SELECT title FROM tasks WHERE hidden = 0 AND status = 'InProgress'
          ORDER BY updated_at DESC LIMIT 1",
@@ -110,6 +142,23 @@ pub async fn status_payload(pool: &SqlitePool, now: DateTime<Utc>) -> Result<Sta
     .await?;
     let due: i64 = due_row.get("due");
     let overdue: i64 = due_row.get::<Option<i64>, _>("overdue").unwrap_or(0);
+
+    // Активная сессия трекинга (v0.7.9)
+    let active_session: Option<(String, i64)> = sqlx::query(
+        "SELECT s.started_at, t.title
+         FROM task_sessions s
+         JOIN tasks t ON t.id = s.task_id
+         WHERE s.ended_at IS NULL
+         LIMIT 1"
+    )
+    .fetch_optional(pool)
+    .await?
+    .and_then(|r| {
+        let started: String = r.get("started_at");
+        let started_dt = DateTime::parse_from_rfc3339(&started).ok()?.with_timezone(&Utc);
+        let mins = (now - started_dt).num_seconds().max(0) / 60;
+        Some((r.get::<String, _>("title"), mins))
+    });
 
     let setting = |key: &str| {
         let pool = pool.clone();
@@ -143,9 +192,15 @@ pub async fn status_payload(pool: &SqlitePool, now: DateTime<Utc>) -> Result<Sta
 
     let (text, class) = if let Some(label) = &pomo_label {
         (label.clone(), "pomodoro")
+    } else if let Some((ref title, mins)) = active_session {
+        (format!("▶ {} · {} мин", ellipsize(title, TITLE_MAX), mins), "tracking")
     } else if let Some(b) = current {
         (format!("▶ {} до {}", ellipsize(&b.title, TITLE_MAX), hhmm(b.end)), "block")
+    } else if let Some(b) = routine_current {
+        (format!("▶ {} до {}", ellipsize(&b.title, TITLE_MAX), hhmm(b.end)), "block")
     } else if let Some(b) = next {
+        (format!("⏱ {} {}", hhmm(b.start), ellipsize(&b.title, TITLE_MAX)), "next")
+    } else if let Some(b) = routine_next {
         (format!("⏱ {} {}", hhmm(b.start), ellipsize(&b.title, TITLE_MAX)), "next")
     } else if let Some(t) = &in_progress {
         (format!("▶ {}", ellipsize(t, TITLE_MAX)), "task")
@@ -156,6 +211,9 @@ pub async fn status_payload(pool: &SqlitePool, now: DateTime<Utc>) -> Result<Sta
     };
 
     let mut tip: Vec<String> = Vec::new();
+    if let Some((ref title, mins)) = active_session {
+        tip.push(format!("Трекинг: {} ({} мин)", title, mins));
+    }
     if pomo_label.is_some() {
         let phase_ru = match pomo_phase.as_str() {
             "work" => "работа",
@@ -167,9 +225,13 @@ pub async fn status_payload(pool: &SqlitePool, now: DateTime<Utc>) -> Result<Sta
     }
     if let Some(b) = current {
         tip.push(format!("Идёт: {} (до {})", b.title, hhmm(b.end)));
+    } else if let Some(b) = routine_current {
+        tip.push(format!("Идёт рутина: {} (до {})", b.title, hhmm(b.end)));
     }
     if let Some(b) = next {
         tip.push(format!("Далее: {} в {}", b.title, hhmm(b.start)));
+    } else if let Some(b) = routine_next {
+        tip.push(format!("Далее рутина: {} в {}", b.title, hhmm(b.start)));
     }
     if let Some(t) = &in_progress {
         tip.push(format!("В работе: {t}"));

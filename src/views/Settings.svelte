@@ -3,7 +3,7 @@
   import { save as saveDialog, open as openDialog } from "@tauri-apps/plugin-dialog";
   import { api } from "../lib/api/tauri";
   import { categoryStore } from "../lib/stores/categories.svelte";
-  import type { AppSettings, AppCategoryRule } from "../lib/types";
+  import type { AppSettings, AppCategoryRule, AppLimit } from "../lib/types";
   import { applyTheme } from "../lib/theme";
   import ModelDownloader from "../lib/components/ModelDownloader.svelte";
 
@@ -59,6 +59,10 @@
     openai_in_keyring: false,
     anthropic_in_keyring: false,
     app_category_rules: "",
+    app_limits: "",
+    auto_backup_dir: "",
+    auto_backup_keep: 7,
+    morning_digest_time: "",
   });
 
   let saving = $state(false);
@@ -87,10 +91,26 @@
     }
   }
 
+  // Лимиты времени на категории приложений: одна запись на категорию,
+  // 0/пусто = без лимита. Сериализуются в settings.app_limits при сохранении.
+  let appLimits: Record<string, number> = $state({});
+
+  function parseLimits(json: string): AppLimit[] {
+    try {
+      const v = JSON.parse(json);
+      return Array.isArray(v) ? v : [];
+    } catch {
+      return [];
+    }
+  }
+
   onMount(async () => {
     try {
       settings = await api.getSettings();
       appRules = parseRules(settings.app_category_rules);
+      appLimits = Object.fromEntries(
+        parseLimits(settings.app_limits).map(l => [l.category, l.daily_mins])
+      );
     } catch (e) {
       error = String(e);
     }
@@ -115,6 +135,11 @@
     error = null;
     try {
       settings.app_category_rules = JSON.stringify(appRules.filter(r => r.pattern.trim()));
+      settings.app_limits = JSON.stringify(
+        Object.entries(appLimits)
+          .filter(([, mins]) => mins > 0)
+          .map(([category, daily_mins]) => ({ category, daily_mins }))
+      );
       await api.saveSettings(settings);
       applyTheme(settings.theme_mode, settings);
       saved = true;
@@ -127,6 +152,32 @@
   }
 
   let backupMsg: string | null = $state(null);
+  let backupNowBusy = $state(false);
+  let backupNowMsg = $state("");
+  let lastBackup: string | null = $state(null);
+
+  async function pickBackupDir() {
+    error = null;
+    try {
+      const path = await openDialog({ directory: true, multiple: false });
+      if (path) settings.auto_backup_dir = path;
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
+  async function doBackupNow() {
+    backupNowBusy = true;
+    backupNowMsg = "";
+    try {
+      const name = await api.doAutoBackup();
+      backupNowMsg = `Бэкап сохранён: ${name}`;
+    } catch (e) {
+      backupNowMsg = `Ошибка: ${e}`;
+    } finally {
+      backupNowBusy = false;
+    }
+  }
 
   async function exportData() {
     backupMsg = null;
@@ -171,6 +222,34 @@
       if (!path) return;
       await api.importData(path as string);
       backupMsg = "Импорт завершён ✓ Приложение перезапускается...";
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
+  let notesMdMsg = $state("");
+
+  async function exportNotesMd() {
+    notesMdMsg = "";
+    error = null;
+    try {
+      const dir = await openDialog({ directory: true, multiple: false });
+      if (!dir) return;
+      const count = await api.exportNotesMd(dir as string);
+      notesMdMsg = `Экспортировано заметок: ${count}`;
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
+  async function importNotesMd() {
+    notesMdMsg = "";
+    error = null;
+    try {
+      const dir = await openDialog({ directory: true, multiple: false });
+      if (!dir) return;
+      const count = await api.importNotesMd(dir as string);
+      notesMdMsg = `Импортировано заметок: ${count}. Совпадения по названию создаются как отдельные заметки.`;
     } catch (e) {
       error = String(e);
     }
@@ -366,6 +445,26 @@
         Первое совпавшее правило выигрывает; <code>*</code> — любая подстрока.
         Приложения без правила попадают в «Другое». Применяется после «Сохранить».
       </p>
+
+      <div class="sub-label" style="margin-top:12px;">Лимиты времени на категории (мин/день)</div>
+      {#each RULE_CATEGORIES as c}
+        <div class="rule-row limit-row">
+          <span class="muted" style="flex:1;">{c.label}</span>
+          <input
+            type="number" min="0" style="width:90px;"
+            placeholder="без лимита"
+            value={appLimits[c.value] || ""}
+            oninput={(e) => {
+              const n = parseInt((e.currentTarget as HTMLInputElement).value, 10);
+              appLimits = { ...appLimits, [c.value]: Number.isFinite(n) ? n : 0 };
+            }}
+          />
+        </div>
+      {/each}
+      <p class="hint">
+        0 или пусто — без лимита. При превышении — уведомление раз в день
+        (пока лимит остаётся превышенным). Применяется после «Сохранить».
+      </p>
     {/if}
   </section>
 
@@ -434,9 +533,41 @@
       <input type="checkbox" bind:checked={settings.context_notifications} />
       Контекстные уведомления (накопились просрочки, возврат к задаче «в работе»)
     </label>
+    <label class="field" style="margin-top:8px;">
+      <span class="label">Утренняя сводка (HH:MM, пусто = выкл)</span>
+      <input type="time" bind:value={settings.morning_digest_time} />
+    </label>
     <p class="hint">
       Пауза всех уведомлений — в меню трея: «Пауза уведомлений» (30 мин / 1 ч / 2 ч / бессрочно).
     </p>
+  </section>
+
+  <section class="card panel">
+    <h3 class="section-title">Авто-бэкап</h3>
+    <div class="stack">
+      <label class="field">
+        <span class="label">Папка для бэкапов (пусто = выкл)</span>
+        <div class="input-row">
+          <input type="text" bind:value={settings.auto_backup_dir} placeholder="Выберите папку..." readonly style="flex:1;" />
+          <button class="btn-sm" onclick={pickBackupDir}>Обзор…</button>
+        </div>
+      </label>
+      <label class="field">
+        <span class="label">Хранить копий</span>
+        <input type="number" min="1" bind:value={settings.auto_backup_keep} />
+      </label>
+      {#if lastBackup}
+        <p class="hint">Последний бэкап: {lastBackup}</p>
+      {/if}
+      <div class="preset-row">
+        <button class="btn-sm" onclick={doBackupNow} disabled={backupNowBusy || !settings.auto_backup_dir.trim()}>
+          {backupNowBusy ? "…" : "Сделать сейчас"}
+        </button>
+        {#if backupNowMsg}
+          <span class="muted" style="font-size:12px;">{backupNowMsg}</span>
+        {/if}
+      </div>
+    </div>
   </section>
 
   <section class="card panel">
@@ -447,6 +578,13 @@
       <button class="btn-sm" onclick={resetOnboarding} title="Сбросит флаг onboarding_complete и покажет онбординг заново">Сбросить онбординг</button>
       {#if backupMsg}
         <span class="muted" style="font-size:12px;">{backupMsg}</span>
+      {/if}
+    </div>
+    <div class="preset-row" style="margin-top:8px;">
+      <button class="btn-sm" onclick={exportNotesMd}>Экспорт заметок (.md)</button>
+      <button class="btn-sm" onclick={importNotesMd}>Импорт заметок из папки</button>
+      {#if notesMdMsg}
+        <span class="muted" style="font-size:12px;">{notesMdMsg}</span>
       {/if}
     </div>
   </section>
@@ -503,6 +641,12 @@
     display: flex;
     gap: 6px;
     flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .input-row {
+    display: flex;
+    gap: 6px;
     align-items: center;
   }
 

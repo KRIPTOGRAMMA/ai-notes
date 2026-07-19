@@ -12,6 +12,7 @@ use sqlx::{Row, SqlitePool};
 use std::collections::HashMap;
 use tauri::{Emitter, Manager};
 use crate::commands::ai::ask_ai;
+use crate::commands::routines;
 
 const SYSTEM_PLAN: &str = "Ты планировщик дня. Разложи самые важные задачи по свободному окну: \
 близкие дедлайны и высокий приоритет — раньше, длительность блока 30–90 минут, \
@@ -87,6 +88,14 @@ pub async fn plan_day_context(pool: &SqlitePool, now: DateTime<Utc>) -> Result<P
         let mins: i64 = r.get("mins");
         busy.push((from, from + mins));
         busy_lines.push(format!("{}–{} {}", fmt_hm(from), fmt_hm(from + mins), r.get::<String, _>("title")));
+    }
+    busy.sort();
+
+    // Рутины на сегодня: занятость, которую не отменяют
+    let routine_busy = routines::today_routine_busy(pool).await.map_err(|e| e.to_string())?;
+    for (start, end, title) in &routine_busy {
+        busy.push((*start, *end));
+        busy_lines.push(format!("{}–{} {} (рутина)", fmt_hm(*start), fmt_hm(*end), title));
     }
     busy.sort();
 

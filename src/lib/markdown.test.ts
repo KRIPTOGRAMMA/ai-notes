@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { renderMarkdown, taskLineIndices, toggleTaskListItem, extractWikiLinks } from "./markdown";
+import { renderMarkdown, taskLineIndices, toggleTaskListItem, extractWikiLinks, IMAGE_RE, imageMarkdown, extImageExt } from "./markdown";
 
 describe("renderMarkdown", () => {
   it("рендерит gfm-чекбоксы", () => {
@@ -63,6 +63,55 @@ describe("extractWikiLinks", () => {
 
   it("тримит пробелы вокруг названия", () => {
     expect(extractWikiLinks("[[ Заметка ]]")).toEqual(["Заметка"]);
+  });
+});
+
+describe("imageMarkdown", () => {
+  it("строит ![](имя) без alt-текста", () => {
+    expect(imageMarkdown("abc123.png")).toBe("![](abc123.png)");
+  });
+});
+
+describe("extImageExt", () => {
+  it("извлекает расширение из MIME-типа", () => {
+    expect(extImageExt("image/png")).toBe("png");
+    expect(extImageExt("image/webp")).toBe("webp");
+    expect(extImageExt("image/gif")).toBe("gif");
+  });
+
+  it("jpeg MIME нормализуется в jpg", () => {
+    expect(extImageExt("image/jpeg")).toBe("jpg");
+  });
+
+  it("без MIME — извлекает расширение из имени файла", () => {
+    expect(extImageExt("screenshot.JPG")).toBe("jpg");
+    expect(extImageExt("photo.webp")).toBe("webp");
+  });
+
+  it("нет ни MIME, ни расширения — дефолт png", () => {
+    expect(extImageExt("clipboard-image")).toBe("png");
+    expect(extImageExt("")).toBe("png");
+  });
+});
+
+describe("IMAGE_RE", () => {
+  it("находит ![alt](filename) с alt и без", () => {
+    const matches = [..."текст ![](a.png) и ![alt текст](b.jpg)".matchAll(IMAGE_RE)];
+    expect(matches.length).toBe(2);
+    expect(matches[0][1]).toBe("");
+    expect(matches[0][2]).toBe("a.png");
+    expect(matches[1][1]).toBe("alt текст");
+    expect(matches[1][2]).toBe("b.jpg");
+  });
+
+  it("не матчит обычные ссылки [текст](url) без восклицательного знака", () => {
+    const matches = [...("[ссылка](url.png)".matchAll(IMAGE_RE))];
+    expect(matches.length).toBe(0);
+  });
+
+  it("не матчит пустой src", () => {
+    const matches = [...("![]()".matchAll(IMAGE_RE))];
+    expect(matches.length).toBe(0);
   });
 });
 

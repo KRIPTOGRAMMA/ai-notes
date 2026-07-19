@@ -8,11 +8,16 @@ mod ai;
 mod status;
 
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tauri::{Emitter, Manager};
 use tauri::menu::{Menu, MenuItem, CheckMenuItem, Submenu};
 use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
 
-pub type ModeItems = Arc<Mutex<Vec<CheckMenuItem<tauri::Wry>>>>;
+// Обычные (не checkbox) пункты меню — some tray-хосты (напр. waybar) неверно
+// рендерят checkbox-пункты (GtkCheckMenuItem), показывая текст статуса
+// вместо названия ("ВЫКЛ" вместо "Light"/"Focus"/"Study"). Обходим: активный
+// режим показываем префиксом "✓ " прямо в тексте пункта.
+pub type ModeItems = Arc<Mutex<Vec<MenuItem<tauri::Wry>>>>;
 pub type QuietItems = Arc<Mutex<Vec<CheckMenuItem<tauri::Wry>>>>;
 // Начальный режим окна быстрого ввода: "task" | "note". Живёт как managed-state,
 // чтобы QuickCapture мог прочитать его при монтировании (гонка emit-до-mount).
@@ -88,9 +93,12 @@ fn get_quick_mode(mode: tauri::State<'_, QuickMode>) -> String {
 fn update_mode_checks(app: &tauri::AppHandle, mode: &commands::settings::WorkMode) {
     if let Some(items) = app.try_state::<ModeItems>() {
         let items = items.lock().unwrap();
-        let mode_str = format!("mode_{}", mode.as_str());
+        let active_id = format!("mode_{}", mode.as_str());
         for item in items.iter() {
-            let _ = item.set_checked(item.id().as_ref() == mode_str.as_str());
+            let id = item.id().as_ref().to_string();
+            let name = id.strip_prefix("mode_").unwrap_or(&id);
+            let label = if id == active_id { format!("✓ {name}") } else { name.to_string() };
+            let _ = item.set_text(label);
         }
     }
 }
@@ -204,6 +212,7 @@ pub fn run() {
                 .plugin(tauri_plugin_global_shortcut::Builder::new().build())
                 .plugin(tauri_plugin_shell::init())
                 .plugin(tauri_plugin_dialog::init())
+                .plugin(tauri_plugin_clipboard_manager::init())
                 .invoke_handler(
                     tauri::generate_handler![
                         commands::tasks::create_task,
@@ -212,11 +221,13 @@ pub fn run() {
                         commands::tasks::update_task,
                         commands::tasks::complete_task,
                         commands::tasks::search_tasks,
+                        commands::tasks::search_tasks_snippet,
                         commands::tasks::reorder_tasks,
                         commands::projects::get_projects,
                         commands::projects::create_project,
                         commands::projects::update_project,
                         commands::projects::delete_project,
+                        commands::projects::get_goal_history,
                         commands::categories::get_categories,
                         commands::categories::create_category,
                         commands::categories::update_category,
@@ -224,6 +235,9 @@ pub fn run() {
                         commands::pomodoro::get_pomodoro_state,
                         commands::pomodoro::pomodoro_toggle_pause,
                         commands::pomodoro::pomodoro_skip,
+                        commands::pomodoro::pomodoro_start,
+                        commands::pomodoro::pomodoro_stop,
+                        commands::pomodoro::get_pomodoro_stats,
                         open_quick_capture,
                         get_quick_mode,
                         is_wayland,
@@ -253,28 +267,51 @@ pub fn run() {
                         commands::notes::update_note,
                         commands::notes::delete_note,
                         commands::notes::search_notes,
+                        commands::notes::search_notes_snippet,
                         commands::notes::rename_note_links,
+                        commands::notes::get_note_revisions,
+                        commands::notes::get_note_revision_content,
+                        commands::notes::restore_note_revision,
+                        commands::notes::export_notes_md,
+                        commands::notes::import_notes_md,
                         commands::note_links::ai_suggest_links,
                         commands::settings::get_settings,
                         commands::settings::save_settings,
                         commands::backup::export,
                         commands::backup::import,
+                        commands::backup::do_auto_backup,
                         commands::model::default_model_url,
                         commands::model::model_status,
                         commands::model::download_model,
                         commands::subtasks::get_subtasks,
                         commands::subtasks::add_subtask,
                         commands::subtasks::toggle_subtask,
-                        commands::subtasks::delete_subtask
+                        commands::subtasks::delete_subtask,
+                        commands::routines::get_routines,
+                        commands::routines::create_routine,
+                        commands::routines::update_routine,
+                        commands::routines::delete_routine,
+                        commands::tracking::start_task_tracking,
+                        commands::tracking::stop_task_tracking,
+                        commands::tracking::get_active_session,
+                        commands::tracking::get_task_seconds,
+                        commands::tracking::get_project_seconds,
+                        commands::images::save_note_image,
+                        commands::images::get_images_dir,
+                        commands::checklists::get_checklist_templates,
+                        commands::checklists::create_checklist_template,
+                        commands::checklists::delete_checklist_template
                     ]
                 )
                 .setup(|app| {
                     // Трей
                     let open = MenuItem::with_id(app, "open", "Открыть", true, None::<&str>)?;
-                    // checked=false на старте; правильная галочка выставляется после загрузки настроек
-                    let mode_light = CheckMenuItem::with_id(app, "mode_Light", "Light", true, false, None::<&str>)?;
-                    let mode_focus = CheckMenuItem::with_id(app, "mode_Focus", "Focus", true, false, None::<&str>)?;
-                    let mode_study = CheckMenuItem::with_id(app, "mode_Study", "Study", true, false, None::<&str>)?;
+                    // Обычные пункты (не checkbox) — см. комментарий у ModeItems: активный
+                    // режим помечается префиксом "✓ " в тексте, выставляется update_mode_checks
+                    // после загрузки настроек.
+                    let mode_light = MenuItem::with_id(app, "mode_Light", "Light", true, None::<&str>)?;
+                    let mode_focus = MenuItem::with_id(app, "mode_Focus", "Focus", true, None::<&str>)?;
+                    let mode_study = MenuItem::with_id(app, "mode_Study", "Study", true, None::<&str>)?;
                     let mode_menu = Submenu::with_items(app, "Режим", true, &[&mode_light, &mode_focus, &mode_study])?;
                     // Пауза уведомлений: галочка выставляется после загрузки настроек
                     let quiet_30 = CheckMenuItem::with_id(app, "quiet_30", quiet_base_label("quiet_30"), true, false, None::<&str>)?;
@@ -512,8 +549,26 @@ pub fn run() {
             notifier::scheduler::start_scheduler(app.app_handle().clone(), pool.clone(), work_mode.clone());
             notifier::nudge::start_nudger(app.app_handle().clone(), pool.clone(), work_mode.clone());
             notifier::triggers::start_triggers(app.app_handle().clone(), pool.clone(), work_mode.clone());
-            let pomodoro_tx = notifier::pomodoro::start_pomodoro(app.app_handle().clone(), work_mode, pool);
+            let pomodoro_tx = notifier::pomodoro::start_pomodoro(app.app_handle().clone(), work_mode, pool.clone());
             app.manage(commands::pomodoro::PomodoroCmdTx(pomodoro_tx));
+
+            // Авто-бэкап: раз в 60с проверяем, не пора ли сделать копию
+            {
+                let app_handle = app.app_handle().clone();
+                let pool_bk = pool.clone();
+                tokio::spawn(async move {
+                    loop {
+                        if commands::backup::auto_backup_due(&pool_bk).await {
+                            let data_dir = match app_handle.path().app_data_dir() {
+                                Ok(d) => d,
+                                Err(_) => { tokio::time::sleep(Duration::from_secs(60)).await; continue; }
+                            };
+                            let _ = commands::backup::auto_backup_impl(&pool_bk, &data_dir).await;
+                        }
+                        tokio::time::sleep(Duration::from_secs(60)).await;
+                    }
+                });
+            }
             app.run(|_, _| {});
         });
 }

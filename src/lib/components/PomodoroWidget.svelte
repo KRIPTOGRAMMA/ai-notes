@@ -52,9 +52,21 @@
     await api.pomodoroSkip();
     await poll();
   }
+  async function start() {
+    await api.pomodoroStart();
+    await poll();
+  }
+  async function stop() {
+    await api.pomodoroStop();
+    await poll();
+  }
 </script>
 
-{#if phase !== "off"}
+{#if phase === "off"}
+  <div class="pomo card">
+    <button class="btn-icon" title="Начать помидор" onclick={start}>▶ 🍅</button>
+  </div>
+{:else}
   <div class="pomo card">
     <span class="pomo-label">{phaseLabel}</span>
     {#if phase !== "paused"}
@@ -65,6 +77,7 @@
         {phase === "paused" ? "▶" : "⏸"}
       </button>
       <button class="btn-icon" title="Пропустить фазу" onclick={skip}>⏭</button>
+      <button class="btn-icon" title="Остановить" onclick={stop}>■</button>
     </div>
   </div>
 {/if}

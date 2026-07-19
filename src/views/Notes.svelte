@@ -6,10 +6,11 @@
   import { projectStore } from "../lib/stores/projects.svelte";
   import { api } from "../lib/api/tauri";
   import { extractWikiLinks } from "../lib/markdown";
-  import LiveMarkdownEditor from "../lib/components/LiveMarkdownEditor.svelte";
-  import type { Note } from "../lib/types";
+  import type { Note, NoteRevision } from "../lib/types";
+  type EditorComponent = typeof import("../lib/components/LiveMarkdownEditor.svelte").default;
 
   let selectedId: string | null = $state(null);
+  let dailyKey = $state(0); // отслеживаем dailyRequested
   let editTitle = $state("");
   let editContent = $state("");
   let editTags: string[] = $state([]);
@@ -20,10 +21,21 @@
   let saving = $state(false);
   let renameToast: string | null = $state(null);
   let renameToastTimeout: ReturnType<typeof setTimeout> | null = null;
-  let editorRef: LiveMarkdownEditor | undefined = $state();
 
   const selected = $derived(noteStore.notes.find(n => n.id === selectedId) ?? null);
   const otherTitles = $derived(noteStore.notes.filter(n => n.id !== selectedId).map(n => n.title));
+
+  // Фильтр списка заметок
+  let noteFilter = $state("");
+  let filterTag = $state("");
+  let filterProjectId = $state("");
+  const allTags = $derived([...new Set(noteStore.notes.flatMap(n => n.tags))].sort());
+  const filteredNotes = $derived(noteStore.notes.filter(n => {
+    if (noteFilter && !n.title.toLowerCase().includes(noteFilter.toLowerCase())) return false;
+    if (filterTag && !n.tags.includes(filterTag)) return false;
+    if (filterProjectId && n.project_id !== filterProjectId) return false;
+    return true;
+  }));
 
   // Заметки, ссылающиеся на текущую через [[название]] (без учёта регистра).
   const backlinks = $derived.by<Note[]>(() => {
@@ -102,6 +114,24 @@
     if (created) selectNote(created);
   }
 
+  async function openDailyNote() {
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, "0");
+    const dd = String(today.getDate()).padStart(2, "0");
+    const title = `${yyyy}-${mm}-${dd}`;
+    const existing = findByTitle(title);
+    if (existing) { selectNote(existing); return; }
+    // Дата вчера
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yy = yesterday.getFullYear();
+    const ym = String(yesterday.getMonth() + 1).padStart(2, "0");
+    const yd = String(yesterday.getDate()).padStart(2, "0");
+    const created = await noteStore.create({ title, content: `[[${yy}-${ym}-${yd}]]\n\n` });
+    if (created) selectNote(created);
+  }
+
   // Открытие заметки по сигналу из глобального поиска (Ctrl+K).
   $effect(() => {
     const id = noteStore.focusNoteId;
@@ -109,6 +139,14 @@
     const note = noteStore.notes.find(n => n.id === id);
     if (note) selectNote(note);
     noteStore.clearFocus();
+  });
+
+  // Сигнал «открыть заметку дня» (Ctrl+D из другого раздела).
+  $effect(() => {
+    dailyKey;
+    if (noteStore.dailyRequested === 0) return;
+    dailyKey = noteStore.dailyRequested;
+    openDailyNote();
   });
 
   async function newNote() {
@@ -161,6 +199,11 @@
     // Отложенное сохранение удаляемой заметки не нужно — просто гасим таймер.
     if (saveTimeout) { clearTimeout(saveTimeout); saveTimeout = null; }
     saving = false;
+    // Панель версий могла быть открыта на этой же заметке — её ревизии удаляются
+    // каскадом на бэкенде; закрываем панель, иначе клик по уже несуществующей
+    // ревизии («Восстановить», повторный просмотр) вернёт ошибку с бэкенда.
+    revisionsOpen = false;
+    viewingRevisionId = null;
     await noteStore.remove(selectedId);
     selectedId = null;
     editTitle = "";
@@ -202,6 +245,46 @@
       : null;
   }
 
+  // --- Версии заметки (v0.7.12) ---
+  let revisionsOpen = $state(false);
+  let revisions: NoteRevision[] = $state([]);
+  let viewingRevisionId: string | null = $state(null);
+  let viewingRevisionContent = $state("");
+  let revisionsBusy = $state(false);
+
+  async function openRevisions() {
+    if (!selectedId) return;
+    await flushPendingSave();
+    revisionsOpen = true;
+    viewingRevisionId = null;
+    revisions = await api.getNoteRevisions(selectedId).catch(() => []);
+  }
+
+  function closeRevisions() {
+    revisionsOpen = false;
+    viewingRevisionId = null;
+  }
+
+  async function viewRevision(rev: NoteRevision) {
+    viewingRevisionId = rev.id;
+    viewingRevisionContent = await api.getNoteRevisionContent(rev.id).catch(() => "");
+  }
+
+  async function restoreRevision(rev: NoteRevision) {
+    if (!selectedId) return;
+    if (!confirm("Восстановить эту версию? Текущий текст тоже сохранится в версиях.")) return;
+    revisionsBusy = true;
+    try {
+      const updated = await api.restoreNoteRevision(rev.id);
+      editContent = updated.content;
+      suppressNextContentSave = true;
+      await noteStore.load();
+      revisionsOpen = false;
+    } finally {
+      revisionsBusy = false;
+    }
+  }
+
   onMount(() => {
     noteStore.load();
     taskStore.load();
@@ -223,13 +306,31 @@
   <div class="list-pane">
     <div class="list-head">
       <button class="btn-primary btn-sm" style="width:100%;" onclick={newNote}>+ Новая заметка</button>
+      <button class="btn-ghost btn-sm" style="width:100%;" onclick={openDailyNote}>📅 Сегодня</button>
+      <input class="filter-input" bind:value={noteFilter} placeholder="Поиск..." />
+      <div class="filter-row">
+        <select bind:value={filterTag} class="filter-select">
+          <option value="">Все теги</option>
+          {#each allTags as t}
+            <option value={t}>#{t}</option>
+          {/each}
+        </select>
+        <select bind:value={filterProjectId} class="filter-select">
+          <option value="">Все проекты</option>
+          {#each projectStore.active as p (p.id)}
+            <option value={p.id}>{p.name}</option>
+          {/each}
+        </select>
+      </div>
     </div>
 
     {#if noteStore.notes.length === 0}
       <div class="empty">Нет заметок</div>
+    {:else if filteredNotes.length === 0}
+      <div class="empty">Нет заметок по фильтру</div>
     {:else}
       <ul class="note-list">
-        {#each noteStore.notes as note (note.id)}
+        {#each filteredNotes as note (note.id)}
           <li>
             <button class="note-item" class:active={selectedId === note.id} onclick={() => selectNote(note)}>
               <div class="note-title">{note.title}</div>
@@ -258,6 +359,7 @@
           <button class="btn-icon" disabled={linkSuggesting} title="ИИ предложит заметки для связи"
             onclick={suggestLinks}>{linkSuggesting ? "…" : "🔗✨"}</button>
         {/if}
+        <button class="btn-icon" title="Версии заметки" onclick={openRevisions}>🕐</button>
         <button class="btn-icon btn-danger" title="Удалить заметку" onclick={deleteSelected}>✕</button>
       </div>
 
@@ -317,15 +419,18 @@
       </div>
 
       <div class="editor-body">
-        <LiveMarkdownEditor
-          bind:this={editorRef}
-          bind:value={editContent}
-          placeholder="Начните писать... (Markdown, чек-листы: - [ ] пункт, ссылки: [[заметка]])"
-          knownTitles={otherTitles}
-          resolveExists={(t) => findByTitle(t) !== null}
-          onWikiLinkClick={openWikiLink}
-          onSubmitShortcut={() => {}}
-        />
+        {#key selectedId}
+          {#await import("../lib/components/LiveMarkdownEditor.svelte") then { default: Editor }}
+            <Editor
+              bind:value={editContent}
+              placeholder="Начните писать... (Markdown, чек-листы: - [ ] пункт, ссылки: [[заметка]])"
+              knownTitles={otherTitles}
+              resolveExists={(t) => findByTitle(t) !== null}
+              onWikiLinkClick={openWikiLink}
+              onSubmitShortcut={() => {}}
+            />
+          {/await}
+        {/key}
       </div>
 
       {#if backlinks.length > 0}
@@ -339,6 +444,47 @@
     {/if}
   </div>
 </div>
+
+{#if revisionsOpen}
+  <div class="backdrop" role="presentation" onclick={closeRevisions} onkeydown={(e) => e.key === "Escape" && closeRevisions()}>
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <div class="dialog card revisions-dialog" role="dialog" onclick={(e) => e.stopPropagation()}>
+      <h3 class="dialog-title">Версии заметки</h3>
+
+      {#if revisions.length === 0}
+        <p class="muted">Ещё нет сохранённых версий — они появляются при правках с интервалом от 10 минут.</p>
+      {:else}
+        <div class="revisions-body">
+          <ul class="revisions-list">
+            {#each revisions as rev (rev.id)}
+              <li>
+                <button class="revision-item" class:active={viewingRevisionId === rev.id} onclick={() => viewRevision(rev)}>
+                  <span>{formatDate(rev.created_at)}</span>
+                  <span class="muted" style="font-size:11px;">{rev.size} симв.</span>
+                </button>
+              </li>
+            {/each}
+          </ul>
+          <div class="revision-preview">
+            {#if viewingRevisionId}
+              <pre>{viewingRevisionContent}</pre>
+              <button class="btn-primary btn-sm" disabled={revisionsBusy}
+                onclick={() => restoreRevision(revisions.find(r => r.id === viewingRevisionId)!)}>
+                {revisionsBusy ? "Восстановление…" : "Восстановить"}
+              </button>
+            {:else}
+              <span class="muted">Выберите версию слева для просмотра</span>
+            {/if}
+          </div>
+        </div>
+      {/if}
+
+      <div class="actions">
+        <button class="btn-ghost" onclick={closeRevisions}>Закрыть</button>
+      </div>
+    </div>
+  </div>
+{/if}
 
 <style>
   .notes {
@@ -360,6 +506,37 @@
   .list-head {
     padding: 8px;
     border-bottom: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .filter-input {
+    font-size: 12px;
+    padding: 4px 6px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    outline: none;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .filter-input:focus { border-color: var(--accent); }
+
+  .filter-row {
+    display: flex;
+    gap: 4px;
+  }
+
+  .filter-select {
+    font-size: 11px;
+    flex: 1;
+    padding: 2px 4px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-primary);
+    color: var(--text-primary);
   }
 
   .note-list {
@@ -536,4 +713,98 @@
     color: var(--accent);
   }
   .backlink:hover { text-decoration: underline; }
+
+  .backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.35);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    padding: 16px;
+  }
+
+  .dialog {
+    width: 100%;
+    max-height: 90vh;
+    overflow-y: auto;
+    padding: 18px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .revisions-dialog {
+    max-width: 640px;
+  }
+
+  .dialog-title {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 700;
+  }
+
+  .revisions-body {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 12px;
+    min-height: 280px;
+  }
+
+  .revisions-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 340px;
+    overflow-y: auto;
+  }
+
+  .revision-item {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    text-align: left;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: transparent;
+    cursor: pointer;
+    font-size: 12px;
+  }
+
+  .revision-item.active {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+  }
+
+  .revision-preview {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .revision-preview pre {
+    flex: 1;
+    margin: 0;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: auto;
+    max-height: 340px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 12px;
+  }
+
+  .actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 4px;
+  }
 </style>

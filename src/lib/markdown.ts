@@ -68,6 +68,22 @@ export function renderMarkdown(src: string): string {
   return DOMPurify.sanitize(raw);
 }
 
+// Картинки ![alt](filename) — filename без пути (то, что вернул save_note_image).
+// Общий regex для парсинга (LiveMarkdownEditor) и построения markdown при вставке.
+export const IMAGE_RE = /!\[([^\[\]]*)\]\(([^()\s]+)\)/g;
+
+export function imageMarkdown(filename: string): string {
+  return `![](${filename})`;
+}
+
+// Расширение картинки для save_note_image: из MIME-типа (image/png → png,
+// image/jpeg → jpg) или, если MIME отсутствует, из имени файла; дефолт — png.
+export function extImageExt(mimeOrName: string): string {
+  const fromMime = /^image\/([a-z0-9]+)/i.exec(mimeOrName)?.[1];
+  if (fromMime) return fromMime === "jpeg" ? "jpg" : fromMime;
+  return (/\.([a-z0-9]+)$/i.exec(mimeOrName)?.[1] ?? "png").toLowerCase();
+}
+
 const TASK_LINE = /^(\s*[-*+]\s+)\[( |x|X)\]/;
 
 // Индексы строк editContent, содержащих markdown-чекбокс, по порядку. Порядок

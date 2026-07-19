@@ -28,6 +28,13 @@
     week_idle: number;
   }
 
+  interface PomodoroStats {
+    today: number;
+    week: number;
+    task_streak: number;
+    pomodoro_streak: number;
+  }
+
   interface InsightPayload {
     result: string | null;
     error: string | null;
@@ -45,6 +52,7 @@
   let ratio: ActiveIdleRatio | null = $state(null);
   let settings: AppSettings | null = $state(null);
   let error: string | null = $state(null);
+  let pomodoroStats: PomodoroStats | null = $state(null);
 
   // Приложения: топ по активным минутам + время по категориям (правила из Настроек)
   let appUsage: { app: string; minutes: number }[] = $state([]);
@@ -206,8 +214,10 @@
         settings = await api.getSettings();
         await loadAppUsage(1);
         await projectStore.load(); // свежий прогресс целей за период
+        await loadProjectTime();
         await categoryStore.load(); // имена/цвета категорий задач для пончика
         hourly = await api.getHourlyActivity(56); // heatmap: последние 8 недель
+        pomodoroStats = await api.getPomodoroStats();
 
       } catch (e) {
         error = String(e);
@@ -263,6 +273,20 @@
 
   const goalPct = (done: number, target: number) =>
     Math.min(100, Math.round((done / Math.max(target, 1)) * 100));
+
+  let projectTime: { name: string; mins: number }[] = $state([]);
+  async function loadProjectTime() {
+    const now = new Date();
+    const weekAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
+    const result: { name: string; mins: number }[] = [];
+    for (const p of projectStore.active) {
+      try {
+        const secs = await api.getProjectSeconds(p.id, weekAgo.toISOString());
+        if (secs >= 60) result.push({ name: p.name, mins: Math.round(secs / 60) });
+      } catch {}
+    }
+    projectTime = result.sort((a, b) => b.mins - a.mins);
+  }
 </script>
 
 <div class="dash">
@@ -367,6 +391,33 @@
       {/if}
     </section>
 
+    <!-- Помодоро: статистика и стрики -->
+    {#if pomodoroStats}
+      <section class="card panel">
+        <h3 class="section-title">Помодоро</h3>
+        <ul class="goals">
+          <li class="goal-item">
+            <div class="goal-row">
+              <span class="goal-metric">сегодня</span>
+              <span class="goal-val muted">{pomodoroStats.today}</span>
+            </div>
+            <div class="goal-row">
+              <span class="goal-metric">за неделю</span>
+              <span class="goal-val muted">{pomodoroStats.week}</span>
+            </div>
+            <div class="goal-row">
+              <span class="goal-metric">стрик задач</span>
+              <span class="goal-val muted">{pomodoroStats.task_streak} дн.</span>
+            </div>
+            <div class="goal-row">
+              <span class="goal-metric">стрик помидоров</span>
+              <span class="goal-val muted">{pomodoroStats.pomodoro_streak} дн.</span>
+            </div>
+          </li>
+        </ul>
+      </section>
+    {/if}
+
     <!-- Резюме дня/недели -->
     <section class="card panel">
       <h3 class="section-title">Резюме</h3>
@@ -434,8 +485,26 @@
           {/each}
         </ul>
         <p class="muted" style="font-size:11px;margin:8px 0 0 0;">
-          Минуты — по прошедшим тайм-блокам задач проекта за период.
+          Минуты — по трекингу задач проекта за период.
         </p>
+      </section>
+    {/if}
+
+    {#if projectTime.length > 0}
+      <section class="card panel">
+        <h3 class="section-title">Время по проектам (7 дней)</h3>
+        <ul class="goals">
+          {#each projectTime as pt}
+            <li class="goal-item">
+              <div class="goal-head">
+                <span class="goal-name">{pt.name}</span>
+              </div>
+              <div class="goal-row">
+                <span class="goal-val muted">{pt.mins} мин</span>
+              </div>
+            </li>
+          {/each}
+        </ul>
       </section>
     {/if}
 

@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Task, CreateTaskPayload, UpdateTaskPayload, Priority, Category, Recurrence, RecurrenceUnit, TaskStatus } from "../types";
+  import { api } from "../api/tauri";
   import { projectStore } from "../stores/projects.svelte";
   import { categoryStore } from "../stores/categories.svelte";
 
@@ -24,6 +25,11 @@
   // "Other" — фолбэк-категория, существует всегда (в отличие от Work — её можно удалить)
   let category = $state<Category>(task?.category ?? "Other");
   let tagsInput = $state((task?.tags ?? []).join(", "));
+  let totalTaskMins = $state(0);
+
+  if (task) {
+    api.getTaskSeconds(task.id).then(s => totalTaskMins = Math.round(s / 60)).catch(() => {});
+  }
   // "" = без проекта; в патче пустая строка отвязывает
   let projectId = $state(task?.project_id ?? "");
 
@@ -175,6 +181,13 @@
         </select>
       </label>
     </div>
+
+    {#if isEdit && totalTaskMins > 0}
+      <div class="field">
+        <span class="label">Время всего</span>
+        <span class="muted" style="font-size:13px;">{totalTaskMins} мин</span>
+      </div>
+    {/if}
 
     {#if isEdit}
       <label class="field">

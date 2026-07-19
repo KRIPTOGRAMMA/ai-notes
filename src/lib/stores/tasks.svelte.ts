@@ -6,6 +6,8 @@ let error: string | null = $state(null);
 // Сигнал «открыть эту задачу» — ставится из глобального поиска, Tasks.svelte
 // реагирует через $effect и открывает TaskModal.
 let focusTaskId: string | null = $state(null);
+let createRequested = $state(0); // инкремент — сигнал открыть модалку создания
+let planDayRequested = $state(0); // инкремент — сигнал перейти в Календарь-неделю и запустить план дня
 
 function describeError(e: unknown): string {
   if (typeof e === "string") return e;
@@ -22,6 +24,10 @@ export const taskStore = {
   get focusTaskId() { return focusTaskId; },
   requestFocus(id: string) { focusTaskId = id; },
   clearFocus() { focusTaskId = null; },
+  get createRequested() { return createRequested; },
+  requestCreate() { createRequested++; },
+  get planDayRequested() { return planDayRequested; },
+  requestPlanDay() { planDayRequested++; },
 
   async load() {
     try {

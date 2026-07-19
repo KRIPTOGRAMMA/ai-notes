@@ -15,6 +15,7 @@
   import Calendar from "./views/Calendar.svelte";
   import SearchOverlay from "./lib/components/SearchOverlay.svelte";
   import PomodoroWidget from "./lib/components/PomodoroWidget.svelte";
+  import TrackingWidget from "./lib/components/TrackingWidget.svelte";
   import "./app.css";
 
   type View = "tasks" | "notes" | "dashboard" | "calendar" | "settings";
@@ -63,7 +64,31 @@
     { view: "settings",  label: "Настройки", icon: "M21 5h-7 M10 5H3 M21 12h-9 M8 12H3 M21 19h-5 M12 19H3 M14 3v4 M8 10v4 M16 17v4" },
   ];
 
+  // Командная палитра: «Сменить тему» — цикл light → dark → system, применяет
+  // сразу и сохраняет (та же логика сохранения, что и Settings.svelte::save()).
+  async function cycleTheme() {
+    if (!loadedSettings) return;
+    const order: AppSettings["theme_mode"][] = ["light", "dark", "system"];
+    const next = order[(order.indexOf(loadedSettings.theme_mode) + 1) % order.length];
+    loadedSettings.theme_mode = next;
+    applyTheme(next, loadedSettings);
+    await api.saveSettings(loadedSettings);
+  }
+
   let lastActivityPing = 0;
+  const paletteCommands = [
+    { label: "Новая задача", hint: "Создать задачу", keywords: "новая задача create task", run: () => { activeView = "tasks"; taskStore.requestCreate(); } },
+    { label: "Новая заметка", hint: "Создать заметку", keywords: "новая заметка create note", run: () => { activeView = "notes"; } },
+    { label: "Заметка дня", hint: "Открыть/создать дневную заметку", keywords: "заметка дня daily note today", run: () => { activeView = "notes"; noteStore.requestDaily(); } },
+    { label: "Перейти: Задачи", keywords: "перейти задачи go tasks", run: () => { activeView = "tasks"; } },
+    { label: "Перейти: Заметки", keywords: "перейти заметки go notes", run: () => { activeView = "notes"; } },
+    { label: "Перейти: Дашборд", keywords: "перейти дашборд go dashboard", run: () => { activeView = "dashboard"; } },
+    { label: "Перейти: Календарь", keywords: "перейти календарь go calendar", run: () => { activeView = "calendar"; } },
+    { label: "Перейти: Настройки", keywords: "перейти настройки go settings", run: () => { activeView = "settings"; } },
+    { label: "Спланировать день", hint: "Календарь-неделя + ИИ-план", keywords: "спланировать день план calendar plan day", run: () => { activeView = "calendar"; taskStore.requestPlanDay(); } },
+    { label: "Сменить тему", hint: "Светлая → тёмная → системная", keywords: "сменить тема theme dark light", run: cycleTheme },
+  ];
+
   function pingActivity() {
     const now = Date.now();
     if (now - lastActivityPing < 10_000) return;
@@ -87,6 +112,10 @@
     } else if (e.code === "KeyK") {
       e.preventDefault();
       showSearch = true;
+    } else if (e.code === "KeyD") {
+      e.preventDefault();
+      activeView = "notes";
+      noteStore.requestDaily();
     } else if (!e.shiftKey && !e.altKey && e.code >= "Digit1" && e.code <= "Digit5") {
       const idx = Number(e.code.slice(-1)) - 1;
       if (idx >= 0 && idx < viewOrder.length) {
@@ -99,6 +128,7 @@
 
 {#if showSearch}
   <SearchOverlay
+    commands={paletteCommands}
     onClose={() => showSearch = false}
     onSelectTask={(id) => { activeView = "tasks"; taskStore.requestFocus(id); showSearch = false; }}
     onSelectNote={(id) => { activeView = "notes"; noteStore.requestFocus(id); showSearch = false; }}
@@ -132,6 +162,8 @@
         </button>
       {/each}
     </nav>
+
+    <TrackingWidget />
 
     <PomodoroWidget />
 

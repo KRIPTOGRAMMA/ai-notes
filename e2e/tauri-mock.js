@@ -37,6 +37,10 @@
     openai_in_keyring: false,
     anthropic_in_keyring: false,
     app_category_rules: "",
+    auto_backup_dir: "",
+    auto_backup_keep: 7,
+    last_auto_backup: "",
+    morning_digest_time: "",
   };
 
   let db;
@@ -102,7 +106,7 @@
     },
     is_wayland: () => false,
     get_tracking_mode: () => "basic",
-    get_window_tracking: () => null,
+    get_window_tracking: () => db.windowTracking ?? null,
     record_input: () => {},
     open_quick_capture: ({ mode }) => {
       db.quickMode = mode;
@@ -224,6 +228,7 @@
       for (const t of db.tasks) if (t.project_id === id) t.project_id = null;
       persist();
     },
+    get_goal_history: ({ projectId }) => [],
 
     // --- подзадачи ---
     get_subtasks: ({ taskId }) => findTask(taskId)?.subtasks ?? [],
@@ -303,7 +308,30 @@
     },
     delete_note: ({ id }) => {
       db.notes = db.notes.filter((n) => n.id !== id);
+      if (db.noteRevisions) db.noteRevisions = db.noteRevisions.filter((r) => r.note_id !== id);
       persist();
+    },
+    get_note_revisions: ({ noteId }) =>
+      (db.noteRevisions ?? [])
+        .filter((r) => r.note_id === noteId)
+        .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
+        .map((r) => ({ id: r.id, created_at: r.created_at, size: r.content.length })),
+    get_note_revision_content: ({ revisionId }) => {
+      const r = (db.noteRevisions ?? []).find((r) => r.id === revisionId);
+      if (!r) throw "Ревизия не найдена";
+      return r.content;
+    },
+    restore_note_revision: ({ revisionId }) => {
+      const r = (db.noteRevisions ?? []).find((r) => r.id === revisionId);
+      if (!r) throw "Ревизия не найдена";
+      const n = db.notes.find((n) => n.id === r.note_id);
+      if (!n) throw "Заметка не найдена";
+      if (!db.noteRevisions) db.noteRevisions = [];
+      db.noteRevisions.push({ id: uuid(), note_id: n.id, content: n.content, created_at: now() });
+      n.content = r.content;
+      n.updated_at = now();
+      persist();
+      return { ...n };
     },
     search_notes: ({ query }) => {
       const q = (query ?? "").trim().toLowerCase();
@@ -311,6 +339,64 @@
       return db.notes
         .filter((n) => n.title.toLowerCase().includes(q) || n.content.toLowerCase().includes(q))
         .map((n) => ({ ...n }));
+    },
+    search_notes_snippet: ({ query }) => {
+      const q = (query ?? "").trim().toLowerCase();
+      if (!q) return [];
+      return db.notes
+        .filter((n) => n.title.toLowerCase().includes(q) || n.content.toLowerCase().includes(q))
+        .map((n) => ({
+          item: { ...n },
+          snippet: n.content.replace(new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi"), "<mark>$1</mark>"),
+        }));
+    },
+    search_tasks_snippet: ({ query }) => {
+      const q = (query ?? "").trim().toLowerCase();
+      if (!q) return [];
+      return db.tasks
+        .filter((t) => t.title.toLowerCase().includes(q) || (t.description ?? "").toLowerCase().includes(q))
+        .map((t) => ({
+          item: { ...t },
+          snippet: (t.description ?? "").replace(new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`, "gi"), "<mark>$1</mark>"),
+        }));
+    },
+    get_images_dir: () => "/mock/app-data/images",
+    // Экспорт/импорт заметок в .md (v0.7.14): реального диска в e2e нет —
+    // db.mdFiles эмулирует папку как {filename: content}, ключ dir игнорируется
+    // (единственная "папка" на тест).
+    export_notes_md: () => {
+      db.mdFiles = {};
+      const used = {};
+      for (const n of db.notes) {
+        const base = (n.title || "Без названия").trim() || "Без названия";
+        const key = base.toLowerCase();
+        used[key] = (used[key] ?? 0) + 1;
+        const filename = used[key] === 1 ? `${base}.md` : `${base}-${used[key]}.md`;
+        db.mdFiles[filename] = n.content;
+      }
+      persist();
+      return Object.keys(db.mdFiles).length;
+    },
+    import_notes_md: () => {
+      const files = db.mdFiles ?? {};
+      let count = 0;
+      for (const [filename, content] of Object.entries(files)) {
+        const title = filename.replace(/\.md$/, "");
+        db.notes.push({
+          id: uuid(), title, content, tags: [], linked_task_id: null, project_id: null,
+          created_at: now(), updated_at: now(),
+        });
+        count++;
+      }
+      persist();
+      return count;
+    },
+    save_note_image: ({ dataBase64, ext }) => {
+      const filename = `${uuid()}.${ext}`;
+      if (!db.images) db.images = [];
+      db.images.push({ filename, dataUrl: dataBase64 });
+      persist();
+      return filename;
     },
     rename_note_links: ({ oldTitle, newTitle }) => {
       const oldT = (oldTitle ?? "").trim();
@@ -363,6 +449,16 @@
       db.pomodoro.phase = db.pomodoro.phase === "work" ? "break" : "work";
       persist();
     },
+    pomodoro_start: () => {
+      db.pomodoro = { phase: "work", until: new Date(Date.now() + 25 * 60000).toISOString() };
+      persist();
+    },
+    pomodoro_stop: () => {
+      db.pomodoro = { phase: "off", until: null };
+      persist();
+    },
+    get_pomodoro_stats: () =>
+      db.pomodoroStats ?? { today: 0, week: 0, task_streak: 0, pomodoro_streak: 0 },
     get_category_distribution: () => [],
     get_active_idle_ratio: () => ({ today_active: 0, today_idle: 0, week_active: 0, week_idle: 0 }),
     get_app_usage: () => [],
@@ -404,6 +500,108 @@
     default_model_url: () => "",
     export: () => {},
     import: () => {},
+    do_auto_backup: () => "ai-notes-backup-2026-07-17-1600.zip",
+
+    // --- трекинг ---
+    start_task_tracking: ({ taskId }) => {
+      const t = findTask(taskId);
+      if (!t) throw `Задача не найдена: ${taskId}`;
+      if (!db.sessions) db.sessions = [];
+      // Закрыть открытые
+      for (const s of db.sessions) if (!s.ended_at) s.ended_at = now();
+      const s = { id: uuid(), task_id: taskId, started_at: now(), ended_at: null };
+      db.sessions.push(s);
+      t.status = "InProgress";
+      t.updated_at = now();
+      persist();
+      return { task_id: taskId, title: t.title, started_at: s.started_at, elapsed_secs: 0 };
+    },
+    stop_task_tracking: () => {
+      if (!db.sessions) return;
+      for (const s of db.sessions) if (!s.ended_at) s.ended_at = now();
+      persist();
+    },
+    get_active_session: () => {
+      if (!db.sessions) return null;
+      const s = db.sessions.find((s) => !s.ended_at);
+      if (!s) return null;
+      const t = findTask(s.task_id);
+      const started = new Date(s.started_at);
+      const elapsed = Math.round((Date.now() - started.getTime()) / 1000);
+      return { task_id: s.task_id, title: t?.title ?? "", started_at: s.started_at, elapsed_secs: elapsed };
+    },
+    get_task_seconds: ({ taskId }) => {
+      if (!db.sessions) return 0;
+      const now = Date.now();
+      let total = 0;
+      for (const s of db.sessions) {
+        if (s.task_id !== taskId) continue;
+        const start = new Date(s.started_at).getTime();
+        const end = s.ended_at ? new Date(s.ended_at).getTime() : now;
+        total += Math.max(0, Math.round((end - start) / 1000));
+      }
+      return total;
+    },
+    get_project_seconds: ({ projectId, from }) => {
+      if (!db.sessions) return 0;
+      const fromMs = new Date(from).getTime();
+      const nowMs = Date.now();
+      let total = 0;
+      for (const s of db.sessions) {
+        const t = findTask(s.task_id);
+        if (!t || t.project_id !== projectId) continue;
+        const start = new Date(s.started_at).getTime();
+        if (start < fromMs) continue;
+        const end = s.ended_at ? new Date(s.ended_at).getTime() : nowMs;
+        total += Math.max(0, Math.round((end - start) / 1000));
+      }
+      return total;
+    },
+
+    // --- рутины ---
+    get_routines: () => (db.routines ?? []).map((r) => ({ ...r })),
+    create_routine: ({ routine }) => {
+      const full = {
+        id: uuid(),
+        active: true,
+        ...routine,
+      };
+      if (!db.routines) db.routines = [];
+      db.routines.push(full);
+      persist();
+      return { ...full };
+    },
+    update_routine: ({ id, patch }) => {
+      const r = db.routines?.find((r) => r.id === id);
+      if (!r) throw `Рутина не найдена: ${id}`;
+      for (const [k, v] of Object.entries(patch)) {
+        if (v !== undefined) r[k] = v;
+      }
+      persist();
+    },
+    delete_routine: ({ id }) => {
+      if (db.routines) db.routines = db.routines.filter((r) => r.id !== id);
+      persist();
+    },
+
+    // --- шаблоны чеклистов ---
+    get_checklist_templates: () =>
+      [...(db.checklistTemplates ?? [])].sort((a, b) => a.name.localeCompare(b.name)).map((t) => ({ ...t })),
+    create_checklist_template: ({ name, items }) => {
+      const cleanName = (name ?? "").trim();
+      const cleanItems = (items ?? []).map((i) => i.trim()).filter(Boolean);
+      if (!cleanName) throw "Название шаблона не может быть пустым";
+      if (cleanItems.length === 0) throw "Шаблон без пунктов не имеет смысла";
+      const full = { id: uuid(), name: cleanName, items: cleanItems };
+      if (!db.checklistTemplates) db.checklistTemplates = [];
+      db.checklistTemplates.push(full);
+      persist();
+      return { ...full };
+    },
+    delete_checklist_template: ({ id }) => {
+      if (db.checklistTemplates) db.checklistTemplates = db.checklistTemplates.filter((t) => t.id !== id);
+      persist();
+    },
 
     // --- плагины ---
     "plugin:event|listen": ({ event, handler }) => {
@@ -417,8 +615,8 @@
     "plugin:autostart|enable": () => {},
     "plugin:autostart|disable": () => {},
     "plugin:autostart|is_enabled": () => false,
-    "plugin:dialog|save": () => null,
-    "plugin:dialog|open": () => null,
+    "plugin:dialog|save": () => db.mockDialogPath ?? null,
+    "plugin:dialog|open": () => db.mockDialogPath ?? null,
   };
 
   window.__TAURI_INTERNALS__ = {
@@ -434,6 +632,14 @@
         return undefined;
       }
       return handler(args);
+    },
+    // Картинки в заметках (v0.7.13): реальный convertFileSrc строит asset://
+    // URL из абсолютного пути — в e2e картинок на диске нет, поэтому отдаём
+    // содержимое из db.images (заполняется save_note_image-моком) как data-url.
+    convertFileSrc(filePath) {
+      const name = filePath.split("/").pop();
+      const entry = (db.images ?? []).find((i) => i.filename === name);
+      return entry ? entry.dataUrl : `mock-asset://${filePath}`;
     },
     metadata: {
       currentWindow: { label: "main" },

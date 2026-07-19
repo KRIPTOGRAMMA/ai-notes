@@ -69,7 +69,17 @@ pub struct AppSettings {
     pub anthropic_in_keyring: bool,  // runtime-only: ключ хранится в keyring
     #[serde(default)]
     pub app_category_rules: String,  // JSON [{pattern, category}] — классы окон → категории
+    #[serde(default)]
+    pub app_limits: String,          // JSON [{category, daily_mins}] — 0/отсутствие = без лимита
+    #[serde(default)]
+    pub auto_backup_dir: String,     // пусто = авто-бэкап выключен
+    #[serde(default = "default_seven")]
+    pub auto_backup_keep: u64,       // сколько копий хранить
+    #[serde(default)]
+    pub morning_digest_time: String, // "HH:MM", пусто = выкл
 }
+
+fn default_seven() -> u64 { 7 }
 
 fn default_true() -> bool { true }
 
@@ -105,6 +115,10 @@ impl Default for AppSettings {
             openai_in_keyring: false,
             anthropic_in_keyring: false,
             app_category_rules: String::new(),
+            app_limits: String::new(),
+            auto_backup_dir: String::new(),
+            auto_backup_keep: 7,
+            morning_digest_time: String::new(),
         }
     }
 }
@@ -202,6 +216,12 @@ pub async fn load_settings_raw(pool: &SqlitePool) -> AppResult<AppSettings> {
     if let Some(v) = get_setting(pool, "context_notifications").await { s.context_notifications = v != "false"; }
     if let Some(v) = get_setting(pool, "ai_fallback").await { s.ai_fallback = v == "true"; }
     if let Some(v) = get_setting(pool, "app_category_rules").await { s.app_category_rules = v; }
+    if let Some(v) = get_setting(pool, "app_limits").await { s.app_limits = v; }
+    if let Some(v) = get_setting(pool, "auto_backup_dir").await { s.auto_backup_dir = v; }
+    if let Some(v) = get_setting(pool, "auto_backup_keep").await {
+        if let Ok(n) = v.parse() { s.auto_backup_keep = n; }
+    }
+    if let Some(v) = get_setting(pool, "morning_digest_time").await { s.morning_digest_time = v; }
     // Ключи: сначала keyring, затем legacy-значение из БД
     let openai_from_keyring = keyring_get("openai_key");
     let anthropic_from_keyring = keyring_get("anthropic_key");
@@ -270,6 +290,18 @@ pub async fn save_settings(
         settings.app_category_rules.as_str()
     };
     set_setting(pool.inner(), "app_category_rules", rules).await?;
+    // Лимиты категорий: та же логика — мусор не сохраняем
+    let limits = if crate::commands::monitor::parse_app_limits(&settings.app_limits).is_empty()
+        && !settings.app_limits.trim().is_empty()
+    {
+        ""
+    } else {
+        settings.app_limits.as_str()
+    };
+    set_setting(pool.inner(), "app_limits", limits).await?;
+    set_setting(pool.inner(), "auto_backup_dir", &settings.auto_backup_dir).await?;
+    set_setting(pool.inner(), "auto_backup_keep", &settings.auto_backup_keep.max(1).to_string()).await?;
+    set_setting(pool.inner(), "morning_digest_time", &settings.morning_digest_time).await?;
 
     for (name, value) in [("openai_key", &settings.openai_key), ("anthropic_key", &settings.anthropic_key)] {
         match keyring_set(name, value) {

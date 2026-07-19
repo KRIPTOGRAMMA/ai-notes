@@ -68,6 +68,17 @@ export interface Project {
   goal_done_mins: number;
 }
 
+export interface GoalSnapshot {
+  id: string;
+  project_id: string;
+  period_key: string;
+  goal_tasks: number | null;
+  goal_mins: number | null;
+  done_tasks: number;
+  done_mins: number;
+  recorded_at: string;
+}
+
 export interface UpdateProjectPayload {
   name?: string;
   color?: string;
@@ -115,6 +126,22 @@ export interface Note {
   updated_at: string;
 }
 
+export interface NoteSnippet {
+  item: Note;
+  snippet: string;
+}
+
+export interface NoteRevision {
+  id: string;
+  created_at: string;
+  size: number;
+}
+
+export interface TaskSnippet {
+  item: Task;
+  snippet: string;
+}
+
 export interface CreateNotePayload {
   title: string;
   content: string;
@@ -158,9 +185,46 @@ export interface AppSettings {
   openai_in_keyring: boolean;
   anthropic_in_keyring: boolean;
   app_category_rules: string; // JSON [{pattern, category}]
+  app_limits: string;         // JSON [{category, daily_mins}] — 0/отсутствие = без лимита
+  auto_backup_dir: string;    // пусто = авто-бэкап выключен
+  auto_backup_keep: number;   // сколько копий хранить (мин 1)
+  morning_digest_time: string; // "HH:MM", пусто = выкл
 }
 
 export interface AppCategoryRule {
   pattern: string;
   category: Category;
+}
+
+export interface AppLimit {
+  category: Category;
+  daily_mins: number;
+}
+
+export interface ChecklistTemplate {
+  id: string;
+  name: string;
+  items: string[];
+}
+
+export interface Routine {
+  id: string;
+  title: string;
+  days_mask: number;
+  start_mins: number;
+  duration_mins: number;
+  active: boolean;
+}
+
+export interface RoutineBlock {
+  title: string;
+  start_mins: number;
+  duration_mins: number;
+}
+
+export interface ActiveSession {
+  task_id: string;
+  title: string;
+  started_at: string;
+  elapsed_secs: number;
 }

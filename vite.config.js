@@ -11,8 +11,13 @@ export default defineConfig({
       input: {
         main: "index.html",
         quickTask: "quick-task.html",
-      }
-    }
+      },
+      output: {
+        manualChunks: {
+          codemirror: ["@codemirror/state", "@codemirror/view", "@codemirror/commands", "@codemirror/lang-markdown", "@codemirror/language", "@codemirror/autocomplete", "@lezer/common", "@lezer/markdown", "@lezer/highlight"],
+        },
+      },
+    },
   },
   server: {
     port: 1420,

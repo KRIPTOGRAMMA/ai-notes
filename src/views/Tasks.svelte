@@ -7,9 +7,12 @@
   import { api } from "../lib/api/tauri";
   import { parseComposer, SUBTASK_PREFIX } from "../lib/composer";
   import TaskModal from "../lib/components/TaskModal.svelte";
-  import type { Task, Category, CreateTaskPayload, UpdateTaskPayload, Project } from "../lib/types";
+  import type { Task, Category, CreateTaskPayload, UpdateTaskPayload, Project, GoalSnapshot, ActiveSession, ChecklistTemplate } from "../lib/types";
 
   type AiResult = { task_id: string; type: string; result?: string; error?: string };
+
+  let showGoalHistory = $state<Record<string, GoalSnapshot[]>>({});
+  let goalHistoryLoading = $state<Record<string, boolean>>({});
 
   let showHistory = $state(false);
   let showCreateModal = $state(false);
@@ -68,6 +71,22 @@
         && (p.goal_mins == null || p.goal_done_mins >= p.goal_mins);
   }
 
+  async function toggleGoalHistory(projectId: string) {
+    if (showGoalHistory[projectId]) {
+      const next = { ...showGoalHistory };
+      delete next[projectId];
+      showGoalHistory = next;
+      return;
+    }
+    goalHistoryLoading = { ...goalHistoryLoading, [projectId]: true };
+    try {
+      const snapshots = await api.getGoalHistory(projectId);
+      showGoalHistory = { ...showGoalHistory, [projectId]: snapshots };
+    } finally {
+      goalHistoryLoading = { ...goalHistoryLoading, [projectId]: false };
+    }
+  }
+
   async function addProject() {
     const name = newProjectName.trim();
     if (!name) return;
@@ -97,6 +116,23 @@
   let aiLoadingId: string | null = $state(null);
   let aiError: string | null = $state(null);
   let subtasksPreview: { taskId: string; items: string[] } | null = $state(null);
+
+  let trackingId: string | null = $state(null);
+
+  onMount(() => {
+    api.getActiveSession().then(s => { trackingId = s?.task_id ?? null; }).catch(() => {});
+  });
+
+  async function toggleTracking(taskId: string) {
+    if (trackingId === taskId) {
+      await api.stopTaskTracking();
+      trackingId = null;
+    } else {
+      await api.startTaskTracking(taskId);
+      trackingId = taskId;
+    }
+    taskStore.load();
+  }
 
   // Открытие задачи по сигналу из глобального поиска (Ctrl+K).
   $effect(() => {
@@ -228,6 +264,49 @@
     await api.addSubtask(parentId, title);
     newSubtaskInput[parentId] = "";
     await taskStore.load();
+  }
+
+  // --- Шаблоны чеклистов (v0.7.15) ---
+  let checklistTemplates: ChecklistTemplate[] = $state([]);
+  let templatePickerFor: string | null = $state(null); // task_id, для которой открыт список «Из шаблона…»
+  let savingTemplateFor: string | null = $state(null); // task_id, для которой открыт инпут «Сохранить как шаблон»
+  let newTemplateName = $state("");
+
+  async function loadChecklistTemplates() {
+    checklistTemplates = await api.getChecklistTemplates().catch(() => []);
+  }
+
+  function openTemplatePicker(taskId: string) {
+    templatePickerFor = templatePickerFor === taskId ? null : taskId;
+    savingTemplateFor = null;
+    if (templatePickerFor) loadChecklistTemplates();
+  }
+
+  async function applyTemplate(taskId: string, template: ChecklistTemplate) {
+    for (const item of template.items) {
+      await api.addSubtask(taskId, item);
+    }
+    templatePickerFor = null;
+    await taskStore.load();
+  }
+
+  async function removeTemplate(id: string) {
+    await api.deleteChecklistTemplate(id);
+    await loadChecklistTemplates();
+  }
+
+  function openSaveTemplate(taskId: string) {
+    savingTemplateFor = savingTemplateFor === taskId ? null : taskId;
+    templatePickerFor = null;
+    newTemplateName = "";
+  }
+
+  async function saveCurrentAsTemplate(task: Task) {
+    const name = newTemplateName.trim();
+    if (!name || task.subtasks.length === 0) return;
+    await api.createChecklistTemplate(name, task.subtasks.map(s => s.title));
+    savingTemplateFor = null;
+    newTemplateName = "";
   }
 
   let expanded = $state<Record<string, boolean>>({});
@@ -434,6 +513,9 @@
         onclick={() => generateSubtasks(task.id, task.title)}>{busy ? "…" : "🔀"}</button>
       <button class="btn-icon" disabled={busy} title="Авто-категория"
         onclick={() => classifyTask(task.id, task.title)}>{busy ? "…" : "🏷"}</button>
+      <button class="btn-icon" title={trackingId === task.id ? "Остановить трекинг" : "Начать трекинг"}
+        onclick={() => toggleTracking(task.id)} class:active={trackingId === task.id}>
+        {trackingId === task.id ? "■" : "▶"}</button>
       <button class="btn-icon btn-danger" title="Удалить"
         onclick={() => taskStore.remove(task.id)}>✕</button>
     </div>
@@ -476,6 +558,44 @@
         />
         <button class="btn-sm" onclick={() => addManualSubtask(task.id)}>Добавить</button>
       </div>
+      <div class="sub-line" style="gap:6px;">
+        <button class="btn-sm" onclick={() => openTemplatePicker(task.id)}>Из шаблона…</button>
+        <button class="btn-sm" onclick={() => openSaveTemplate(task.id)} disabled={task.subtasks.length === 0}
+          title={task.subtasks.length === 0 ? "Сначала добавьте подзадачи" : ""}>
+          Сохранить как шаблон
+        </button>
+      </div>
+
+      {#if templatePickerFor === task.id}
+        <div class="template-panel">
+          {#if checklistTemplates.length === 0}
+            <span class="muted" style="font-size:12px;">Нет сохранённых шаблонов</span>
+          {:else}
+            {#each checklistTemplates as tpl (tpl.id)}
+              <div class="sub-line">
+                <span style="flex:1;">{tpl.name} <span class="muted">({tpl.items.length})</span></span>
+                <button class="btn-sm" onclick={() => applyTemplate(task.id, tpl)}>Применить</button>
+                <button class="btn-icon btn-danger" title="Удалить шаблон" onclick={() => removeTemplate(tpl.id)}>✕</button>
+              </div>
+            {/each}
+          {/if}
+        </div>
+      {/if}
+
+      {#if savingTemplateFor === task.id}
+        <div class="sub-line template-panel">
+          <input
+            type="text"
+            placeholder="Название шаблона"
+            bind:value={newTemplateName}
+            onkeydown={(e) => { if (e.key === 'Enter') saveCurrentAsTemplate(task); }}
+            class="sub-input"
+          />
+          <button class="btn-sm btn-primary" onclick={() => saveCurrentAsTemplate(task)} disabled={!newTemplateName.trim()}>
+            Сохранить
+          </button>
+        </div>
+      {/if}
     </li>
   {/if}
 {/snippet}
@@ -542,6 +662,27 @@
             </select>
             {#if goalText(p)}
               <span class="goal-chip" class:met={goalMet(p)}>{goalText(p)}</span>
+              <button class="btn-sm" onclick={() => toggleGoalHistory(p.id)}>
+                {showGoalHistory[p.id] ? "Скрыть" : "История"}
+              </button>
+            {/if}
+            {#if showGoalHistory[p.id]}
+              <div class="goal-history">
+                {#if goalHistoryLoading[p.id]}
+                  <span class="muted">Загрузка…</span>
+                {:else if showGoalHistory[p.id].length === 0}
+                  <span class="muted">Нет записей</span>
+                {:else}
+                  {#each showGoalHistory[p.id] as snap (snap.id)}
+                    <div class="goal-history-row">
+                      <span class="muted">{snap.recorded_at.slice(0, 16)}</span>
+                      <span>{snap.done_tasks}{snap.goal_tasks != null ? `/${snap.goal_tasks}` : ''} задач</span>
+                      <span>·</span>
+                      <span>{snap.done_mins}{snap.goal_mins != null ? `/${snap.goal_mins}` : ''} мин</span>
+                    </div>
+                  {/each}
+                {/if}
+              </div>
             {/if}
           </div>
         {/if}
@@ -815,6 +956,21 @@
     font-weight: 600;
   }
 
+  .goal-history {
+    width: 100%;
+    font-size: 11px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 4px 0 0 8px;
+  }
+
+  .goal-history-row {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+  }
+
   .day-plan {
     display: flex;
     align-items: center;
@@ -1045,6 +1201,17 @@
     flex: 1;
     font-size: 12px;
     padding: 2px 8px;
+  }
+
+  .template-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 6px 8px;
+    margin-top: 4px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-secondary);
   }
 
   .history .task-row {

@@ -255,6 +255,7 @@ input:focus, select:focus, textarea:focus {
     background: rgba(0, 0, 0, 0.45);
     display: flex;
     justify-content: center;
+    align-items: center;
 }
 
 .modal {
@@ -262,6 +263,9 @@ input:focus, select:focus, textarea:focus {
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     box-shadow: 0 16px 48px rgba(0, 0, 0, 0.3);
+    max-height: 85vh;
+    max-width: 90vw;
+    overflow-y: auto;
 }
 
 kbd {

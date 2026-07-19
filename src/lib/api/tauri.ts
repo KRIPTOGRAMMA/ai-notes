@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Task, Subtask, CreateTaskPayload, UpdateTaskPayload, Note, CreateNotePayload, UpdateNotePayload, AppSettings, Project, UpdateProjectPayload, CategoryInfo } from "../types";
+import type { Task, Subtask, CreateTaskPayload, UpdateTaskPayload, Note, CreateNotePayload, UpdateNotePayload, AppSettings, Project, UpdateProjectPayload, CategoryInfo, NoteSnippet, TaskSnippet, GoalSnapshot, Routine, RoutineBlock, ActiveSession, NoteRevision, ChecklistTemplate } from "../types";
 
 export const api = {
   getTasks: () => invoke<Task[]>("get_tasks"),
@@ -15,6 +15,7 @@ export const api = {
   updateProject: (id: string, patch: UpdateProjectPayload) =>
     invoke<void>("update_project", { id, patch }),
   deleteProject: (id: string) => invoke<void>("delete_project", { id }),
+  getGoalHistory: (projectId: string) => invoke<GoalSnapshot[]>("get_goal_history", { projectId }),
   getCategories: () => invoke<CategoryInfo[]>("get_categories"),
   createCategory: (name: string, color: string) => invoke<CategoryInfo>("create_category", { name, color }),
   updateCategory: (id: string, patch: { name?: string; color?: string }) =>
@@ -33,9 +34,22 @@ export const api = {
   updateNote: (id: string, patch: UpdateNotePayload) => invoke<Note>("update_note", { id, patch }),
   deleteNote: (id: string) => invoke<void>("delete_note", { id }),
   searchNotes: (query: string) => invoke<Note[]>("search_notes", { query }),
+  searchNotesSnippet: (query: string) => invoke<NoteSnippet[]>("search_notes_snippet", { query }),
+  searchTasksSnippet: (query: string) => invoke<TaskSnippet[]>("search_tasks_snippet", { query }),
   renameNoteLinks: (oldTitle: string, newTitle: string) =>
     invoke<number>("rename_note_links", { oldTitle, newTitle }),
   aiSuggestLinks: (noteId: string) => invoke<void>("ai_suggest_links", { noteId }),
+  getNoteRevisions: (noteId: string) => invoke<NoteRevision[]>("get_note_revisions", { noteId }),
+  getNoteRevisionContent: (revisionId: string) => invoke<string>("get_note_revision_content", { revisionId }),
+  restoreNoteRevision: (revisionId: string) => invoke<Note>("restore_note_revision", { revisionId }),
+  saveNoteImage: (dataBase64: string, ext: string) => invoke<string>("save_note_image", { dataBase64, ext }),
+  getImagesDir: () => invoke<string>("get_images_dir"),
+  exportNotesMd: (dir: string) => invoke<number>("export_notes_md", { dir }),
+  importNotesMd: (dir: string) => invoke<number>("import_notes_md", { dir }),
+  getChecklistTemplates: () => invoke<ChecklistTemplate[]>("get_checklist_templates"),
+  createChecklistTemplate: (name: string, items: string[]) =>
+    invoke<ChecklistTemplate>("create_checklist_template", { name, items }),
+  deleteChecklistTemplate: (id: string) => invoke<void>("delete_checklist_template", { id }),
   getActivityByDay: () => invoke<{ date: string; minutes: number }[]>("get_activity_by_day"),
   getTaskCompletionsByDay: () => invoke<{ date: string; completed: number }[]>("get_task_completions_by_day"),
   getCategoryDistribution: () => invoke<{ category: string; count: number }[]>("get_category_distribution"),
@@ -48,6 +62,10 @@ export const api = {
   getPomodoroState: () => invoke<{ phase: string; until: string | null }>("get_pomodoro_state"),
   pomodoroTogglePause: () => invoke<void>("pomodoro_toggle_pause"),
   pomodoroSkip: () => invoke<void>("pomodoro_skip"),
+  pomodoroStart: () => invoke<void>("pomodoro_start"),
+  pomodoroStop: () => invoke<void>("pomodoro_stop"),
+  getPomodoroStats: () =>
+    invoke<{ today: number; week: number; task_streak: number; pomodoro_streak: number }>("get_pomodoro_stats"),
   getAppCategoryTime: (days: number) =>
     invoke<{ category: string; minutes: number }[]>("get_app_category_time", { days }),
   dashboardInsight: () => invoke<void>("dashboard_insight"),
@@ -60,10 +78,22 @@ export const api = {
   getWindowTracking: () => invoke<string | null>("get_window_tracking"),
   exportData: (path: string) => invoke<void>("export", { path }),
   importData: (path: string) => invoke<void>("import", { path }),
+  doAutoBackup: () => invoke<string>("do_auto_backup"),
   getSubtasks: (taskId: string) => invoke<Subtask[]>("get_subtasks", { taskId }),
   addSubtask: (taskId: string, title: string) => invoke<Subtask>("add_subtask", { taskId, title }),
   toggleSubtask: (id: string) => invoke<void>("toggle_subtask", { id }),
   deleteSubtask: (id: string) => invoke<void>("delete_subtask", { id }),
+  getRoutines: () => invoke<Routine[]>("get_routines"),
+  createRoutine: (routine: { title: string; days_mask: number; start_mins: number; duration_mins: number }) =>
+    invoke<Routine>("create_routine", { routine }),
+  updateRoutine: (id: string, patch: { title?: string; days_mask?: number; start_mins?: number; duration_mins?: number; active?: boolean }) =>
+    invoke<void>("update_routine", { id, patch }),
+  deleteRoutine: (id: string) => invoke<void>("delete_routine", { id }),
+  startTaskTracking: (taskId: string) => invoke<ActiveSession>("start_task_tracking", { taskId }),
+  stopTaskTracking: () => invoke<void>("stop_task_tracking"),
+  getActiveSession: () => invoke<ActiveSession | null>("get_active_session"),
+  getTaskSeconds: (taskId: string) => invoke<number>("get_task_seconds", { taskId }),
+  getProjectSeconds: (projectId: string, from: string) => invoke<number>("get_project_seconds", { projectId, from }),
   defaultModelUrl: () => invoke<string>("default_model_url"),
   modelStatus: () => invoke<{ exists: boolean; size_bytes: number }>("model_status"),
   downloadModel: (url: string) => invoke<void>("download_model", { url }),

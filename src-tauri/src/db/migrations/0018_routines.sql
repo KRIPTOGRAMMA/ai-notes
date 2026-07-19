@@ -1,0 +1,8 @@
+CREATE TABLE IF NOT EXISTS routines (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    days_mask INTEGER NOT NULL DEFAULT 127,
+    start_mins INTEGER NOT NULL,
+    duration_mins INTEGER NOT NULL DEFAULT 60,
+    active INTEGER NOT NULL DEFAULT 1
+);

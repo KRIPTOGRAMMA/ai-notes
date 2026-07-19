@@ -14,6 +14,18 @@ use tauri::State;
 use crate::error::AppResult;
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct GoalSnapshot {
+    pub id: String,
+    pub project_id: String,
+    pub period_key: String,
+    pub goal_tasks: Option<i64>,
+    pub goal_mins: Option<i64>,
+    pub done_tasks: i64,
+    pub done_mins: i64,
+    pub recorded_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct Project {
     pub id: String,
     pub name: String,
@@ -104,21 +116,28 @@ pub async fn get_projects_at(pool: &SqlitePool, now: DateTime<Utc>) -> AppResult
                 COALESCE(SUM(t.completed_at IS NOT NULL
                              AND t.completed_at >= CASE p.goal_period WHEN 'month' THEN ? ELSE ? END), 0)
                     AS goal_done_tasks,
-                COALESCE(SUM(CASE WHEN t.scheduled_at IS NOT NULL
-                                   AND t.scheduled_at <= ?
-                                   AND t.scheduled_at >= CASE p.goal_period WHEN 'month' THEN ? ELSE ? END
-                             THEN COALESCE(t.scheduled_mins, 60) ELSE 0 END), 0)
-                    AS goal_done_mins
+                COALESCE((
+                  SELECT SUM(
+                    CASE WHEN s.ended_at IS NOT NULL
+                      THEN (strftime('%s', s.ended_at) - strftime('%s', s.started_at))
+                      ELSE (strftime('%s', ?) - strftime('%s', s.started_at))
+                    END
+                  ) / 60
+                  FROM task_sessions s
+                  JOIN tasks t2 ON t2.id = s.task_id
+                  WHERE t2.project_id = p.id
+                    AND s.started_at >= CASE p.goal_period WHEN 'month' THEN ? ELSE ? END
+                ), 0) AS goal_done_mins
          FROM projects p
          LEFT JOIN tasks t ON t.project_id = p.id
          GROUP BY p.id
          ORDER BY p.archived, p.created_at",
     )
-    .bind(&month)
-    .bind(&week)
-    .bind(&now_str)
-    .bind(&month)
-    .bind(&week)
+    .bind(&month)    // goal_done_tasks CASE month
+    .bind(&week)     // goal_done_tasks CASE week
+    .bind(&now_str)  // strftime('%s', ?) for open session
+    .bind(&month)    // subquery CASE month
+    .bind(&week)     // subquery CASE week
     .fetch_all(pool)
     .await?;
 
@@ -240,6 +259,35 @@ pub async fn update_project_impl(pool: &SqlitePool, id: String, patch: UpdatePro
             .bind(&id).execute(pool).await?;
     }
     Ok(())
+}
+
+#[tauri::command]
+pub async fn get_goal_history(pool: State<'_, SqlitePool>, project_id: String) -> AppResult<Vec<GoalSnapshot>> {
+    get_goal_history_impl(pool.inner(), &project_id).await
+}
+
+pub async fn get_goal_history_impl(pool: &SqlitePool, project_id: &str) -> AppResult<Vec<GoalSnapshot>> {
+    let rows = sqlx::query(
+        "SELECT id, project_id, period_key, goal_tasks, goal_mins, done_tasks, done_mins, recorded_at
+         FROM project_goal_history
+         WHERE project_id = ?
+         ORDER BY recorded_at DESC
+         LIMIT 50"
+    )
+    .bind(project_id)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows.iter().map(|r| GoalSnapshot {
+        id: r.get("id"),
+        project_id: r.get("project_id"),
+        period_key: r.get("period_key"),
+        goal_tasks: r.get("goal_tasks"),
+        goal_mins: r.get("goal_mins"),
+        done_tasks: r.get("done_tasks"),
+        done_mins: r.get("done_mins"),
+        recorded_at: r.get("recorded_at"),
+    }).collect())
 }
 
 #[tauri::command]
@@ -371,15 +419,35 @@ mod tests {
         // выполнена только что — в периоде; выполнена 60 дней назад — нет
         insert(Some((now - chrono::Duration::minutes(1)).to_rfc3339()), None, None).await;
         insert(Some((now - chrono::Duration::days(60)).to_rfc3339()), None, None).await;
-        // блок начался час назад — 45 мин в зачёт; блок в будущем — не считается
-        insert(None, Some((now - chrono::Duration::hours(1)).to_rfc3339()), Some(45)).await;
-        insert(None, Some((now + chrono::Duration::hours(3)).to_rfc3339()), Some(90)).await;
+        // две задачи для session-based goal_done_mins: одна с закрытой сессией, другая с открытой
+        let task_a = uuid::Uuid::new_v4().to_string();
+        let task_b = uuid::Uuid::new_v4().to_string();
+        sqlx::query("INSERT INTO tasks (id, title, status, priority, category, recurrence, tags, hidden, created_at, updated_at, project_id)
+                     VALUES (?, 'A', 'Todo', 'Medium', 'Work', 'None', '[]', 0, ?, ?, ?)")
+            .bind(&task_a).bind(now.to_rfc3339()).bind(now.to_rfc3339()).bind(&p.id)
+            .execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO tasks (id, title, status, created_at, updated_at, project_id)
+                     VALUES (?, 'B', 'Todo', ?, ?, ?)")
+            .bind(&task_b).bind(now.to_rfc3339()).bind(now.to_rfc3339()).bind(&p.id)
+            .execute(&pool).await.unwrap();
+        // сессия 45 мин на задачу A (закрытая, час назад)
+        sqlx::query("INSERT INTO task_sessions (id, task_id, started_at, ended_at) VALUES (?, ?, ?, ?)")
+            .bind(uuid::Uuid::new_v4().to_string()).bind(&task_a)
+            .bind((now - chrono::Duration::hours(1)).to_rfc3339())
+            .bind((now - chrono::Duration::minutes(15)).to_rfc3339())
+            .execute(&pool).await.unwrap();
+        // сессия на задачу B — началась 30 мин назад, не закрыта (открытая, считается до now)
+        sqlx::query("INSERT INTO task_sessions (id, task_id, started_at, ended_at) VALUES (?, ?, ?, NULL)")
+            .bind(uuid::Uuid::new_v4().to_string()).bind(&task_b)
+            .bind((now - chrono::Duration::minutes(30)).to_rfc3339())
+            .execute(&pool).await.unwrap();
 
         let got = &get_projects_at(&pool, now).await.unwrap()[0];
         assert_eq!(got.goal_tasks, Some(2));
         assert_eq!(got.goal_mins, Some(120));
         assert_eq!(got.goal_done_tasks, 1);
-        assert_eq!(got.goal_done_mins, 45);
+        // 45 (закрытая) + ~30 (открытая) = ~75 минут
+        assert!(got.goal_done_mins >= 73 && got.goal_done_mins <= 77, "got {}", got.goal_done_mins);
         assert_eq!(got.task_total, 4);
 
         // goal_tasks: 0 снимает цель

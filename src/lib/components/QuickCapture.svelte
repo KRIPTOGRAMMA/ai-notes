@@ -22,6 +22,7 @@
   let noteContent = $state("");
 
   let errorMsg: string | null = $state(null);
+  let busy = $state(false);
 
   applyCachedTheme();
 
@@ -44,7 +45,8 @@
   }
 
   async function createTask() {
-    if (!title.trim()) return;
+    if (!title.trim() || busy) return;
+    busy = true;
     try {
       await api.createTask({
         title: title.trim(),
@@ -61,11 +63,14 @@
       reset();
     } catch (e) {
       errorMsg = typeof e === "string" ? e : (e as Error)?.message ?? "Не удалось создать задачу";
+    } finally {
+      busy = false;
     }
   }
 
   async function createNote() {
-    if (!noteTitle.trim() && !noteContent.trim()) return;
+    if ((!noteTitle.trim() && !noteContent.trim()) || busy) return;
+    busy = true;
     try {
       await api.createNote({
         title: noteTitle.trim() || "Без названия",
@@ -76,6 +81,8 @@
       reset();
     } catch (e) {
       errorMsg = typeof e === "string" ? e : (e as Error)?.message ?? "Не удалось создать заметку";
+    } finally {
+      busy = false;
     }
   }
 
@@ -98,6 +105,7 @@
     // Enter создаёт: для задачи — в любом поле; для заметки — только с Ctrl
     // (обычный Enter в textarea переносит строку).
     if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
       if (mode === "task") { submit(); }
       else if (e.ctrlKey) { submit(); }
     }
