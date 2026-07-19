@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { api } from "../api/tauri";
+  import Icon from "./Icon.svelte";
 
   // Опрос раз в секунду — состояние живёт в БД (settings), пишется циклом
   // на бэкенде при каждой смене фазы; здесь просто отражаем его.
@@ -40,9 +41,11 @@
     return `${m}:${String(s).padStart(2, "0")}`;
   });
 
+  // Иконка фазы — SVG (v0.8.1): timer для работы/паузы, coffee для перерыва
   const phaseLabel = $derived(
-    phase === "work" ? "🍅 Фокус" : phase === "break" ? "☕ Перерыв" : phase === "paused" ? "🍅 Пауза" : ""
+    phase === "work" ? "Фокус" : phase === "break" ? "Перерыв" : phase === "paused" ? "Пауза" : ""
   );
+  const phaseIcon = $derived(phase === "break" ? "coffee" : "timer");
 
   async function togglePause() {
     await api.pomodoroTogglePause();
@@ -64,20 +67,20 @@
 
 {#if phase === "off"}
   <div class="pomo card">
-    <button class="btn-icon" title="Начать помидор" onclick={start}>▶ 🍅</button>
+    <button class="btn-icon" title="Начать помидор" onclick={start}><Icon name="play" /> <Icon name="timer" /></button>
   </div>
 {:else}
   <div class="pomo card">
-    <span class="pomo-label">{phaseLabel}</span>
+    <span class="pomo-label"><Icon name={phaseIcon} /> {phaseLabel}</span>
     {#if phase !== "paused"}
       <span class="pomo-time">{remainingLabel}</span>
     {/if}
     <div class="pomo-actions">
       <button class="btn-icon" title={phase === "paused" ? "Продолжить" : "Пауза"} onclick={togglePause}>
-        {phase === "paused" ? "▶" : "⏸"}
+        {#if phase === "paused"}<Icon name="play" />{:else}<Icon name="pause" />{/if}
       </button>
-      <button class="btn-icon" title="Пропустить фазу" onclick={skip}>⏭</button>
-      <button class="btn-icon" title="Остановить" onclick={stop}>■</button>
+      <button class="btn-icon" title="Пропустить фазу" onclick={skip}><Icon name="skip" /></button>
+      <button class="btn-icon" title="Остановить" onclick={stop}><Icon name="stop" /></button>
     </div>
   </div>
 {/if}

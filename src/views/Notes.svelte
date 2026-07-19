@@ -6,6 +6,7 @@
   import { projectStore } from "../lib/stores/projects.svelte";
   import { api } from "../lib/api/tauri";
   import { extractWikiLinks } from "../lib/markdown";
+  import Icon from "../lib/components/Icon.svelte";
   import type { Note, NoteRevision } from "../lib/types";
   type EditorComponent = typeof import("../lib/components/LiveMarkdownEditor.svelte").default;
 
@@ -306,7 +307,7 @@
   <div class="list-pane">
     <div class="list-head">
       <button class="btn-primary btn-sm" style="width:100%;" onclick={newNote}>+ Новая заметка</button>
-      <button class="btn-ghost btn-sm" style="width:100%;" onclick={openDailyNote}>📅 Сегодня</button>
+      <button class="btn-ghost btn-sm" style="width:100%;" onclick={openDailyNote}><Icon name="calendar" size={12} /> Сегодня</button>
       <input class="filter-input" bind:value={noteFilter} placeholder="Поиск..." />
       <div class="filter-row">
         <select bind:value={filterTag} class="filter-select">
@@ -357,9 +358,9 @@
         {/if}
         {#if aiEnabled}
           <button class="btn-icon" disabled={linkSuggesting} title="ИИ предложит заметки для связи"
-            onclick={suggestLinks}>{linkSuggesting ? "…" : "🔗✨"}</button>
+            onclick={suggestLinks}>{#if linkSuggesting}…{:else}<Icon name="sparkles" />{/if}</button>
         {/if}
-        <button class="btn-icon" title="Версии заметки" onclick={openRevisions}>🕐</button>
+        <button class="btn-icon" title="Версии заметки" onclick={openRevisions}><Icon name="clock" /></button>
         <button class="btn-icon btn-danger" title="Удалить заметку" onclick={deleteSelected}>✕</button>
       </div>
 
@@ -404,7 +405,7 @@
           </label>
         {/if}
         {#if linkedTask}
-          <span class="chip">🔗 {linkedTask.title}</span>
+          <span class="chip"><Icon name="link" size={11} /> {linkedTask.title}</span>
         {/if}
 
         <div class="tags">

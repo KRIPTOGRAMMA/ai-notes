@@ -1,6 +1,7 @@
 <script lang="ts">
   import { routineStore } from "../stores/routines.svelte";
   import { onMount } from "svelte";
+  import Icon from "./Icon.svelte";
 
   let { onClose }: { onClose: () => void } = $props();
 
@@ -85,7 +86,7 @@
             <button class="btn-icon" onclick={() => routineStore.update(r.id, { active: !r.active })} title={r.active ? "Выключить" : "Включить"}>
               {r.active ? "✓" : "○"}
             </button>
-            <button class="btn-icon" onclick={() => openEdit(r)} title="Редактировать">✏</button>
+            <button class="btn-icon" onclick={() => openEdit(r)} title="Редактировать"><Icon name="pencil" /></button>
             <button class="btn-icon" onclick={() => routineStore.remove(r.id)} title="Удалить">✕</button>
           </div>
         </div>

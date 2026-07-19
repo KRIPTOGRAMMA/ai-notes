@@ -7,6 +7,7 @@
   import { api } from "../lib/api/tauri";
   import { parseComposer, SUBTASK_PREFIX } from "../lib/composer";
   import TaskModal from "../lib/components/TaskModal.svelte";
+  import Icon from "../lib/components/Icon.svelte";
   import type { Task, Category, CreateTaskPayload, UpdateTaskPayload, Project, GoalSnapshot, ActiveSession, ChecklistTemplate } from "../lib/types";
 
   type AiResult = { task_id: string; type: string; result?: string; error?: string };
@@ -502,20 +503,20 @@
       <span class="chip chip-cat" style="--cat: {categoryStore.color(task.category)}">{categoryStore.name(task.category)}</span>
       {#if task.deadline}
         {@const dl = deadlineInfo(task.deadline)}
-        <span class="chip" class:chip-danger={dl.overdue}>⚑ {dl.label}</span>
+        <span class="chip" class:chip-danger={dl.overdue}><Icon name="flag" size={11} /> {dl.label}</span>
       {/if}
     </div>
 
     <div class="task-actions">
       <button class="btn-icon" disabled={busy} title="Переформулировать в SMART"
-        onclick={() => rewriteTask(task.id, task.title)}>{busy ? "…" : "✨"}</button>
+        onclick={() => rewriteTask(task.id, task.title)}>{#if busy}…{:else}<Icon name="sparkles" />{/if}</button>
       <button class="btn-icon" disabled={busy} title="Разбить на подзадачи"
-        onclick={() => generateSubtasks(task.id, task.title)}>{busy ? "…" : "🔀"}</button>
+        onclick={() => generateSubtasks(task.id, task.title)}>{#if busy}…{:else}<Icon name="shuffle" />{/if}</button>
       <button class="btn-icon" disabled={busy} title="Авто-категория"
-        onclick={() => classifyTask(task.id, task.title)}>{busy ? "…" : "🏷"}</button>
+        onclick={() => classifyTask(task.id, task.title)}>{#if busy}…{:else}<Icon name="tag" />{/if}</button>
       <button class="btn-icon" title={trackingId === task.id ? "Остановить трекинг" : "Начать трекинг"}
         onclick={() => toggleTracking(task.id)} class:active={trackingId === task.id}>
-        {trackingId === task.id ? "■" : "▶"}</button>
+        {#if trackingId === task.id}<Icon name="stop" />{:else}<Icon name="play" />{/if}</button>
       <button class="btn-icon btn-danger" title="Удалить"
         onclick={() => taskStore.remove(task.id)}>✕</button>
     </div>
@@ -731,7 +732,7 @@
     {#if aiEnabled}
       <button onclick={askWhatNow} disabled={whatNowPending}
         title="ИИ посоветует, чем заняться сейчас — по блокам, дедлайнам и приоритетам">
-        {whatNowPending ? "Думаю…" : "🎯 Что сейчас?"}
+        {#if whatNowPending}Думаю…{:else}<Icon name="target" size={12} /> Что сейчас?{/if}
       </button>
     {/if}
     <button onclick={() => { showProjects = true; projectStore.load(); }}>Проекты</button>
@@ -748,7 +749,7 @@
 
   {#if whatNow}
     <div class="what-now card">
-      <span class="what-now-icon">🎯</span>
+      <span class="what-now-icon"><Icon name="target" size={16} /></span>
       <span class="what-now-text">{whatNow}</span>
       <button class="btn-icon" onclick={() => whatNow = null}>✕</button>
     </div>

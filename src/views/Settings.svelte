@@ -6,6 +6,7 @@
   import type { AppSettings, AppCategoryRule, AppLimit } from "../lib/types";
   import { applyTheme } from "../lib/theme";
   import ModelDownloader from "../lib/components/ModelDownloader.svelte";
+  import Icon from "../lib/components/Icon.svelte";
 
   const THEME_PRESETS: { name: string; accent: string }[] = [
     { name: "Indigo", accent: "#6366f1" },
@@ -325,7 +326,7 @@
           <span class="label">API Key
             {#if settings.openai_key}
               {#if settings.openai_in_keyring}
-                <span class="key-ok">🔐 keyring</span>
+                <span class="key-ok"><Icon name="lock" size={11} /> keyring</span>
               {:else}
                 <span class="key-warn">⚠ БД (keyring недоступен)</span>
               {/if}
@@ -350,7 +351,7 @@
           <span class="label">API Key
             {#if settings.anthropic_key}
               {#if settings.anthropic_in_keyring}
-                <span class="key-ok">🔐 keyring</span>
+                <span class="key-ok"><Icon name="lock" size={11} /> keyring</span>
               {:else}
                 <span class="key-warn">⚠ БД (keyring недоступен)</span>
               {/if}

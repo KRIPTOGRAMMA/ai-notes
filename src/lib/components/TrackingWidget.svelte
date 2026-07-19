@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { api } from "../api/tauri";
+  import Icon from "./Icon.svelte";
   import type { ActiveSession } from "../types";
 
   let session: ActiveSession | null = $state(null);
@@ -43,10 +44,10 @@
 
 {#if session}
   <div class="track card">
-    <span class="track-label">▶ {session.title}</span>
+    <span class="track-label"><Icon name="play" size={12} /> {session.title}</span>
     <span class="track-time">{elapsedLabel}</span>
     <div class="track-actions">
-      <button class="btn-icon" title="Остановить трекинг" onclick={stop}>■</button>
+      <button class="btn-icon" title="Остановить трекинг" onclick={stop}><Icon name="stop" /></button>
     </div>
   </div>
 {/if}

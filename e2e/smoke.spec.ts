@@ -580,16 +580,16 @@ test("помодоро: виджет виден при активной фазе
 
   const widget = page.locator(".pomo");
   await expect(widget).toBeVisible();
-  await expect(widget.locator(".pomo-label")).toHaveText("🍅 Фокус");
+  await expect(widget.locator(".pomo-label")).toHaveText("Фокус");
 
   await widget.getByTitle("Пауза").click();
-  await expect(widget.locator(".pomo-label")).toHaveText("🍅 Пауза");
+  await expect(widget.locator(".pomo-label")).toHaveText("Пауза");
 
   await widget.getByTitle("Продолжить").click();
-  await expect(widget.locator(".pomo-label")).toHaveText("🍅 Фокус");
+  await expect(widget.locator(".pomo-label")).toHaveText("Фокус");
 
   await widget.getByTitle("Пропустить фазу").click();
-  await expect(widget.locator(".pomo-label")).toHaveText("☕ Перерыв");
+  await expect(widget.locator(".pomo-label")).toHaveText("Перерыв");
 });
 
 test("помодоро: ▶ на виджете при off запускает ручной цикл, ■ останавливает", async ({ page }) => {
@@ -600,7 +600,7 @@ test("помодоро: ▶ на виджете при off запускает р
   await expect(widget.getByTitle("Начать помидор")).toBeVisible();
 
   await widget.getByTitle("Начать помидор").click();
-  await expect(widget.locator(".pomo-label")).toHaveText("🍅 Фокус");
+  await expect(widget.locator(".pomo-label")).toHaveText("Фокус");
 
   await widget.getByTitle("Остановить").click();
   await expect(widget.getByTitle("Начать помидор")).toBeVisible();

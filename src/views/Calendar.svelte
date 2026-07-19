@@ -6,6 +6,7 @@
   import { api } from "../lib/api/tauri";
   import TaskModal from "../lib/components/TaskModal.svelte";
   import RoutinesModal from "../lib/components/RoutinesModal.svelte";
+  import Icon from "../lib/components/Icon.svelte";
   import type { Task, CreateTaskPayload, RoutineBlock } from "../lib/types";
 
   let { onOpenTask }: { onOpenTask: (id: string) => void } = $props();
@@ -442,7 +443,7 @@
         {:else}
           <button class="btn-sm plan-btn" onclick={planDay} disabled={planning || backlog.length === 0}
             title="ИИ разложит важные задачи из бэклога по свободному времени сегодня">
-            {planning ? "Планирую…" : "⚡ Спланировать день"}
+            {#if planning}Планирую…{:else}<Icon name="zap" size={12} /> Спланировать день{/if}
           </button>
         {/if}
         {#if planError}
