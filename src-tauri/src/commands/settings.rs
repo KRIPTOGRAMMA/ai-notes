@@ -81,6 +81,8 @@ pub struct AppSettings {
     pub morning_digest_time: String, // "HH:MM", пусто = выкл
     #[serde(default = "default_true")]
     pub show_subtasks_expanded: bool, // v0.8.3: подзадачи в списке видны без клика
+    #[serde(default)]
+    pub keybinds: String,             // v0.8.9: JSON {action_id: combo}; отсутствие ключа = дефолт действия
 }
 
 fn default_seven() -> u64 { 7 }
@@ -125,6 +127,7 @@ impl Default for AppSettings {
             auto_backup_keep: 7,
             morning_digest_time: String::new(),
             show_subtasks_expanded: true,
+            keybinds: String::new(),
         }
     }
 }
@@ -230,6 +233,7 @@ pub async fn load_settings_raw(pool: &SqlitePool) -> AppResult<AppSettings> {
     }
     if let Some(v) = get_setting(pool, "morning_digest_time").await { s.morning_digest_time = v; }
     if let Some(v) = get_setting(pool, "show_subtasks_expanded").await { s.show_subtasks_expanded = v != "false"; }
+    if let Some(v) = get_setting(pool, "keybinds").await { s.keybinds = v; }
     // Ключи: сначала keyring, затем legacy-значение из БД
     let openai_from_keyring = keyring_get("openai_key");
     let anthropic_from_keyring = keyring_get("anthropic_key");
@@ -312,6 +316,7 @@ pub async fn save_settings(
     set_setting(pool.inner(), "auto_backup_keep", &settings.auto_backup_keep.max(1).to_string()).await?;
     set_setting(pool.inner(), "morning_digest_time", &settings.morning_digest_time).await?;
     set_setting(pool.inner(), "show_subtasks_expanded", if settings.show_subtasks_expanded { "true" } else { "false" }).await?;
+    set_setting(pool.inner(), "keybinds", &settings.keybinds).await?;
 
     for (name, value) in [("openai_key", &settings.openai_key), ("anthropic_key", &settings.anthropic_key)] {
         match keyring_set(name, value) {
@@ -396,5 +401,16 @@ mod db_tests {
         set_setting(&pool, "color_accent_secondary", "#f43f5e").await.unwrap();
         let s = load_settings_raw(&pool).await.unwrap();
         assert_eq!(s.color_accent_secondary, "#f43f5e");
+    }
+
+    #[tokio::test]
+    async fn keybinds_defaults_empty_and_roundtrips() {
+        let pool = test_pool().await;
+        let s = load_settings_raw(&pool).await.unwrap();
+        assert_eq!(s.keybinds, "");
+
+        set_setting(&pool, "keybinds", r#"{"palette":"Ctrl+KeyJ"}"#).await.unwrap();
+        let s = load_settings_raw(&pool).await.unwrap();
+        assert_eq!(s.keybinds, r#"{"palette":"Ctrl+KeyJ"}"#);
     }
 }

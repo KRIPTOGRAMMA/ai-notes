@@ -1,0 +1,89 @@
+// Переназначаемые хоткеи (v0.8.9). Комбинация хранится как нормализованная
+// строка "Ctrl+Shift+KeyN" (порядок модификаторов фиксирован, код клавиши —
+// KeyboardEvent.code, не .key, чтобы не зависеть от раскладки). Только
+// webview-хоткеи из App.svelte — глобальные OS-shortcuts (Ctrl+Shift+N/M)
+// сюда не входят, у них отдельный механизм (tauri-plugin-global-shortcut).
+
+export interface KeybindAction {
+  id: string;
+  label: string;
+  defaultCombo: string;
+}
+
+export const KEYBIND_ACTIONS: KeybindAction[] = [
+  { id: "palette", label: "Командная палитра / поиск", defaultCombo: "Ctrl+KeyK" },
+  { id: "daily_note", label: "Заметка дня", defaultCombo: "Ctrl+KeyD" },
+  { id: "view_tasks", label: "Перейти: Задачи", defaultCombo: "Ctrl+Digit1" },
+  { id: "view_notes", label: "Перейти: Заметки", defaultCombo: "Ctrl+Digit2" },
+  { id: "view_dashboard", label: "Перейти: Дашборд", defaultCombo: "Ctrl+Digit3" },
+  { id: "view_calendar", label: "Перейти: Календарь", defaultCombo: "Ctrl+Digit4" },
+  { id: "view_settings", label: "Перейти: Настройки", defaultCombo: "Ctrl+Digit5" },
+];
+
+export type Keybinds = Record<string, string>;
+
+export function defaultKeybinds(): Keybinds {
+  const out: Keybinds = {};
+  for (const a of KEYBIND_ACTIONS) out[a.id] = a.defaultCombo;
+  return out;
+}
+
+export function parseKeybinds(json: string): Keybinds {
+  try {
+    const v = JSON.parse(json);
+    if (v && typeof v === "object" && !Array.isArray(v)) return v as Keybinds;
+  } catch {
+    // невалидный JSON/пусто — используем дефолты
+  }
+  return {};
+}
+
+// Комбинация конкретного действия: пользовательский оверрайд или дефолт.
+export function comboFor(binds: Keybinds, actionId: string): string {
+  const action = KEYBIND_ACTIONS.find(a => a.id === actionId);
+  return binds[actionId] ?? action?.defaultCombo ?? "";
+}
+
+const MODIFIER_CODES = new Set(["ControlLeft", "ControlRight", "ShiftLeft", "ShiftRight", "AltLeft", "AltRight", "MetaLeft", "MetaRight"]);
+
+// Строит нормализованную комбинацию из KeyboardEvent при записи нового бинда.
+// Возвращает null, если нажата только клавиша-модификатор (ждём основную клавишу).
+export function comboFromEvent(e: { ctrlKey: boolean; shiftKey: boolean; altKey: boolean; code: string }): string | null {
+  if (MODIFIER_CODES.has(e.code)) return null;
+  const parts: string[] = [];
+  if (e.ctrlKey) parts.push("Ctrl");
+  if (e.shiftKey) parts.push("Shift");
+  if (e.altKey) parts.push("Alt");
+  parts.push(e.code);
+  return parts.join("+");
+}
+
+// Совпадает ли событие клавиатуры с сохранённой комбинацией.
+export function comboMatches(combo: string, e: { ctrlKey: boolean; shiftKey: boolean; altKey: boolean; code: string }): boolean {
+  const built = comboFromEvent(e);
+  return built !== null && built === combo;
+}
+
+// Человекочитаемая форма для UI: "Ctrl+Shift+KeyN" → "Ctrl+Shift+N".
+export function formatCombo(combo: string): string {
+  return combo
+    .split("+")
+    .map(part => {
+      if (part.startsWith("Key")) return part.slice(3);
+      if (part.startsWith("Digit")) return part.slice(5);
+      return part;
+    })
+    .join("+");
+}
+
+// Находит действия, у которых итоговая (с учётом оверрайдов) комбинация
+// совпадает — включая проверяемый черновик draftActionId/draftCombo ещё до
+// сохранения. Возвращает id конфликтующих действий (без draftActionId).
+export function findConflicts(binds: Keybinds, draftActionId: string, draftCombo: string): string[] {
+  const conflicts: string[] = [];
+  for (const action of KEYBIND_ACTIONS) {
+    if (action.id === draftActionId) continue;
+    if (comboFor(binds, action.id) === draftCombo) conflicts.push(action.id);
+  }
+  return conflicts;
+}

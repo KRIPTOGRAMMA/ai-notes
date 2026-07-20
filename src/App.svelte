@@ -7,6 +7,7 @@
   import { listen } from "@tauri-apps/api/event";
   import type { AppSettings } from "./lib/types";
   import { applyCachedTheme, applyTheme } from "./lib/theme";
+  import { parseKeybinds, comboFor, comboMatches, type Keybinds } from "./lib/keybinds";
   import Onboarding from "./views/Onboarding.svelte";
   import Tasks from "./views/Tasks.svelte";
   import Notes from "./views/Notes.svelte";
@@ -27,6 +28,7 @@
   let loadedSettings: AppSettings | null = $state(null);
   let showOnboarding = $state(false);
   let isWayland = $state(false);
+  let keybinds: Keybinds = $state({});
 
   // Тема: сначала из кеша (анти-мигание), затем — источник истины из БД.
   applyCachedTheme();
@@ -42,19 +44,23 @@
     const unlistenTask = listen("task-created", () => taskStore.load());
     void unlistenNote;
     void unlistenTask;
+    // Settings.svelte живёт в том же вебвью — обычное window-событие,
+    // без Tauri IPC, чтобы переназначенный хоткей заработал сразу, без reload.
+    const onKeybindsSaved = (e: Event) => {
+      keybinds = parseKeybinds((e as CustomEvent<string>).detail ?? "");
+    };
+    window.addEventListener("keybinds-saved", onKeybindsSaved);
     try {
       isWayland = await api.isWayland();
       loadedSettings = await api.getSettings();
       showOnboarding = !loadedSettings.onboarding_complete;
       applyTheme(loadedSettings.theme_mode, loadedSettings);
+      keybinds = parseKeybinds(loadedSettings.keybinds);
     } catch {
       loadedSettings = null;
       showOnboarding = false;
     }
   });
-
-  // Ctrl+1..5 переключают разделы в порядке сайдбара.
-  const viewOrder: View[] = ["tasks", "notes", "dashboard", "calendar", "settings"];
 
   const NAV: { view: View; label: string; icon: string }[] = [
     { view: "tasks",     label: "Задачи",    icon: "M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z M9 12l2 2 4-4" },
@@ -102,25 +108,36 @@
   onkeydown={(e) => {
     pingActivity();
     if (!e.ctrlKey) return;
-    // Ctrl+Shift+N — быстрая задача, Ctrl+Shift+M — быстрая заметка
+    // Ctrl+Shift+N/M — быстрая задача/заметка: не переназначаемы в v0.8.9,
+    // держатся в синхроне с OS-уровневым global-shortcut (см. lib.rs).
     if (e.shiftKey && e.code === "KeyN") {
       e.preventDefault();
       api.openQuickCapture("task").catch(() => {});
-    } else if (e.shiftKey && e.code === "KeyM") {
+      return;
+    }
+    if (e.shiftKey && e.code === "KeyM") {
       e.preventDefault();
       api.openQuickCapture("note").catch(() => {});
-    } else if (e.code === "KeyK") {
+      return;
+    }
+    if (comboMatches(comboFor(keybinds, "palette"), e)) {
       e.preventDefault();
       showSearch = true;
-    } else if (e.code === "KeyD") {
+    } else if (comboMatches(comboFor(keybinds, "daily_note"), e)) {
       e.preventDefault();
       activeView = "notes";
       noteStore.requestDaily();
-    } else if (!e.shiftKey && !e.altKey && e.code >= "Digit1" && e.code <= "Digit5") {
-      const idx = Number(e.code.slice(-1)) - 1;
-      if (idx >= 0 && idx < viewOrder.length) {
-        e.preventDefault();
-        activeView = viewOrder[idx];
+    } else {
+      const viewActions: [string, View][] = [
+        ["view_tasks", "tasks"], ["view_notes", "notes"], ["view_dashboard", "dashboard"],
+        ["view_calendar", "calendar"], ["view_settings", "settings"],
+      ];
+      for (const [actionId, view] of viewActions) {
+        if (comboMatches(comboFor(keybinds, actionId), e)) {
+          e.preventDefault();
+          activeView = view;
+          break;
+        }
       }
     }
   }}

@@ -7,6 +7,10 @@
   import { applyTheme } from "../lib/theme";
   import ModelDownloader from "../lib/components/ModelDownloader.svelte";
   import Icon from "../lib/components/Icon.svelte";
+  import {
+    KEYBIND_ACTIONS, type Keybinds,
+    parseKeybinds, comboFor, comboFromEvent, formatCombo, findConflicts,
+  } from "../lib/keybinds";
 
   const PROVIDERS: { value: AppSettings["ai_provider"]; label: string }[] = [
     { value: "none", label: "Без ИИ (функции отключены)" },
@@ -79,6 +83,7 @@
     auto_backup_keep: 7,
     morning_digest_time: "",
     show_subtasks_expanded: true,
+    keybinds: "",
   });
 
   let saving = $state(false);
@@ -140,6 +145,7 @@
       appLimits = Object.fromEntries(
         parseLimits(settings.app_limits).map(l => [l.category, l.daily_mins])
       );
+      keybinds = parseKeybinds(settings.keybinds);
     } catch (e) {
       error = String(e);
     }
@@ -147,6 +153,41 @@
     windowTracking = await api.getWindowTracking().catch(() => null);
     categoryStore.load();
   });
+
+  // --- Хоткеи (v0.8.9): оверрайды хранятся в settings.keybinds (JSON),
+  // дефолты — KEYBIND_ACTIONS.defaultCombo. Запись нового бинда — по клику
+  // на «Записать», следующее нажатие клавиш (не модификатор) фиксируется.
+  let keybinds: Keybinds = $state({});
+  let recordingActionId: string | null = $state(null);
+  let keybindConflict: { actionId: string; withLabel: string } | null = $state(null);
+
+  function startRecording(actionId: string) {
+    recordingActionId = actionId;
+    keybindConflict = null;
+  }
+
+  function onKeybindCapture(e: KeyboardEvent) {
+    if (!recordingActionId) return;
+    e.preventDefault();
+    if (e.key === "Escape") { recordingActionId = null; return; }
+    const combo = comboFromEvent(e);
+    if (!combo) return; // нажат только модификатор — ждём основную клавишу
+
+    const conflicts = findConflicts(keybinds, recordingActionId, combo);
+    if (conflicts.length > 0) {
+      const other = KEYBIND_ACTIONS.find(a => a.id === conflicts[0]);
+      keybindConflict = { actionId: recordingActionId, withLabel: other?.label ?? conflicts[0] };
+      return;
+    }
+    keybinds = { ...keybinds, [recordingActionId]: combo };
+    recordingActionId = null;
+    keybindConflict = null;
+  }
+
+  function resetKeybind(actionId: string) {
+    const { [actionId]: _drop, ...rest } = keybinds;
+    keybinds = rest;
+  }
 
   // --- Категории задач (CRUD сохраняется сразу, без кнопки «Сохранить») ---
   let newCatName = $state("");
@@ -169,8 +210,12 @@
           .filter(([, mins]) => mins > 0)
           .map(([category, daily_mins]) => ({ category, daily_mins }))
       );
+      settings.keybinds = JSON.stringify(keybinds);
       await api.saveSettings(settings);
       applyTheme(settings.theme_mode, settings);
+      // App.svelte держит свою копию хоткеев для keydown-обработчика —
+      // без этого события переназначение применялось бы только после reload.
+      window.dispatchEvent(new CustomEvent("keybinds-saved", { detail: settings.keybinds }));
       saved = true;
       setTimeout(() => saved = false, 2000);
     } catch (e) {
@@ -619,6 +664,44 @@
     </div>
   </section>
 
+  <section class="card panel" class:hidden-by-search={sectionMatches[8] === false} bind:this={sectionEls[8]}>
+    <h3 class="section-title">Хоткеи</h3>
+    <p class="hint" style="margin-top:0;">
+      Только хоткеи внутри окна приложения. <code>Ctrl+Shift+N</code>/<code>Ctrl+Shift+M</code>
+      (быстрая задача/заметка) переназначению не подлежат — они завязаны на системный хоткей.
+    </p>
+    <div class="keybind-list">
+      {#each KEYBIND_ACTIONS as action (action.id)}
+        <div class="keybind-row">
+          <span class="keybind-label">{action.label}</span>
+          {#if recordingActionId === action.id}
+            <!-- svelte-ignore a11y_autofocus -->
+            <input
+              class="keybind-combo recording"
+              type="text"
+              readonly
+              value="Нажмите комбинацию… (Esc — отмена)"
+              onkeydown={onKeybindCapture}
+              autofocus
+            />
+          {:else}
+            <button type="button" class="keybind-combo" onclick={() => startRecording(action.id)}>
+              {formatCombo(comboFor(keybinds, action.id))}
+            </button>
+          {/if}
+          {#if keybinds[action.id] && keybinds[action.id] !== action.defaultCombo}
+            <button type="button" class="btn-icon" title="Сбросить к дефолту" onclick={() => resetKeybind(action.id)}>↺</button>
+          {/if}
+        </div>
+        {#if keybindConflict?.actionId === action.id}
+          <p class="hint" style="color:var(--danger, #d33);margin:0 0 4px 0;">
+            Конфликт: уже занято действием «{keybindConflict.withLabel}» — выберите другую комбинацию.
+          </p>
+        {/if}
+      {/each}
+    </div>
+  </section>
+
   <button class="btn-primary" onclick={save} disabled={saving}>
     {saving ? "Сохранение..." : saved ? "Сохранено ✓" : "Сохранить"}
   </button>
@@ -737,6 +820,42 @@
     height: 26px;
     padding: 1px 2px;
     cursor: pointer;
+  }
+
+  .keybind-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .keybind-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .keybind-label {
+    flex: 1;
+    font-size: 13px;
+  }
+
+  .keybind-combo {
+    font-size: 12px;
+    font-family: inherit;
+    padding: 4px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-secondary);
+    min-width: 120px;
+    text-align: center;
+    cursor: pointer;
+  }
+
+  .keybind-combo.recording {
+    border-color: var(--accent);
+    color: var(--text-secondary);
+    cursor: default;
+    min-width: 220px;
   }
 
   .key-ok {

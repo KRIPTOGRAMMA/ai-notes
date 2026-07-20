@@ -191,6 +191,7 @@ export interface AppSettings {
   auto_backup_keep: number;   // сколько копий хранить (мин 1)
   morning_digest_time: string; // "HH:MM", пусто = выкл
   show_subtasks_expanded: boolean; // подзадачи в списке видны без клика (v0.8.3)
+  keybinds: string; // JSON {action_id: combo} (v0.8.9); отсутствие ключа = дефолт действия
 }
 
 export interface AppCategoryRule {

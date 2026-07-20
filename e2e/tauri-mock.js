@@ -43,6 +43,7 @@
     last_auto_backup: "",
     morning_digest_time: "",
     show_subtasks_expanded: true,
+    keybinds: "",
   };
 
   let db;
