@@ -73,6 +73,19 @@
   let trackingMode: "extended" | "basic" | null = $state(null);
   let windowTracking: string | null = $state(null);
 
+  // --- Поиск по настройкам (v0.8.5): простой substring-match по всему
+  // тексту секции, без индексации/fuzzy. Пустой запрос — всё видно.
+  let searchQuery = $state("");
+  let sectionEls: HTMLElement[] = $state([]);
+  let sectionMatches = $state<boolean[]>([]);
+
+  function recomputeSearch() {
+    const q = searchQuery.trim().toLowerCase();
+    sectionMatches = sectionEls.map(el =>
+      !q || (el?.textContent?.toLowerCase().includes(q) ?? true)
+    );
+  }
+
   // Правила «класс окна → категория»: редактируются строками,
   // сериализуются в settings.app_category_rules при сохранении.
   let appRules: AppCategoryRule[] = $state([]);
@@ -261,11 +274,19 @@
 <div class="settings">
   <h2 class="page-title" style="margin-bottom:14px;">Настройки</h2>
 
+  <input
+    type="search"
+    class="settings-search"
+    placeholder="Поиск по настройкам…"
+    bind:value={searchQuery}
+    oninput={recomputeSearch}
+  />
+
   {#if error}
     <div class="alert">{error}</div>
   {/if}
 
-  <section class="card panel">
+  <section class="card panel" class:hidden-by-search={sectionMatches[0] === false} bind:this={sectionEls[0]}>
     <h3 class="section-title">Внешний вид</h3>
 
     <div class="radio-row">
@@ -307,7 +328,7 @@
     </label>
   </section>
 
-  <section class="card panel">
+  <section class="card panel" class:hidden-by-search={sectionMatches[1] === false} bind:this={sectionEls[1]}>
     <h3 class="section-title">ИИ-провайдер</h3>
 
     <div class="stack">
@@ -385,7 +406,7 @@
     {/if}
   </section>
 
-  <section class="card panel">
+  <section class="card panel" class:hidden-by-search={sectionMatches[2] === false} bind:this={sectionEls[2]}>
     <h3 class="section-title">Режим работы</h3>
     <select bind:value={settings.work_mode} style="width:100%;">
       <option value="Light">Light — обычный режим</option>
@@ -409,7 +430,7 @@
     {/if}
   </section>
 
-  <section class="card panel">
+  <section class="card panel" class:hidden-by-search={sectionMatches[3] === false} bind:this={sectionEls[3]}>
     <h3 class="section-title">Мониторинг</h3>
     <div class="pair">
       <label class="field">
@@ -475,7 +496,7 @@
     {/if}
   </section>
 
-  <section class="card panel">
+  <section class="card panel" class:hidden-by-search={sectionMatches[4] === false} bind:this={sectionEls[4]}>
     <h3 class="section-title">Категории задач</h3>
     {#each categoryStore.categories as c (c.id)}
       <div class="rule-row">
@@ -516,7 +537,7 @@
     </p>
   </section>
 
-  <section class="card panel">
+  <section class="card panel" class:hidden-by-search={sectionMatches[5] === false} bind:this={sectionEls[5]}>
     <h3 class="section-title">Уведомления</h3>
     <div class="pair">
       <label class="field">
@@ -549,7 +570,7 @@
     </p>
   </section>
 
-  <section class="card panel">
+  <section class="card panel" class:hidden-by-search={sectionMatches[6] === false} bind:this={sectionEls[6]}>
     <h3 class="section-title">Авто-бэкап</h3>
     <div class="stack">
       <label class="field">
@@ -577,7 +598,7 @@
     </div>
   </section>
 
-  <section class="card panel">
+  <section class="card panel" class:hidden-by-search={sectionMatches[7] === false} bind:this={sectionEls[7]}>
     <h3 class="section-title">Данные</h3>
     <div class="preset-row">
       <button class="btn-sm" onclick={exportData}>Экспорт (ZIP)</button>
@@ -605,6 +626,15 @@
   .settings {
     max-width: 560px;
     padding-bottom: 24px;
+  }
+
+  .settings-search {
+    width: 100%;
+    margin-bottom: 14px;
+  }
+
+  .hidden-by-search {
+    display: none;
   }
 
   .panel {
