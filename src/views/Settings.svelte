@@ -8,11 +8,15 @@
   import ModelDownloader from "../lib/components/ModelDownloader.svelte";
   import Icon from "../lib/components/Icon.svelte";
 
-  const THEME_PRESETS: { name: string; accent: string }[] = [
-    { name: "Indigo", accent: "#6366f1" },
-    { name: "Emerald", accent: "#10b981" },
-    { name: "Rose", accent: "#f43f5e" },
-    { name: "Slate", accent: "#64748b" },
+  // Каждый пресет задаёт пару акцентов (основной + дополнительный, градиент
+  // на .btn-primary) одной кнопкой; «Свой» — ручной выбор ниже остаётся как есть.
+  const THEME_PRESETS: { name: string; accent: string; accentSecondary: string }[] = [
+    { name: "Indigo", accent: "#6366f1", accentSecondary: "#6366f1" },
+    { name: "Океан", accent: "#0891b2", accentSecondary: "#6366f1" },
+    { name: "Закат", accent: "#f43f5e", accentSecondary: "#f59e0b" },
+    { name: "Лес", accent: "#10b981", accentSecondary: "#65a30d" },
+    { name: "Rose", accent: "#f43f5e", accentSecondary: "#f43f5e" },
+    { name: "Slate", accent: "#64748b", accentSecondary: "#64748b" },
   ];
 
   // Применяем тему сразу при любом изменении — живое превью без нажатия «Сохранить».
@@ -20,13 +24,15 @@
     applyTheme(settings.theme_mode, settings);
   }
 
-  function applyPreset(accent: string) {
+  function applyPreset(accent: string, accentSecondary: string) {
     settings.color_accent = accent;
+    settings.color_accent_secondary = accentSecondary;
     previewTheme();
   }
 
   function resetColors() {
     settings.color_accent = "";
+    settings.color_accent_secondary = "";
     settings.color_bg = "";
     settings.color_text = "";
     settings.color_border = "";
@@ -51,6 +57,7 @@
     nudge_after_mins: 90,
     theme_mode: "system",
     color_accent: "",
+    color_accent_secondary: "",
     color_bg: "",
     color_text: "",
     color_border: "",
@@ -301,15 +308,15 @@
     <div class="sub-label">Пресеты акцента</div>
     <div class="preset-row">
       {#each THEME_PRESETS as p}
-        <button type="button" class="btn-sm" onclick={() => applyPreset(p.accent)}>
-          <span class="swatch" style="background:{p.accent};"></span>
+        <button type="button" class="btn-sm" onclick={() => applyPreset(p.accent, p.accentSecondary)}>
+          <span class="swatch" style="background:linear-gradient(135deg, {p.accent}, {p.accentSecondary});"></span>
           {p.name}
         </button>
       {/each}
     </div>
 
     <div class="color-grid">
-      {#each [["color_accent","Акцент"],["color_bg","Фон"],["color_text","Текст"],["color_border","Границы"]] as [key, label]}
+      {#each [["color_accent","Акцент"],["color_accent_secondary","Доп. акцент"],["color_bg","Фон"],["color_text","Текст"],["color_border","Границы"]] as [key, label]}
         <label class="check">
           <input type="color"
             value={(settings as any)[key] || "#6366f1"}

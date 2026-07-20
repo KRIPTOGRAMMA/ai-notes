@@ -6,6 +6,7 @@ export type ThemeMode = "light" | "dark" | "system";
 
 export interface ThemeColors {
   color_accent: string;
+  color_accent_secondary: string;
   color_bg: string;
   color_text: string;
   color_border: string;
@@ -48,6 +49,8 @@ function applyColors(colors: Partial<ThemeColors>) {
   } else {
     root.style.removeProperty("--accent-hover");
   }
+  // Второй акцент — пусто = равен первому (градиент на .btn-primary вырождается в сплошной цвет).
+  set("--accent-secondary", colors.color_accent_secondary?.trim() ? colors.color_accent_secondary : colors.color_accent);
   set("--bg-primary", colors.color_bg);
   set("--text-primary", colors.color_text);
   set("--border", colors.color_border);

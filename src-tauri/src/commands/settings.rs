@@ -52,6 +52,8 @@ pub struct AppSettings {
     #[serde(default)]
     pub color_accent: String,        // оверрайды цветов; пусто = дефолт из CSS
     #[serde(default)]
+    pub color_accent_secondary: String, // второй акцент (градиент на .btn-primary); пусто = равен color_accent
+    #[serde(default)]
     pub color_bg: String,
     #[serde(default)]
     pub color_text: String,
@@ -108,6 +110,7 @@ impl Default for AppSettings {
             nudge_after_mins: 90,
             theme_mode: "system".into(),
             color_accent: String::new(),
+            color_accent_secondary: String::new(),
             color_bg: String::new(),
             color_text: String::new(),
             color_border: String::new(),
@@ -212,6 +215,7 @@ pub async fn load_settings_raw(pool: &SqlitePool) -> AppResult<AppSettings> {
     if let Some(v) = get_setting(pool, "nudge_after_mins").await { if let Ok(n) = v.parse() { s.nudge_after_mins = n; } }
     if let Some(v) = get_setting(pool, "theme_mode").await { s.theme_mode = v; }
     if let Some(v) = get_setting(pool, "color_accent").await { s.color_accent = v; }
+    if let Some(v) = get_setting(pool, "color_accent_secondary").await { s.color_accent_secondary = v; }
     if let Some(v) = get_setting(pool, "color_bg").await { s.color_bg = v; }
     if let Some(v) = get_setting(pool, "color_text").await { s.color_text = v; }
     if let Some(v) = get_setting(pool, "color_border").await { s.color_border = v; }
@@ -271,6 +275,7 @@ pub async fn save_settings(
     let theme_mode = match settings.theme_mode.as_str() { "light" | "dark" | "system" => settings.theme_mode.as_str(), _ => "system" };
     set_setting(pool.inner(), "theme_mode", theme_mode).await?;
     set_setting(pool.inner(), "color_accent", &settings.color_accent).await?;
+    set_setting(pool.inner(), "color_accent_secondary", &settings.color_accent_secondary).await?;
     set_setting(pool.inner(), "color_bg", &settings.color_bg).await?;
     set_setting(pool.inner(), "color_text", &settings.color_text).await?;
     set_setting(pool.inner(), "color_border", &settings.color_border).await?;
@@ -380,5 +385,16 @@ mod db_tests {
         persist_work_mode(&pool, &WorkMode::Focus).await.unwrap();
         let s = load_settings_raw(&pool).await.unwrap();
         assert_eq!(s.work_mode, WorkMode::Focus);
+    }
+
+    #[tokio::test]
+    async fn color_accent_secondary_defaults_empty_and_roundtrips() {
+        let pool = test_pool().await;
+        let s = load_settings_raw(&pool).await.unwrap();
+        assert_eq!(s.color_accent_secondary, "");
+
+        set_setting(&pool, "color_accent_secondary", "#f43f5e").await.unwrap();
+        let s = load_settings_raw(&pool).await.unwrap();
+        assert_eq!(s.color_accent_secondary, "#f43f5e");
     }
 }

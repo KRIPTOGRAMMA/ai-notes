@@ -28,6 +28,7 @@
     nudge_after_mins: 90,
     theme_mode: "system",
     color_accent: "",
+    color_accent_secondary: "",
     color_bg: "",
     color_text: "",
     color_border: "",

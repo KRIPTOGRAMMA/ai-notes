@@ -176,6 +176,7 @@ export interface AppSettings {
   nudge_after_mins: number;
   theme_mode: "light" | "dark" | "system";
   color_accent: string;
+  color_accent_secondary: string; // второй акцент (градиент на .btn-primary); пусто = равен color_accent
   color_bg: string;
   color_text: string;
   color_border: string;

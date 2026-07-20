@@ -9,6 +9,7 @@
     --border: #e0e0e0;
     --accent: #6366f1;
     --accent-hover: #4f46e5;
+    --accent-secondary: #6366f1;
     --danger: #ef4444;
     --success: #22c55e;
     --radius: 6px;
@@ -38,6 +39,7 @@
     --border: #2e2e2e;
     --accent: #6366f1;
     --accent-hover: #818cf8;
+    --accent-secondary: #6366f1;
     --danger: #ef4444;
     --success: #22c55e;
 
@@ -116,12 +118,12 @@ input:focus, select:focus, textarea:focus {
 
 /* ===== Кнопки-варианты ===== */
 .btn-primary {
-    background: var(--accent);
+    background: linear-gradient(135deg, var(--accent), var(--accent-secondary));
     color: #fff;
     border-color: transparent;
     font-weight: 500;
 }
-.btn-primary:hover { background: var(--accent-hover); }
+.btn-primary:hover { background: linear-gradient(135deg, var(--accent-hover), var(--accent-secondary)); }
 
 .btn-ghost {
     background: transparent;
