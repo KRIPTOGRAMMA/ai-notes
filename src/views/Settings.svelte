@@ -8,6 +8,13 @@
   import ModelDownloader from "../lib/components/ModelDownloader.svelte";
   import Icon from "../lib/components/Icon.svelte";
 
+  const PROVIDERS: { value: AppSettings["ai_provider"]; label: string }[] = [
+    { value: "none", label: "Без ИИ (функции отключены)" },
+    { value: "local", label: "Локальная модель (llamafile)" },
+    { value: "openai", label: "OpenAI" },
+    { value: "anthropic", label: "Anthropic" },
+  ];
+
   // Каждый пресет задаёт пару акцентов (основной + дополнительный, градиент
   // на .btn-primary) одной кнопкой; «Свой» — ручной выбор ниже остаётся как есть.
   const THEME_PRESETS: { name: string; accent: string; accentSecondary: string }[] = [
@@ -338,14 +345,14 @@
   <section class="card panel" class:hidden-by-search={sectionMatches[1] === false} bind:this={sectionEls[1]}>
     <h3 class="section-title">ИИ-провайдер</h3>
 
-    <div class="stack">
-      {#each [["none","Без ИИ (функции отключены)"],["local","Локальная модель (llamafile)"],["openai","OpenAI"],["anthropic","Anthropic"]] as [val, label]}
-        <label class="check">
-          <input type="radio" name="provider" value={val} bind:group={settings.ai_provider} />
-          {label}
-        </label>
-      {/each}
-    </div>
+    <label class="field">
+      <span class="label">Провайдер</span>
+      <select bind:value={settings.ai_provider}>
+        {#each PROVIDERS as p (p.value)}
+          <option value={p.value}>{p.label}</option>
+        {/each}
+      </select>
+    </label>
 
     {#if settings.ai_provider !== "none"}
       <label class="check" style="margin-top:10px;">
@@ -354,56 +361,44 @@
       </label>
     {/if}
 
-    {#if settings.ai_provider === "openai"}
+    <!-- Один блок настроек, поля зависят от выбранного провайдера — не два
+         параллельных дублирующих блока, как было при radio-списке. -->
+    {#if settings.ai_provider === "openai" || settings.ai_provider === "anthropic"}
+      {@const isOpenai = settings.ai_provider === "openai"}
       <div class="stack" style="margin-top:12px;">
         <label class="field">
           <span class="label">API Key
-            {#if settings.openai_key}
-              {#if settings.openai_in_keyring}
+            {#if isOpenai ? settings.openai_key : settings.anthropic_key}
+              {#if isOpenai ? settings.openai_in_keyring : settings.anthropic_in_keyring}
                 <span class="key-ok"><Icon name="lock" size={11} /> keyring</span>
               {:else}
                 <span class="key-warn">⚠ БД (keyring недоступен)</span>
               {/if}
             {/if}
           </span>
-          <input type="password" bind:value={settings.openai_key} placeholder="sk-..." />
+          {#if isOpenai}
+            <input type="password" bind:value={settings.openai_key} placeholder="sk-..." />
+          {:else}
+            <input type="password" bind:value={settings.anthropic_key} placeholder="sk-ant-..." />
+          {/if}
         </label>
         <label class="field">
           <span class="label">Модель</span>
-          <select bind:value={settings.openai_model}>
-            <option value="gpt-4o-mini">gpt-4o-mini (быстрый, дешёвый)</option>
-            <option value="gpt-4o">gpt-4o</option>
-            <option value="gpt-4-turbo">gpt-4-turbo</option>
-          </select>
+          {#if isOpenai}
+            <select bind:value={settings.openai_model}>
+              <option value="gpt-4o-mini">gpt-4o-mini (быстрый, дешёвый)</option>
+              <option value="gpt-4o">gpt-4o</option>
+              <option value="gpt-4-turbo">gpt-4-turbo</option>
+            </select>
+          {:else}
+            <select bind:value={settings.anthropic_model}>
+              <option value="claude-haiku-4-5-20251001">claude-haiku-4-5 (быстрый, дешёвый)</option>
+              <option value="claude-sonnet-4-6">claude-sonnet-4-6</option>
+            </select>
+          {/if}
         </label>
       </div>
-    {/if}
-
-    {#if settings.ai_provider === "anthropic"}
-      <div class="stack" style="margin-top:12px;">
-        <label class="field">
-          <span class="label">API Key
-            {#if settings.anthropic_key}
-              {#if settings.anthropic_in_keyring}
-                <span class="key-ok"><Icon name="lock" size={11} /> keyring</span>
-              {:else}
-                <span class="key-warn">⚠ БД (keyring недоступен)</span>
-              {/if}
-            {/if}
-          </span>
-          <input type="password" bind:value={settings.anthropic_key} placeholder="sk-ant-..." />
-        </label>
-        <label class="field">
-          <span class="label">Модель</span>
-          <select bind:value={settings.anthropic_model}>
-            <option value="claude-haiku-4-5-20251001">claude-haiku-4-5 (быстрый, дешёвый)</option>
-            <option value="claude-sonnet-4-6">claude-sonnet-4-6</option>
-          </select>
-        </label>
-      </div>
-    {/if}
-
-    {#if settings.ai_provider === "local"}
+    {:else if settings.ai_provider === "local"}
       <div style="margin-top:12px;">
         <p class="muted" style="font-size:12px;margin:0 0 10px 0;">
           Локальная модель хранится в <code>~/.local/share/ai-notes/models/model.gguf</code>

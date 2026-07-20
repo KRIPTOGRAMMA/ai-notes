@@ -1004,6 +1004,34 @@ test("пресет цветов: задаёт основной и дополни
   expect(secondaryAfter).toBe("#f59e0b");
 });
 
+test("настройки: ИИ-провайдер — выпадающий список переключает поля, сохранение работает", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Настройки" }).click();
+  const providerSelect = page.locator("section", { hasText: "ИИ-провайдер" }).locator("select").first();
+
+  await expect(page.getByPlaceholder("sk-...")).toHaveCount(0);
+  await expect(page.getByPlaceholder("sk-ant-...")).toHaveCount(0);
+
+  await providerSelect.selectOption("openai");
+  await expect(page.getByPlaceholder("sk-...")).toBeVisible();
+  await expect(page.getByPlaceholder("sk-ant-...")).toHaveCount(0);
+  await page.getByPlaceholder("sk-...").fill("sk-test-openai");
+
+  await providerSelect.selectOption("anthropic");
+  await expect(page.getByPlaceholder("sk-ant-...")).toBeVisible();
+  await expect(page.getByPlaceholder("sk-...")).toHaveCount(0);
+  await page.getByPlaceholder("sk-ant-...").fill("sk-ant-test");
+
+  await page.getByRole("button", { name: "Сохранить", exact: true }).click();
+  await page.reload();
+  await page.getByRole("button", { name: "Настройки" }).click();
+
+  await expect(providerSelect).toHaveValue("anthropic");
+  await expect(page.getByPlaceholder("sk-ant-...")).toHaveValue("sk-ant-test");
+});
+
 test("настройки: поиск скрывает несовпавшие секции", async ({ page }) => {
   await withMock(page);
   await page.goto("/");
