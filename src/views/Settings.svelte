@@ -92,8 +92,28 @@
   let trackingMode: "extended" | "basic" | null = $state(null);
   let windowTracking: string | null = $state(null);
 
+  // --- Вкладки (v0.8.10): секции сгруппированы, чтобы не листать одну
+  // длинную колонку. SECTION_TAB[i] — id вкладки для секции с индексом i
+  // (индексы секций те же, что использует sectionEls/sectionMatches ниже).
+  const TABS = [
+    { id: "general", label: "Общее" },
+    { id: "ai", label: "ИИ" },
+    { id: "tasks", label: "Категории" },
+    { id: "notifications", label: "Уведомления" },
+    { id: "data", label: "Данные" },
+    { id: "hotkeys", label: "Хоткеи" },
+  ] as const;
+  type TabId = (typeof TABS)[number]["id"];
+  // Внешний вид(0), Режим работы(2) → Общее; ИИ-провайдер(1) → ИИ;
+  // Мониторинг(3), Категории задач(4) → Задачи; Уведомления(5) → Уведомления;
+  // Авто-бэкап(6), Данные(7) → Данные; Хоткеи(8) → Хоткеи.
+  const SECTION_TAB: TabId[] = ["general", "ai", "general", "tasks", "tasks", "notifications", "data", "data", "hotkeys"];
+  let activeTab = $state<TabId>("general");
+
   // --- Поиск по настройкам (v0.8.5): простой substring-match по всему
-  // тексту секции, без индексации/fuzzy. Пустой запрос — всё видно.
+  // тексту секции, без индексации/fuzzy. Пустой запрос — всё видно везде;
+  // непустой — автоматически переключает на первую вкладку с совпадением
+  // (v0.8.10), внутри вкладки несовпавшие секции по-прежнему скрыты.
   let searchQuery = $state("");
   let sectionEls: HTMLElement[] = $state([]);
   let sectionMatches = $state<boolean[]>([]);
@@ -103,6 +123,10 @@
     sectionMatches = sectionEls.map(el =>
       !q || (el?.textContent?.toLowerCase().includes(q) ?? true)
     );
+    if (q) {
+      const firstMatch = sectionMatches.findIndex(m => m);
+      if (firstMatch >= 0) activeTab = SECTION_TAB[firstMatch];
+    }
   }
 
   // Правила «класс окна → категория»: редактируются строками,
@@ -341,11 +365,24 @@
     oninput={recomputeSearch}
   />
 
+  <div class="settings-tabs" role="tablist">
+    {#each TABS as tab (tab.id)}
+      <button
+        type="button"
+        class="settings-tab"
+        class:active={activeTab === tab.id}
+        role="tab"
+        aria-selected={activeTab === tab.id}
+        onclick={() => activeTab = tab.id}
+      >{tab.label}</button>
+    {/each}
+  </div>
+
   {#if error}
     <div class="alert">{error}</div>
   {/if}
 
-  <section class="card panel" class:hidden-by-search={sectionMatches[0] === false} bind:this={sectionEls[0]}>
+  <section class="card panel" class:hidden-by-search={sectionMatches[0] === false} class:hidden-by-tab={SECTION_TAB[0] !== activeTab} bind:this={sectionEls[0]}>
     <h3 class="section-title">Внешний вид</h3>
 
     <div class="radio-row">
@@ -387,7 +424,7 @@
     </label>
   </section>
 
-  <section class="card panel" class:hidden-by-search={sectionMatches[1] === false} bind:this={sectionEls[1]}>
+  <section class="card panel" class:hidden-by-search={sectionMatches[1] === false} class:hidden-by-tab={SECTION_TAB[1] !== activeTab} bind:this={sectionEls[1]}>
     <h3 class="section-title">ИИ-провайдер</h3>
 
     <label class="field">
@@ -453,7 +490,7 @@
     {/if}
   </section>
 
-  <section class="card panel" class:hidden-by-search={sectionMatches[2] === false} bind:this={sectionEls[2]}>
+  <section class="card panel" class:hidden-by-search={sectionMatches[2] === false} class:hidden-by-tab={SECTION_TAB[2] !== activeTab} bind:this={sectionEls[2]}>
     <h3 class="section-title">Режим работы</h3>
     <select bind:value={settings.work_mode} style="width:100%;">
       <option value="Light">Light — обычный режим</option>
@@ -477,7 +514,7 @@
     {/if}
   </section>
 
-  <section class="card panel" class:hidden-by-search={sectionMatches[3] === false} bind:this={sectionEls[3]}>
+  <section class="card panel" class:hidden-by-search={sectionMatches[3] === false} class:hidden-by-tab={SECTION_TAB[3] !== activeTab} bind:this={sectionEls[3]}>
     <h3 class="section-title">Мониторинг</h3>
     <div class="pair">
       <label class="field">
@@ -543,7 +580,7 @@
     {/if}
   </section>
 
-  <section class="card panel" class:hidden-by-search={sectionMatches[4] === false} bind:this={sectionEls[4]}>
+  <section class="card panel" class:hidden-by-search={sectionMatches[4] === false} class:hidden-by-tab={SECTION_TAB[4] !== activeTab} bind:this={sectionEls[4]}>
     <h3 class="section-title">Категории задач</h3>
     {#each categoryStore.categories as c (c.id)}
       <div class="rule-row">
@@ -584,7 +621,7 @@
     </p>
   </section>
 
-  <section class="card panel" class:hidden-by-search={sectionMatches[5] === false} bind:this={sectionEls[5]}>
+  <section class="card panel" class:hidden-by-search={sectionMatches[5] === false} class:hidden-by-tab={SECTION_TAB[5] !== activeTab} bind:this={sectionEls[5]}>
     <h3 class="section-title">Уведомления</h3>
     <div class="pair">
       <label class="field">
@@ -617,7 +654,7 @@
     </p>
   </section>
 
-  <section class="card panel" class:hidden-by-search={sectionMatches[6] === false} bind:this={sectionEls[6]}>
+  <section class="card panel" class:hidden-by-search={sectionMatches[6] === false} class:hidden-by-tab={SECTION_TAB[6] !== activeTab} bind:this={sectionEls[6]}>
     <h3 class="section-title">Авто-бэкап</h3>
     <div class="stack">
       <label class="field">
@@ -645,7 +682,7 @@
     </div>
   </section>
 
-  <section class="card panel" class:hidden-by-search={sectionMatches[7] === false} bind:this={sectionEls[7]}>
+  <section class="card panel" class:hidden-by-search={sectionMatches[7] === false} class:hidden-by-tab={SECTION_TAB[7] !== activeTab} bind:this={sectionEls[7]}>
     <h3 class="section-title">Данные</h3>
     <div class="preset-row">
       <button class="btn-sm" onclick={exportData}>Экспорт (ZIP)</button>
@@ -664,7 +701,7 @@
     </div>
   </section>
 
-  <section class="card panel" class:hidden-by-search={sectionMatches[8] === false} bind:this={sectionEls[8]}>
+  <section class="card panel" class:hidden-by-search={sectionMatches[8] === false} class:hidden-by-tab={SECTION_TAB[8] !== activeTab} bind:this={sectionEls[8]}>
     <h3 class="section-title">Хоткеи</h3>
     <p class="hint" style="margin-top:0;">
       Только хоткеи внутри окна приложения. <code>Ctrl+Shift+N</code>/<code>Ctrl+Shift+M</code>
@@ -718,8 +755,37 @@
     margin-bottom: 14px;
   }
 
-  .hidden-by-search {
+  .hidden-by-search, .hidden-by-tab {
     display: none;
+  }
+
+  .settings-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .settings-tab {
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    padding: 8px 12px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    cursor: pointer;
+  }
+
+  .settings-tab:hover {
+    color: var(--text-primary);
+  }
+
+  .settings-tab.active {
+    color: var(--text-primary);
+    border-bottom-color: var(--accent);
+    font-weight: 500;
   }
 
   .panel {
