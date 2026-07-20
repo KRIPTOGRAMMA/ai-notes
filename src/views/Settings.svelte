@@ -64,6 +64,7 @@
     auto_backup_dir: "",
     auto_backup_keep: 7,
     morning_digest_time: "",
+    show_subtasks_expanded: true,
   });
 
   let saving = $state(false);
@@ -299,6 +300,11 @@
     </div>
 
     <button type="button" class="btn-sm" style="margin-top:10px;" onclick={resetColors}>Сбросить к дефолту</button>
+
+    <label class="check" style="margin-top:12px;">
+      <input type="checkbox" bind:checked={settings.show_subtasks_expanded} />
+      Показывать подзадачи в списке задач развёрнутыми
+    </label>
   </section>
 
   <section class="card panel">

@@ -86,6 +86,27 @@ pub async fn toggle_subtask_impl(pool: &SqlitePool, id: &str) -> Result<(), Stri
     Ok(())
 }
 
+// Инлайн-редактирование названий в чеклисте модалки (v0.8.3):
+// пустое название — ошибка, а не тихое удаление (удаление — явная операция).
+#[tauri::command]
+pub async fn rename_subtask(pool: State<'_, SqlitePool>, id: String, title: String) -> Result<(), String> {
+    rename_subtask_impl(pool.inner(), &id, &title).await
+}
+
+pub async fn rename_subtask_impl(pool: &SqlitePool, id: &str, title: &str) -> Result<(), String> {
+    let title = title.trim();
+    if title.is_empty() {
+        return Err("Пустая подзадача".into());
+    }
+    sqlx::query("UPDATE subtasks SET title = ? WHERE id = ?")
+        .bind(title)
+        .bind(id)
+        .execute(pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn delete_subtask(pool: State<'_, SqlitePool>, id: String) -> Result<(), String> {
     delete_subtask_impl(pool.inner(), &id).await
@@ -133,6 +154,20 @@ mod tests {
     async fn empty_title_rejected() {
         let pool = test_pool().await;
         assert!(add_subtask_impl(&pool, "task-1", "   ").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn rename_updates_title_and_rejects_empty() {
+        let pool = test_pool().await;
+        let s = add_subtask_impl(&pool, "task-1", "старое").await.unwrap();
+
+        rename_subtask_impl(&pool, &s.id, "  новое  ").await.unwrap();
+        let list = get_subtasks_impl(&pool, "task-1").await.unwrap();
+        assert_eq!(list[0].title, "новое"); // trim
+
+        assert!(rename_subtask_impl(&pool, &s.id, "   ").await.is_err());
+        // название не затёрлось после отклонённого rename
+        assert_eq!(get_subtasks_impl(&pool, "task-1").await.unwrap()[0].title, "новое");
     }
 
     #[tokio::test]

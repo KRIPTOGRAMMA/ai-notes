@@ -83,6 +83,7 @@ export const api = {
   addSubtask: (taskId: string, title: string) => invoke<Subtask>("add_subtask", { taskId, title }),
   toggleSubtask: (id: string) => invoke<void>("toggle_subtask", { id }),
   deleteSubtask: (id: string) => invoke<void>("delete_subtask", { id }),
+  renameSubtask: (id: string, title: string) => invoke<void>("rename_subtask", { id, title }),
   getRoutines: () => invoke<Routine[]>("get_routines"),
   createRoutine: (routine: { title: string; days_mask: number; start_mins: number; duration_mins: number }) =>
     invoke<Routine>("create_routine", { routine }),

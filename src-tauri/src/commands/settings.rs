@@ -77,6 +77,8 @@ pub struct AppSettings {
     pub auto_backup_keep: u64,       // сколько копий хранить
     #[serde(default)]
     pub morning_digest_time: String, // "HH:MM", пусто = выкл
+    #[serde(default = "default_true")]
+    pub show_subtasks_expanded: bool, // v0.8.3: подзадачи в списке видны без клика
 }
 
 fn default_seven() -> u64 { 7 }
@@ -119,6 +121,7 @@ impl Default for AppSettings {
             auto_backup_dir: String::new(),
             auto_backup_keep: 7,
             morning_digest_time: String::new(),
+            show_subtasks_expanded: true,
         }
     }
 }
@@ -222,6 +225,7 @@ pub async fn load_settings_raw(pool: &SqlitePool) -> AppResult<AppSettings> {
         if let Ok(n) = v.parse() { s.auto_backup_keep = n; }
     }
     if let Some(v) = get_setting(pool, "morning_digest_time").await { s.morning_digest_time = v; }
+    if let Some(v) = get_setting(pool, "show_subtasks_expanded").await { s.show_subtasks_expanded = v != "false"; }
     // Ключи: сначала keyring, затем legacy-значение из БД
     let openai_from_keyring = keyring_get("openai_key");
     let anthropic_from_keyring = keyring_get("anthropic_key");
@@ -302,6 +306,7 @@ pub async fn save_settings(
     set_setting(pool.inner(), "auto_backup_dir", &settings.auto_backup_dir).await?;
     set_setting(pool.inner(), "auto_backup_keep", &settings.auto_backup_keep.max(1).to_string()).await?;
     set_setting(pool.inner(), "morning_digest_time", &settings.morning_digest_time).await?;
+    set_setting(pool.inner(), "show_subtasks_expanded", if settings.show_subtasks_expanded { "true" } else { "false" }).await?;
 
     for (name, value) in [("openai_key", &settings.openai_key), ("anthropic_key", &settings.anthropic_key)] {
         match keyring_set(name, value) {

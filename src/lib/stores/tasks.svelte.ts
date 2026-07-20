@@ -37,12 +37,16 @@ export const taskStore = {
     }
   },
 
-  async create(payload: CreateTaskPayload) {
+  // Возвращает созданную задачу — модалке нужен id, чтобы дописать подзадачи
+  // из инлайн-чеклиста (v0.8.3) сразу после создания.
+  async create(payload: CreateTaskPayload): Promise<Task | null> {
     try {
-      await api.createTask(payload);
+      const task = await api.createTask(payload);
       await taskStore.load();
+      return task;
     } catch (e) {
       error = describeError(e);
+      return null;
     }
   },
 

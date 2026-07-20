@@ -41,6 +41,7 @@
     auto_backup_keep: 7,
     last_auto_backup: "",
     morning_digest_time: "",
+    show_subtasks_expanded: true,
   };
 
   let db;
@@ -249,6 +250,14 @@
     delete_subtask: ({ id }) => {
       for (const t of db.tasks) t.subtasks = t.subtasks.filter((s) => s.id !== id);
       persist();
+    },
+    rename_subtask: ({ id, title }) => {
+      const trimmed = (title ?? "").trim();
+      if (!trimmed) throw "Пустая подзадача";
+      for (const t of db.tasks) {
+        const s = t.subtasks.find((s) => s.id === id);
+        if (s) { s.title = trimmed; persist(); return; }
+      }
     },
 
     // --- категории задач ---

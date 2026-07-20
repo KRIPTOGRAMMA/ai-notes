@@ -1,13 +1,17 @@
 <script lang="ts">
-  import type { Task, CreateTaskPayload, UpdateTaskPayload, Priority, Category, Recurrence, RecurrenceUnit, TaskStatus } from "../types";
+  import { tick } from "svelte";
+  import type { Task, CreateTaskPayload, UpdateTaskPayload, Priority, Category, Recurrence, RecurrenceUnit, TaskStatus, ChecklistTemplate } from "../types";
   import { api } from "../api/tauri";
   import { projectStore } from "../stores/projects.svelte";
   import { categoryStore } from "../stores/categories.svelte";
+  import { taskStore } from "../stores/tasks.svelte";
 
   type Props = {
     task?: Task | null;
     initialDeadline?: string | null; // префилл дедлайна при создании (формат datetime-local)
-    onSave: (data: CreateTaskPayload | UpdateTaskPayload) => Promise<void>;
+    // Возвращает созданную задачу (create-режим) — модалка дописывает к ней
+    // подзадачи из инлайн-чеклиста; в edit-режиме возврат не используется.
+    onSave: (data: CreateTaskPayload | UpdateTaskPayload) => Promise<Task | null | void>;
     onClose: () => void;
   };
 
@@ -72,6 +76,97 @@
   let saving = $state(false);
   let error = $state("");
 
+  // --- Инлайн-чеклист подзадач (v0.8.3, стиль Xiaomi Notes): каждая строка —
+  // чекбокс + текст; Enter — новая строка ниже, Backspace на пустой — удалить
+  // строку. Изменения применяются при сохранении (diff с task.subtasks).
+  type SubDraft = { id: string | null; title: string; done: boolean };
+  // svelte-ignore state_referenced_locally -- модалка пересоздаётся на каждую задачу ({#if editingTask}), снимок начального значения тут и нужен
+  let subs = $state<SubDraft[]>([
+    ...(task?.subtasks ?? []).map(s => ({ id: s.id, title: s.title, done: s.done })),
+    { id: null, title: "", done: false },
+  ]);
+  let subEls: HTMLInputElement[] = $state([]);
+
+  async function onSubKeydown(e: KeyboardEvent, i: number) {
+    if (e.key === "Enter" && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault();
+      subs.splice(i + 1, 0, { id: null, title: "", done: false });
+      await tick();
+      subEls[i + 1]?.focus();
+    } else if (e.key === "Backspace" && subs[i].title === "" && subs.length > 1) {
+      e.preventDefault();
+      subs.splice(i, 1);
+      await tick();
+      subEls[Math.max(0, i - 1)]?.focus();
+    }
+  }
+
+  // --- Шаблоны чеклистов (v0.7.15, перенесено в модалку в v0.8.3) ---
+  let checklistTemplates: ChecklistTemplate[] = $state([]);
+  let templatePickerOpen = $state(false);
+  let savingTemplateOpen = $state(false);
+  let newTemplateName = $state("");
+
+  async function loadChecklistTemplates() {
+    checklistTemplates = await api.getChecklistTemplates().catch(() => []);
+  }
+
+  function toggleTemplatePicker() {
+    templatePickerOpen = !templatePickerOpen;
+    savingTemplateOpen = false;
+    if (templatePickerOpen) loadChecklistTemplates();
+  }
+
+  async function applyTemplate(template: ChecklistTemplate) {
+    // Последняя строка драфта — пустая заготовка; вставляем шаблон перед ней.
+    const blankIdx = subs.length - 1;
+    const items = template.items.map(title => ({ id: null, title, done: false }));
+    subs.splice(blankIdx, 0, ...items);
+    templatePickerOpen = false;
+  }
+
+  async function removeTemplate(id: string) {
+    await api.deleteChecklistTemplate(id);
+    await loadChecklistTemplates();
+  }
+
+  function toggleSaveTemplate() {
+    savingTemplateOpen = !savingTemplateOpen;
+    templatePickerOpen = false;
+    newTemplateName = "";
+  }
+
+  async function saveCurrentAsTemplate() {
+    const name = newTemplateName.trim();
+    const items = subs.filter(s => s.title.trim()).map(s => s.title.trim());
+    if (!name || items.length === 0) return;
+    await api.createChecklistTemplate(name, items);
+    savingTemplateOpen = false;
+    newTemplateName = "";
+  }
+
+  // Diff чеклиста против исходных подзадач задачи: удаление пропавших,
+  // rename/toggle изменившихся, добавление новых (пустые строки игнорируются).
+  async function applySubtaskChanges(taskId: string) {
+    const orig = task?.subtasks ?? [];
+    const current = subs.filter(s => s.title.trim());
+    const keptIds = new Set(current.map(s => s.id).filter(Boolean));
+    for (const o of orig) {
+      if (!keptIds.has(o.id)) await api.deleteSubtask(o.id);
+    }
+    for (const s of current) {
+      if (s.id === null) {
+        const added = await api.addSubtask(taskId, s.title.trim());
+        if (s.done) await api.toggleSubtask(added.id);
+      } else {
+        const o = orig.find(x => x.id === s.id);
+        if (!o) continue;
+        if (o.title !== s.title.trim()) await api.renameSubtask(s.id, s.title.trim());
+        if (o.done !== s.done) await api.toggleSubtask(s.id);
+      }
+    }
+  }
+
   function buildRecurrence(): Recurrence {
     switch (recurrenceKey) {
       case "Hourly": return "Hourly";
@@ -97,6 +192,9 @@
         : null;
 
       if (isEdit) {
+        // Подзадачи — до onSave: onSave обновляет задачу и перечитывает store,
+        // подхватывая заодно и изменения чеклиста.
+        await applySubtaskChanges(task!.id);
         const patch: UpdateTaskPayload = {
           title: title.trim(),
           description: description.trim() || undefined,
@@ -121,7 +219,15 @@
           deadline: deadlineIso,
           project_id: projectId || null,
         };
-        await onSave(payload);
+        const created = await onSave(payload);
+        const newSubs = subs.filter(s => s.title.trim());
+        if (created && "id" in created && newSubs.length > 0) {
+          for (const s of newSubs) {
+            const added = await api.addSubtask(created.id, s.title.trim());
+            if (s.done) await api.toggleSubtask(added.id);
+          }
+          await taskStore.load(); // create уже перечитал store ДО подзадач
+        }
       }
       onClose();
     } catch (e) {
@@ -161,6 +267,63 @@
       <span class="label">Описание</span>
       <textarea bind:value={description} placeholder="Описание (необязательно)" rows="3" style="resize:vertical;"></textarea>
     </label>
+
+    <div class="field">
+      <span class="label">Подзадачи</span>
+      <div class="checklist">
+        {#each subs as s, i}
+          <div class="check-row">
+            <input type="checkbox" bind:checked={s.done} tabindex="-1" />
+            <input
+              class="check-input"
+              bind:value={s.title}
+              bind:this={subEls[i]}
+              placeholder={i === subs.length - 1 && !s.title ? "+ подзадача (Enter — ещё строка)" : ""}
+              onkeydown={(e) => onSubKeydown(e, i)}
+            />
+          </div>
+        {/each}
+      </div>
+      <div class="template-row">
+        <button type="button" class="btn-sm" onclick={toggleTemplatePicker}>Из шаблона…</button>
+        <button type="button" class="btn-sm" onclick={toggleSaveTemplate}
+          disabled={!subs.some(s => s.title.trim())}
+          title={subs.some(s => s.title.trim()) ? "" : "Сначала добавьте подзадачи"}>
+          Сохранить как шаблон
+        </button>
+      </div>
+
+      {#if templatePickerOpen}
+        <div class="template-panel">
+          {#if checklistTemplates.length === 0}
+            <span class="muted" style="font-size:12px;">Нет сохранённых шаблонов</span>
+          {:else}
+            {#each checklistTemplates as tpl (tpl.id)}
+              <div class="template-line">
+                <span style="flex:1;">{tpl.name} <span class="muted">({tpl.items.length})</span></span>
+                <button type="button" class="btn-sm" onclick={() => applyTemplate(tpl)}>Применить</button>
+                <button type="button" class="btn-icon btn-danger" title="Удалить шаблон" onclick={() => removeTemplate(tpl.id)}>✕</button>
+              </div>
+            {/each}
+          {/if}
+        </div>
+      {/if}
+
+      {#if savingTemplateOpen}
+        <div class="template-panel template-line">
+          <input
+            type="text"
+            placeholder="Название шаблона"
+            bind:value={newTemplateName}
+            onkeydown={(e) => { if (e.key === 'Enter') saveCurrentAsTemplate(); }}
+            class="sub-input"
+          />
+          <button type="button" class="btn-sm btn-primary" onclick={saveCurrentAsTemplate} disabled={!newTemplateName.trim()}>
+            Сохранить
+          </button>
+        </div>
+      {/if}
+    </div>
 
     <div class="pair">
       <label class="field">
@@ -296,6 +459,66 @@
     gap: 8px;
     align-items: center;
     font-size: 13px;
+  }
+
+  /* Инлайн-чеклист подзадач (v0.8.3): строки без рамок, как в блокнотах */
+  .checklist {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .check-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .check-row input[type="checkbox"] {
+    flex-shrink: 0;
+  }
+
+  .check-input {
+    flex: 1;
+    border: none;
+    background: transparent;
+    padding: 3px 4px;
+    font-size: 13px;
+    border-bottom: 1px solid transparent;
+    border-radius: 0;
+  }
+  .check-input:focus {
+    outline: none;
+    border-bottom-color: var(--accent);
+  }
+
+  .template-row {
+    display: flex;
+    gap: 6px;
+    margin-top: 6px;
+  }
+
+  .template-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 6px 8px;
+    margin-top: 4px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-secondary);
+  }
+
+  .template-line {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .sub-input {
+    flex: 1;
+    font-size: 12px;
+    padding: 2px 8px;
   }
 
   .actions {

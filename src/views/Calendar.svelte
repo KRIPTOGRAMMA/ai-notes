@@ -329,7 +329,7 @@
   let createFor = $state<string | null>(null);
 
   async function handleCreate(data: unknown) {
-    await taskStore.create(data as CreateTaskPayload);
+    return await taskStore.create(data as CreateTaskPayload);
   }
 </script>
 

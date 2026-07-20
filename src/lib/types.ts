@@ -189,6 +189,7 @@ export interface AppSettings {
   auto_backup_dir: string;    // пусто = авто-бэкап выключен
   auto_backup_keep: number;   // сколько копий хранить (мин 1)
   morning_digest_time: string; // "HH:MM", пусто = выкл
+  show_subtasks_expanded: boolean; // подзадачи в списке видны без клика (v0.8.3)
 }
 
 export interface AppCategoryRule {

@@ -8,7 +8,7 @@
   import { parseComposer, SUBTASK_PREFIX } from "../lib/composer";
   import TaskModal from "../lib/components/TaskModal.svelte";
   import Icon from "../lib/components/Icon.svelte";
-  import type { Task, Category, CreateTaskPayload, UpdateTaskPayload, Project, GoalSnapshot, ActiveSession, ChecklistTemplate } from "../lib/types";
+  import type { Task, Subtask, Category, CreateTaskPayload, UpdateTaskPayload, Project, GoalSnapshot, ActiveSession } from "../lib/types";
 
   type AiResult = { task_id: string; type: string; result?: string; error?: string };
 
@@ -28,10 +28,15 @@
     projectStore.load();
     categoryStore.load();
     // Капабилити-детект: при выключенном ИИ кнопка «Что сейчас?» просто скрыта
-    api.getSettings().then(s => aiEnabled = s.ai_provider !== "none").catch(() => {});
+    api.getSettings().then(s => {
+      aiEnabled = s.ai_provider !== "none";
+      autoExpandSubs = s.show_subtasks_expanded;
+    }).catch(() => {});
   });
 
   let aiEnabled = $state(false);
+  // v0.8.3: задачи с подзадачами развёрнуты по умолчанию (настройка «Внешний вид»)
+  let autoExpandSubs = $state(true);
 
   const filteredActive = $derived(
     taskStore.activeTasks.filter(t =>
@@ -145,7 +150,7 @@
   });
 
   async function handleCreate(data: CreateTaskPayload | UpdateTaskPayload) {
-    await taskStore.create(data as CreateTaskPayload);
+    return await taskStore.create(data as CreateTaskPayload);
   }
 
   // --- Инлайн-композер: первая строка — название, Enter — перенос,
@@ -253,64 +258,64 @@
     await taskStore.load();
   }
 
-  async function removeSubtask(id: string) {
-    await api.deleteSubtask(id);
-    await taskStore.load();
-  }
+  // --- Инлайн-чеклист в панели строки (v0.8.3, стиль Xiaomi Notes):
+  // существующие подзадачи редактируются на месте (Enter/blur — commit,
+  // Backspace на пустой — удалить), последняя строка — драфт новой.
+  let subDraft = $state<Record<string, string>>({});
+  let draftEls = $state<Record<string, HTMLInputElement>>({});
 
-  let newSubtaskInput = $state<Record<string, string>>({});
-  async function addManualSubtask(parentId: string) {
-    const title = (newSubtaskInput[parentId] ?? "").trim();
+  async function commitDraft(taskId: string, refocus = true) {
+    const title = (subDraft[taskId] ?? "").trim();
     if (!title) return;
-    await api.addSubtask(parentId, title);
-    newSubtaskInput[parentId] = "";
+    await api.addSubtask(taskId, title);
+    subDraft[taskId] = "";
     await taskStore.load();
+    if (refocus) { await tick(); draftEls[taskId]?.focus(); }
   }
 
-  // --- Шаблоны чеклистов (v0.7.15) ---
-  let checklistTemplates: ChecklistTemplate[] = $state([]);
-  let templatePickerFor: string | null = $state(null); // task_id, для которой открыт список «Из шаблона…»
-  let savingTemplateFor: string | null = $state(null); // task_id, для которой открыт инпут «Сохранить как шаблон»
-  let newTemplateName = $state("");
-
-  async function loadChecklistTemplates() {
-    checklistTemplates = await api.getChecklistTemplates().catch(() => []);
-  }
-
-  function openTemplatePicker(taskId: string) {
-    templatePickerFor = templatePickerFor === taskId ? null : taskId;
-    savingTemplateFor = null;
-    if (templatePickerFor) loadChecklistTemplates();
-  }
-
-  async function applyTemplate(taskId: string, template: ChecklistTemplate) {
-    for (const item of template.items) {
-      await api.addSubtask(taskId, item);
+  async function commitRename(sub: Subtask, value: string) {
+    const t = value.trim();
+    if (!t) { // очистил и ушёл — считаем удалением (симметрично Backspace)
+      await api.deleteSubtask(sub.id);
+      await taskStore.load();
+      return;
     }
-    templatePickerFor = null;
-    await taskStore.load();
+    if (t !== sub.title) {
+      await api.renameSubtask(sub.id, t);
+      await taskStore.load();
+    }
   }
 
-  async function removeTemplate(id: string) {
-    await api.deleteChecklistTemplate(id);
-    await loadChecklistTemplates();
+  async function onSubRowKeydown(e: KeyboardEvent, taskId: string, sub: Subtask) {
+    const input = e.currentTarget as HTMLInputElement;
+    if (e.key === "Enter") {
+      e.preventDefault();
+      await commitRename(sub, input.value);
+      await tick();
+      draftEls[taskId]?.focus();
+    } else if (e.key === "Backspace" && input.value === "") {
+      e.preventDefault();
+      await api.deleteSubtask(sub.id);
+      await taskStore.load();
+      await tick();
+      draftEls[taskId]?.focus();
+    }
   }
 
-  function openSaveTemplate(taskId: string) {
-    savingTemplateFor = savingTemplateFor === taskId ? null : taskId;
-    templatePickerFor = null;
-    newTemplateName = "";
-  }
-
-  async function saveCurrentAsTemplate(task: Task) {
-    const name = newTemplateName.trim();
-    if (!name || task.subtasks.length === 0) return;
-    await api.createChecklistTemplate(name, task.subtasks.map(s => s.title));
-    savingTemplateFor = null;
-    newTemplateName = "";
+  function onDraftKeydown(e: KeyboardEvent, taskId: string) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      commitDraft(taskId);
+    }
   }
 
   let expanded = $state<Record<string, boolean>>({});
+
+  // Явный клик переопределяет авто-разворачивание; без клика — задачи с
+  // подзадачами открыты, если включена настройка show_subtasks_expanded.
+  function isExpanded(task: Task): boolean {
+    return expanded[task.id] ?? (autoExpandSubs && task.subtasks.length > 0);
+  }
 
   // --- Ручная сортировка: drag строки в пределах своего списка (группы) ---
   let dragTaskId: string | null = $state(null);
@@ -494,9 +499,15 @@
     <div class="task-meta">
       <button
         class="chip chip-sub"
-        onclick={() => expanded[task.id] = !expanded[task.id]}
+        class:has-subs={task.subtasks.length > 0}
+        class:subs-done={task.subtasks.length > 0 && doneCount(task) === task.subtasks.length}
+        onclick={() => expanded[task.id] = !isExpanded(task)}
         title={task.subtasks.length > 0 ? "Подзадачи" : "Добавить подзадачу"}
-      >{expanded[task.id] ? "▾" : "▸"} {task.subtasks.length > 0 ? `${doneCount(task)}/${task.subtasks.length}` : "+"}</button>
+      >{isExpanded(task) ? "▾" : "▸"}
+        {#if task.subtasks.length > 0}
+          <span class="sub-track"><span class="sub-fill" style="width:{Math.round(doneCount(task) / task.subtasks.length * 100)}%"></span></span>
+          {doneCount(task)}/{task.subtasks.length}
+        {:else}+{/if}</button>
       {#each task.tags as tag}
         <span class="chip chip-tag">#{tag}</span>
       {/each}
@@ -540,63 +551,30 @@
     </li>
   {/if}
 
-  {#if expanded[task.id]}
+  {#if isExpanded(task)}
     <li class="task-sub-panel">
       {#each task.subtasks as sub (sub.id)}
         <div class="sub-line">
           <input type="checkbox" checked={sub.done} onchange={() => toggleSubtask(sub.id)} />
-          <span style="flex:1;" class:sub-done={sub.done}>{sub.title}</span>
-          <button class="btn-icon btn-danger" title="Удалить" onclick={() => removeSubtask(sub.id)}>✕</button>
+          <input
+            class="check-input"
+            class:sub-done={sub.done}
+            value={sub.title}
+            onblur={(e) => commitRename(sub, e.currentTarget.value)}
+            onkeydown={(e) => onSubRowKeydown(e, task.id, sub)}
+          />
         </div>
       {/each}
       <div class="sub-line">
         <input
-          type="text"
-          placeholder="+ подзадача"
-          bind:value={newSubtaskInput[task.id]}
-          onkeydown={(e) => { if (e.key === 'Enter') addManualSubtask(task.id); }}
-          class="sub-input"
+          class="check-input"
+          placeholder="+ подзадача (Enter)"
+          bind:value={subDraft[task.id]}
+          bind:this={draftEls[task.id]}
+          onkeydown={(e) => onDraftKeydown(e, task.id)}
+          onblur={() => commitDraft(task.id, false)}
         />
-        <button class="btn-sm" onclick={() => addManualSubtask(task.id)}>Добавить</button>
       </div>
-      <div class="sub-line" style="gap:6px;">
-        <button class="btn-sm" onclick={() => openTemplatePicker(task.id)}>Из шаблона…</button>
-        <button class="btn-sm" onclick={() => openSaveTemplate(task.id)} disabled={task.subtasks.length === 0}
-          title={task.subtasks.length === 0 ? "Сначала добавьте подзадачи" : ""}>
-          Сохранить как шаблон
-        </button>
-      </div>
-
-      {#if templatePickerFor === task.id}
-        <div class="template-panel">
-          {#if checklistTemplates.length === 0}
-            <span class="muted" style="font-size:12px;">Нет сохранённых шаблонов</span>
-          {:else}
-            {#each checklistTemplates as tpl (tpl.id)}
-              <div class="sub-line">
-                <span style="flex:1;">{tpl.name} <span class="muted">({tpl.items.length})</span></span>
-                <button class="btn-sm" onclick={() => applyTemplate(task.id, tpl)}>Применить</button>
-                <button class="btn-icon btn-danger" title="Удалить шаблон" onclick={() => removeTemplate(tpl.id)}>✕</button>
-              </div>
-            {/each}
-          {/if}
-        </div>
-      {/if}
-
-      {#if savingTemplateFor === task.id}
-        <div class="sub-line template-panel">
-          <input
-            type="text"
-            placeholder="Название шаблона"
-            bind:value={newTemplateName}
-            onkeydown={(e) => { if (e.key === 'Enter') saveCurrentAsTemplate(task); }}
-            class="sub-input"
-          />
-          <button class="btn-sm btn-primary" onclick={() => saveCurrentAsTemplate(task)} disabled={!newTemplateName.trim()}>
-            Сохранить
-          </button>
-        </div>
-      {/if}
     </li>
   {/if}
 {/snippet}
@@ -1155,6 +1133,33 @@
   }
   .chip-sub:hover { background: var(--bg-hover); }
 
+  /* Задача С подзадачами визуально отличается от пустого «+» (v0.8.2):
+     акцентный чип с мини-прогрессом, зелёный — когда все выполнены. */
+  .chip-sub.has-subs {
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    font-weight: 600;
+  }
+  .chip-sub.has-subs:hover { background: color-mix(in srgb, var(--accent) 20%, transparent); }
+  .chip-sub.subs-done {
+    color: var(--success);
+    background: color-mix(in srgb, var(--success) 12%, transparent);
+  }
+  .chip-sub.subs-done:hover { background: color-mix(in srgb, var(--success) 20%, transparent); }
+
+  .sub-track {
+    width: 26px;
+    height: 4px;
+    border-radius: 2px;
+    background: color-mix(in srgb, currentColor 25%, transparent);
+    overflow: hidden;
+  }
+  .sub-fill {
+    display: block;
+    height: 100%;
+    background: currentColor;
+  }
+
   /* Действия видны только при наведении на строку */
   .task-actions {
     display: flex;
@@ -1198,21 +1203,19 @@
     color: var(--text-secondary);
   }
 
-  .sub-input {
+  /* Инлайн-чеклист панели (v0.8.3): borderless-строки, как в модалке */
+  .check-input {
     flex: 1;
-    font-size: 12px;
-    padding: 2px 8px;
+    border: none;
+    background: transparent;
+    padding: 3px 4px;
+    font-size: 13px;
+    border-bottom: 1px solid transparent;
+    border-radius: 0;
   }
-
-  .template-panel {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    padding: 6px 8px;
-    margin-top: 4px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    background: var(--bg-secondary);
+  .check-input:focus {
+    outline: none;
+    border-bottom-color: var(--accent);
   }
 
   .history .task-row {

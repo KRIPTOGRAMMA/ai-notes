@@ -287,6 +287,7 @@ pub fn run() {
                         commands::subtasks::add_subtask,
                         commands::subtasks::toggle_subtask,
                         commands::subtasks::delete_subtask,
+                        commands::subtasks::rename_subtask,
                         commands::routines::get_routines,
                         commands::routines::create_routine,
                         commands::routines::update_routine,
