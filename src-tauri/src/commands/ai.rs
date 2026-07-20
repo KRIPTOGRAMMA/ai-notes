@@ -27,29 +27,91 @@ pub struct AiResult {
     pub error: Option<String>,
 }
 
+// Убирает по одной паре внешних markdown/кавычка-символов с концов строки:
+// "**текст**" -> "текст", "`текст`" -> "текст", «текст» -> "текст".
+fn strip_wrapping(s: &str) -> &str {
+    let s = s.trim();
+    for (open, close) in [("**", "**"), ("__", "__"), ("`", "`"), ("«", "»"), ("\"", "\""), ("'", "'")] {
+        if s.len() > open.len() + close.len() && s.starts_with(open) && s.ends_with(close) {
+            return s[open.len()..s.len() - close.len()].trim();
+        }
+    }
+    s
+}
+
+// Строка-мусор, которую модель могла добавить вокруг настоящих подзадач:
+// кодовый забор (``` или ```json) и типичные преамбулы/пустые заголовки.
+fn is_noise_line(line: &str) -> bool {
+    let l = line.trim();
+    if l.is_empty() { return true; }
+    if l.starts_with("```") { return true; }
+    let lower = l.to_lowercase();
+    let colon_like_ending = l.ends_with(':') || l.ends_with('：');
+    if colon_like_ending && lower.len() < 80 { return true; } // «Вот список подзадач:» и т.п.
+    false
+}
+
+// Один пункт списка -> очищенный текст подзадачи, либо None если после чистки
+// ничего разумного не осталось (пустая строка, кодовый забор, чистая пунктуация,
+// либо строка — на самом деле кусок JSON, а не текст подзадачи).
+fn clean_subtask_line(line: &str) -> Option<String> {
+    let l = line.trim();
+    if is_noise_line(l) { return None; }
+    // Нумерация ("1." "2)") и маркер списка ("-", "•", одиночная "* "), но не
+    // пара "**" — это markdown-жирное, которое должно остаться нетронутым
+    // для strip_wrapping ниже.
+    let stripped = l
+        .trim_start_matches(|c: char| c.is_ascii_digit())
+        .trim_start_matches(['.', ')'])
+        .trim_start();
+    let stripped = if let Some(rest) = stripped.strip_prefix("* ") {
+        rest
+    } else {
+        stripped.trim_start_matches(['-', '•'])
+    };
+    let stripped = stripped.trim();
+    let stripped = strip_wrapping(stripped);
+    if stripped.is_empty() || is_noise_line(stripped) { return None; }
+    // Похоже на сырой JSON-литерал ("[1, 2, 3]", "{...}"), а не на текст
+    // подзадачи — модель могла не собрать валидный массив строк.
+    let looks_like_json = (stripped.starts_with('[') && stripped.ends_with(']'))
+        || (stripped.starts_with('{') && stripped.ends_with('}'));
+    if looks_like_json { return None; }
+    Some(stripped.to_string())
+}
+
+const MAX_SUBTASKS: usize = 15; // защита от зацикленного/мусорного ответа модели
+
+// Строгий разбор ответа модели в список подзадач: не доверяем модели —
+// как parse_plan в planner.rs, при малейшем сомнении отбрасываем элемент,
+// а не пытаемся угадать. Оба пути (JSON и построчный фолбэк) прогоняются
+// через одну и ту же чистку/фильтрацию мусора.
 fn parse_subtasks(raw: &str) -> Option<String> {
     let trimmed = raw.trim();
-    let json_start = trimmed.find('[').unwrap_or(0);
-    let json_end = trimmed.rfind(']').map(|i| i + 1).unwrap_or(trimmed.len());
-    if let Ok(items) = serde_json::from_str::<Vec<String>>(&trimmed[json_start..json_end]) {
-        if !items.is_empty() {
-            return Some(items.join("|||"));
+
+    // JSON-массив: ищем сбалансированную пару [...] (не просто первую [ и
+    // последнюю ] — иначе строка вида "сделай [важно]: [\"a\",\"b\"]" ломается),
+    // пробуя от каждого '[' до последнего ']' после него, пока разбор не удастся.
+    let brackets: Vec<usize> = trimmed.match_indices('[').map(|(i, _)| i).collect();
+    let last_close = trimmed.rfind(']');
+    if let Some(end) = last_close {
+        for start in brackets {
+            if start >= end { continue; }
+            let Ok(items) = serde_json::from_str::<Vec<String>>(&trimmed[start..=end]) else { continue };
+            let cleaned: Vec<String> = items.iter().filter_map(|s| clean_subtask_line(s)).collect();
+            if !cleaned.is_empty() {
+                let mut cleaned = cleaned;
+                cleaned.truncate(MAX_SUBTASKS);
+                return Some(cleaned.join("|||"));
+            }
         }
     }
 
-    let items: Vec<String> = trimmed
-        .lines()
-        .filter_map(|line| {
-            let l = line.trim();
-            let stripped = l
-                .trim_start_matches(|c: char| c.is_ascii_digit())
-                .trim_start_matches(['.', ')', '-', '*', ' '])
-                .trim();
-            if stripped.is_empty() { None } else { Some(stripped.to_string()) }
-        })
-        .collect();
-
-    if items.is_empty() { None } else { Some(items.join("|||")) }
+    // Фолбэк: построчный список (нумерация/маркеры/markdown), с той же чисткой.
+    let mut items: Vec<String> = trimmed.lines().filter_map(clean_subtask_line).collect();
+    if items.is_empty() { return None; }
+    items.truncate(MAX_SUBTASKS);
+    Some(items.join("|||"))
 }
 
 fn into_payload(task_id: String, kind: &str, r: Result<String, String>) -> AiResult {
@@ -474,5 +536,71 @@ mod tests {
         assert!(s.contains("Выполнено задач: 1 (свежая)"), "{s}");
         assert!(!s.contains("старая"), "{s}");
         assert!(s.contains("Активное время: 5 мин"), "{s}");
+    }
+
+    // --- parse_subtasks: v0.8.11, "модели не доверять" — грязные ответы LLM ---
+
+    #[test]
+    fn parses_clean_json_array() {
+        let raw = r#"["Собрать требования", "Написать код", "Написать тесты"]"#;
+        assert_eq!(parse_subtasks(raw).unwrap(), "Собрать требования|||Написать код|||Написать тесты");
+    }
+
+    #[test]
+    fn strips_code_fence_around_json() {
+        let raw = "```json\n[\"шаг раз\", \"шаг два\"]\n```";
+        assert_eq!(parse_subtasks(raw).unwrap(), "шаг раз|||шаг два");
+    }
+
+    #[test]
+    fn preamble_line_is_not_included_as_subtask() {
+        let raw = "Вот список подзадач:\n1. Изучить требования\n2. Написать план\n3. Реализовать и протестировать";
+        let result = parse_subtasks(raw).unwrap();
+        assert!(!result.contains("Вот список подзадач"), "{result}");
+        assert_eq!(result, "Изучить требования|||Написать план|||Реализовать и протестировать");
+    }
+
+    #[test]
+    fn stray_bracket_before_real_json_array_does_not_break_parsing() {
+        let raw = r#"Разбил задачу [важно] на подзадачи: ["шаг 1", "шаг 2"]"#;
+        assert_eq!(parse_subtasks(raw).unwrap(), "шаг 1|||шаг 2");
+    }
+
+    #[test]
+    fn empty_json_array_falls_back_to_none_not_garbage() {
+        assert_eq!(parse_subtasks("[]"), None);
+    }
+
+    #[test]
+    fn json_array_of_non_strings_does_not_produce_garbage_literal() {
+        // Раньше "[1, 2, 3]" целиком выживало как один поддельный пункт.
+        assert_eq!(parse_subtasks("[1, 2, 3]"), None);
+    }
+
+    #[test]
+    fn numbered_list_with_markdown_bold_is_cleaned() {
+        let raw = "1. **Собрать требования**\n2. **Написать код**";
+        assert_eq!(parse_subtasks(raw).unwrap(), "Собрать требования|||Написать код");
+    }
+
+    #[test]
+    fn bullet_markers_are_stripped() {
+        let raw = "- шаг раз\n* шаг два\n• шаг три";
+        assert_eq!(parse_subtasks(raw).unwrap(), "шаг раз|||шаг два|||шаг три");
+    }
+
+    #[test]
+    fn pure_garbage_or_whitespace_returns_none() {
+        assert_eq!(parse_subtasks(""), None);
+        assert_eq!(parse_subtasks("   \n  \n "), None);
+        assert_eq!(parse_subtasks("```\n```"), None);
+    }
+
+    #[test]
+    fn excessive_item_count_is_truncated() {
+        let items: Vec<String> = (1..=30).map(|i| format!("шаг {i}")).collect();
+        let raw = serde_json::to_string(&items).unwrap();
+        let result = parse_subtasks(&raw).unwrap();
+        assert_eq!(result.split("|||").count(), MAX_SUBTASKS);
     }
 }
