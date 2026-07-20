@@ -102,6 +102,34 @@ test("задача: создание, редактирование, выполн
   await expect(page.getByText("переименованная задача")).toHaveCount(0);
 });
 
+test("история: клик по строке открывает read-only детали с подзадачами и датой завершения", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+
+  await createTask(page, "поход в горы");
+  await page.locator(".chip-sub").click();
+  const draft = page.getByPlaceholder("+ подзадача (Enter)");
+  await draft.fill("рюкзак");
+  await draft.press("Enter");
+  await page.locator(".check-input").last().fill("палатка");
+  await page.locator(".check-input").last().press("Enter");
+  await page.locator(".task-sub-panel input[type='checkbox']").first().check();
+
+  await page.locator(".task-check").click();
+  await page.getByRole("button", { name: "История" }).click();
+
+  await page.locator(".history .task-main", { hasText: "поход в горы" }).click();
+  const modal = page.locator(".modal");
+  await expect(modal.getByText("поход в горы")).toBeVisible();
+  await expect(modal.locator(".check-row")).toHaveCount(2);
+  await expect(modal.locator(".check-row").nth(0).locator("input")).toBeChecked();
+  await expect(modal.locator(".check-row").nth(1).locator("input")).not.toBeChecked();
+  await expect(modal.getByText("Завершена")).toBeVisible();
+
+  await modal.getByRole("button", { name: "Закрыть" }).click();
+  await expect(page.locator(".modal")).toHaveCount(0);
+});
+
 test("модалка: инлайн-чеклист подзадач — Enter добавляет строку, сохранение применяет diff", async ({ page }) => {
   await withMock(page);
   await page.goto("/");

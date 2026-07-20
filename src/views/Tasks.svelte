@@ -7,6 +7,7 @@
   import { api } from "../lib/api/tauri";
   import { parseComposer, SUBTASK_PREFIX } from "../lib/composer";
   import TaskModal from "../lib/components/TaskModal.svelte";
+  import TaskHistoryDetail from "../lib/components/TaskHistoryDetail.svelte";
   import Icon from "../lib/components/Icon.svelte";
   import type { Task, Subtask, Category, CreateTaskPayload, UpdateTaskPayload, Project, GoalSnapshot, ActiveSession } from "../lib/types";
 
@@ -309,6 +310,8 @@
     }
   }
 
+  let historyDetailTask: Task | null = $state(null);
+
   let expanded = $state<Record<string, boolean>>({});
 
   // Явный клик переопределяет авто-разворачивание; без клика — задачи с
@@ -595,6 +598,13 @@
   />
 {/if}
 
+{#if historyDetailTask}
+  <TaskHistoryDetail
+    task={historyDetailTask}
+    onClose={() => historyDetailTask = null}
+  />
+{/if}
+
 {#if showProjects}
   <div role="dialog" aria-modal="true" class="overlay backdrop"
     onclick={(e) => { if (e.target === e.currentTarget) showProjects = false; }}>
@@ -823,13 +833,22 @@
           {#each taskStore.historyTasks as task (task.id)}
             <li class="task-row">
               <span class="task-check done">✓</span>
-              <div class="task-main">
+              <div
+                class="task-main"
+                onclick={() => historyDetailTask = task}
+                onkeydown={(e) => { if (e.key === "Enter") historyDetailTask = task; }}
+                role="button"
+                tabindex="0"
+              >
                 <div class="task-title done-title">{task.title}</div>
                 {#if task.description}
                   <div class="task-desc">{task.description}</div>
                 {/if}
               </div>
               <div class="task-meta">
+                {#if task.subtasks.length > 0}
+                  <span class="chip">{doneCount(task)}/{task.subtasks.length}</span>
+                {/if}
                 <span class="chip">{task.status === "Done" ? "Выполнена" : task.status}</span>
               </div>
               <div class="task-actions">
