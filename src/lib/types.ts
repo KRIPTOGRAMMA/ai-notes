@@ -208,6 +208,11 @@ export interface ChecklistTemplate {
   items: string[];
 }
 
+export interface DayCompletion {
+  id: string;
+  title: string;
+}
+
 export interface Routine {
   id: string;
   title: string;

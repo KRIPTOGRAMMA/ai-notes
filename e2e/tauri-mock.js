@@ -443,7 +443,7 @@
       return Object.entries(byDay).sort().map(([date, completed]) => ({ date, completed }));
     },
     get_completions_for_day: ({ date }) =>
-      db.tasks.filter((t) => t.completed_at && localDayKey(t.completed_at) === date).map((t) => t.title),
+      db.tasks.filter((t) => t.completed_at && localDayKey(t.completed_at) === date).map((t) => ({ id: t.id, title: t.title })),
     get_hourly_activity: () => [],
     // Помодоро: мок не гоняет реальный цикл (Study-режим не в скоупе e2e) —
     // фиксированное "off", тесты виджета переопределяют через db.pomodoro при сидировании.

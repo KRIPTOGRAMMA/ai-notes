@@ -199,7 +199,7 @@
     {:else if activeView === "settings"}
       <Settings />
     {:else if activeView === "dashboard"}
-      <Dashboard />
+      <Dashboard onOpenTask={(id) => { activeView = "tasks"; taskStore.requestFocus(id); }} />
     {:else if activeView === "calendar"}
       <Calendar onOpenTask={(id) => { activeView = "tasks"; taskStore.requestFocus(id); }} />
     {/if}

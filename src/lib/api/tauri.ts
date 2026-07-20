@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Task, Subtask, CreateTaskPayload, UpdateTaskPayload, Note, CreateNotePayload, UpdateNotePayload, AppSettings, Project, UpdateProjectPayload, CategoryInfo, NoteSnippet, TaskSnippet, GoalSnapshot, Routine, RoutineBlock, ActiveSession, NoteRevision, ChecklistTemplate } from "../types";
+import type { Task, Subtask, CreateTaskPayload, UpdateTaskPayload, Note, CreateNotePayload, UpdateNotePayload, AppSettings, Project, UpdateProjectPayload, CategoryInfo, NoteSnippet, TaskSnippet, GoalSnapshot, Routine, RoutineBlock, ActiveSession, NoteRevision, ChecklistTemplate, DayCompletion } from "../types";
 
 export const api = {
   getTasks: () => invoke<Task[]>("get_tasks"),
@@ -56,7 +56,7 @@ export const api = {
   getActiveIdleRatio: () =>
     invoke<{ today_active: number; today_idle: number; week_active: number; week_idle: number }>("get_active_idle_ratio"),
   getAppUsage: (days: number) => invoke<{ app: string; minutes: number }[]>("get_app_usage", { days }),
-  getCompletionsForDay: (date: string) => invoke<string[]>("get_completions_for_day", { date }),
+  getCompletionsForDay: (date: string) => invoke<DayCompletion[]>("get_completions_for_day", { date }),
   getHourlyActivity: (days: number) =>
     invoke<{ weekday: number; hour: number; minutes: number }[]>("get_hourly_activity", { days }),
   getPomodoroState: () => invoke<{ phase: string; until: string | null }>("get_pomodoro_state"),

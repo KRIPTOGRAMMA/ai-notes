@@ -4,7 +4,9 @@
   import { api } from "../lib/api/tauri";
   import { projectStore } from "../lib/stores/projects.svelte";
   import { categoryStore } from "../lib/stores/categories.svelte";
-  import type { AppSettings } from "../lib/types";
+  import type { AppSettings, DayCompletion } from "../lib/types";
+
+  let { onOpenTask }: { onOpenTask: (id: string) => void } = $props();
 
   interface ActivityDay {
     date: string;
@@ -168,20 +170,42 @@
     return new Date(date + "T00:00:00").toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
   }
 
-  // Тултип: список выполненных задач дня подгружается по наведению и кэшируется
-  let calTip: { date: string; count: number; titles: string[]; x: number; y: number } | null = $state(null);
-  const dayTitlesCache = new Map<string, string[]>();
+  // Тултип (hover, быстрый превью) и попап (клик, с переходом к задаче) —
+  // список выполненных задач дня подгружается лениво и кэшируется по дате.
+  let calTip: { date: string; count: number; completions: DayCompletion[]; x: number; y: number } | null = $state(null);
+  let calPopup: { date: string; count: number; completions: DayCompletion[] } | null = $state(null);
+  const dayCompletionsCache = new Map<string, DayCompletion[]>();
+
+  async function loadDayCompletions(day: { date: string; count: number }): Promise<DayCompletion[]> {
+    if (day.count === 0) return [];
+    const cached = dayCompletionsCache.get(day.date);
+    if (cached) return cached;
+    const completions = await api.getCompletionsForDay(day.date).catch(() => []);
+    dayCompletionsCache.set(day.date, completions);
+    return completions;
+  }
 
   async function showCalTip(e: MouseEvent, day: { date: string; count: number }) {
     const cell = e.currentTarget as HTMLElement;
     const x = cell.offsetLeft;
     const y = cell.offsetTop;
-    let titles: string[] = [];
-    if (day.count > 0) {
-      titles = dayTitlesCache.get(day.date) ?? await api.getCompletionsForDay(day.date).catch(() => []);
-      dayTitlesCache.set(day.date, titles);
-    }
-    calTip = { date: day.date, count: day.count, titles, x, y };
+    const completions = await loadDayCompletions(day);
+    calTip = { date: day.date, count: day.count, completions, x, y };
+  }
+
+  async function openCalPopup(day: { date: string; count: number }) {
+    calTip = null;
+    const completions = await loadDayCompletions(day);
+    calPopup = { date: day.date, count: day.count, completions };
+  }
+
+  function openTaskFromPopup(id: string) {
+    calPopup = null;
+    onOpenTask(id);
+  }
+
+  function handleKeydown(e: KeyboardEvent) {
+    if (e.key === "Escape" && calPopup) calPopup = null;
   }
 
   // --- Heatmap «час × день недели» (v0.6.5) ---
@@ -584,7 +608,8 @@
               <span class="cal-cell lead"></span>
             {/each}
             {#each calendar.days as day (day.date)}
-              <span
+              <button
+                type="button"
                 class="cal-cell"
                 data-date={day.date}
                 data-count={day.count}
@@ -592,16 +617,16 @@
                   ? `background: color-mix(in srgb, var(--accent) ${CAL_MIX[calLevel(day.count)]}%, transparent);`
                   : ""}
                 onmouseenter={(e) => showCalTip(e, day)}
-                role="img"
+                onclick={() => openCalPopup(day)}
                 aria-label="{fmtDay(day.date)}: {day.count}"
-              ></span>
+              ></button>
             {/each}
           </div>
           {#if calTip}
             <div class="cal-tip" style="left:{Math.min(calTip.x, 640)}px; top:{calTip.y + 16}px;">
               <div class="cal-tip-head">{fmtDay(calTip.date)} — {calTip.count > 0 ? `выполнено: ${calTip.count}` : "пусто"}</div>
-              {#each calTip.titles as t (t)}
-                <div class="cal-tip-item">• {t}</div>
+              {#each calTip.completions as c (c.id)}
+                <div class="cal-tip-item">• {c.title}</div>
               {/each}
             </div>
           {/if}
@@ -637,6 +662,30 @@
     </section>
   </div>
 </div>
+
+<svelte:window onkeydown={handleKeydown} />
+
+{#if calPopup}
+  <div role="dialog" aria-modal="true" class="overlay backdrop" onclick={(e) => { if (e.target === e.currentTarget) calPopup = null; }}>
+    <div class="modal dialog cal-popup">
+      <h2 class="dialog-title">{fmtDay(calPopup.date)} — {calPopup.count > 0 ? `выполнено: ${calPopup.count}` : "пусто"}</h2>
+      {#if calPopup.completions.length === 0}
+        <div class="empty">Нет выполненных задач в этот день</div>
+      {:else}
+        <ul class="cal-popup-list">
+          {#each calPopup.completions as c (c.id)}
+            <li>
+              <button type="button" class="cal-popup-item" onclick={() => openTaskFromPopup(c.id)}>{c.title}</button>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+      <div class="actions">
+        <button class="btn-ghost" onclick={() => calPopup = null}>Закрыть</button>
+      </div>
+    </div>
+  </div>
+{/if}
 
 <style>
   .dash {
@@ -682,6 +731,9 @@
     height: 10px;
     border-radius: 2px;
     background: var(--bg-secondary);
+    border: none;
+    padding: 0;
+    cursor: pointer;
   }
 
   .cal-cell.lead { background: transparent; }
@@ -916,5 +968,59 @@
     background: var(--accent);
     border-radius: 3px;
     display: inline-block;
+  }
+
+  .backdrop {
+    align-items: center;
+    padding: 16px;
+  }
+
+  .dialog {
+    width: 100%;
+    padding: 18px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .dialog-title {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 700;
+  }
+
+  .actions {
+    display: flex;
+    justify-content: flex-end;
+  }
+
+  .cal-popup {
+    max-width: 420px;
+  }
+
+  .cal-popup-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 320px;
+    overflow-y: auto;
+  }
+
+  .cal-popup-item {
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: none;
+    padding: 6px 8px;
+    border-radius: var(--radius);
+    font-size: 13px;
+    cursor: pointer;
+  }
+
+  .cal-popup-item:hover {
+    background: var(--bg-secondary);
   }
 </style>

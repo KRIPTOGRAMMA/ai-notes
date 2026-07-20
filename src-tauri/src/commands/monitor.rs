@@ -267,22 +267,28 @@ pub async fn get_app_category_time_impl(
 
 // ===== Дашборд-аналитика (v0.6.5) =====
 
-// Выполненные задачи конкретного локального дня (для тултипа календаря).
+#[derive(Debug, serde::Serialize, PartialEq)]
+pub struct DayCompletion {
+    pub id: String,
+    pub title: String,
+}
+
+// Выполненные задачи конкретного локального дня (для попапа/тултипа календаря).
 #[tauri::command]
-pub async fn get_completions_for_day(pool: State<'_, SqlitePool>, date: String) -> AppResult<Vec<String>> {
+pub async fn get_completions_for_day(pool: State<'_, SqlitePool>, date: String) -> AppResult<Vec<DayCompletion>> {
     get_completions_for_day_impl(pool.inner(), date).await
 }
 
-pub async fn get_completions_for_day_impl(pool: &SqlitePool, date: String) -> AppResult<Vec<String>> {
+pub async fn get_completions_for_day_impl(pool: &SqlitePool, date: String) -> AppResult<Vec<DayCompletion>> {
     let rows = sqlx::query(
-        "SELECT title FROM tasks
+        "SELECT id, title FROM tasks
          WHERE completed_at IS NOT NULL AND date(completed_at, 'localtime') = ?
          ORDER BY completed_at",
     )
     .bind(&date)
     .fetch_all(pool)
     .await?;
-    Ok(rows.iter().map(|r| r.get("title")).collect())
+    Ok(rows.iter().map(|r| DayCompletion { id: r.get("id"), title: r.get("title") }).collect())
 }
 
 #[derive(Debug, serde::Serialize, PartialEq)]
@@ -393,8 +399,10 @@ mod tests {
         }
 
         let key = Local::now().date_naive().format("%Y-%m-%d").to_string();
-        let titles = get_completions_for_day_impl(&pool, key).await.unwrap();
-        assert_eq!(titles, vec!["сегодняшняя"]);
+        let completions = get_completions_for_day_impl(&pool, key).await.unwrap();
+        assert_eq!(completions.len(), 1);
+        assert_eq!(completions[0].id, "d1");
+        assert_eq!(completions[0].title, "сегодняшняя");
         assert!(get_completions_for_day_impl(&pool, "1999-01-01".into()).await.unwrap().is_empty());
     }
 
