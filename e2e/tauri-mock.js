@@ -119,7 +119,7 @@
 
     // --- задачи ---
     get_tasks: () =>
-      [...db.tasks].sort((a, b) => a.sort_order - b.sort_order).map((t) => ({ ...t })),
+      [...db.tasks].filter((t) => !t.deleted_at).sort((a, b) => a.sort_order - b.sort_order).map((t) => ({ ...t })),
     reorder_tasks: ({ ids }) => {
       // Зеркало бэкенда: та же тройка значений раздаётся по новому порядку
       const byId = new Map(db.tasks.map((t) => [t.id, t]));
@@ -137,6 +137,7 @@
         completed_at: null,
         recurrence: "None",
         hidden: false,
+        deleted_at: null,
         project_id: null,
         scheduled_at: null,
         scheduled_mins: null,
@@ -167,7 +168,22 @@
       return { ...t };
     },
     delete_task: ({ id }) => {
+      const t = findTask(id);
+      if (!t) throw `Задача не найдена: ${id}`;
+      t.deleted_at = now();
+      persist();
+    },
+    get_deleted_tasks: () =>
+      db.tasks.filter((t) => t.deleted_at).sort((a, b) => new Date(b.deleted_at) - new Date(a.deleted_at)).map((t) => ({ ...t })),
+    restore_task: ({ id }) => {
+      const t = findTask(id);
+      if (!t) throw `Задача не найдена: ${id}`;
+      t.deleted_at = null;
+      persist();
+    },
+    purge_deleted_task: ({ id }) => {
       db.tasks = db.tasks.filter((t) => t.id !== id);
+      for (const n of db.notes) if (n.linked_task_id === id) n.linked_task_id = null;
       persist();
     },
     complete_task: ({ id }) => {
@@ -183,7 +199,7 @@
     },
     search_tasks: ({ query }) => {
       const q = query.toLowerCase();
-      return db.tasks.filter((t) => t.title.toLowerCase().includes(q));
+      return db.tasks.filter((t) => !t.deleted_at && t.title.toLowerCase().includes(q));
     },
 
     // --- проекты ---

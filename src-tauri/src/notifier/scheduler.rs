@@ -40,7 +40,7 @@ async fn check_deadlines(app: &tauri::AppHandle, pool: &SqlitePool, muted: bool)
 
     let rows = match sqlx::query(
         "SELECT id, title, deadline, notified_24h, notified_1h, notified_deadline
-         FROM tasks WHERE hidden = 0 AND deadline IS NOT NULL"
+         FROM tasks WHERE hidden = 0 AND deadline IS NOT NULL AND deleted_at IS NULL"
     )
     .fetch_all(pool)
     .await
@@ -94,7 +94,7 @@ pub async fn blocks_due(pool: &SqlitePool, now: chrono::DateTime<Utc>, grace_min
     let rows = match sqlx::query(
         "SELECT id, title, scheduled_at, COALESCE(scheduled_mins, 60) as mins
          FROM tasks
-         WHERE hidden = 0 AND notified_block = 0 AND scheduled_at IS NOT NULL",
+         WHERE hidden = 0 AND notified_block = 0 AND scheduled_at IS NOT NULL AND deleted_at IS NULL",
     )
     .fetch_all(pool)
     .await
@@ -219,7 +219,7 @@ async fn check_morning_digest(app: &tauri::AppHandle, pool: &SqlitePool, muted: 
         .unwrap_or(now - chrono::Duration::hours(12));
     let blocks = sqlx::query(
         "SELECT title, COALESCE(scheduled_mins, 60) AS mins, scheduled_at
-         FROM tasks WHERE hidden = 0 AND status != 'Done'
+         FROM tasks WHERE hidden = 0 AND status != 'Done' AND deleted_at IS NULL
            AND scheduled_at IS NOT NULL AND scheduled_at < ? AND scheduled_at >= ?"
     )
     .bind(tomorrow_utc.to_rfc3339())
@@ -230,7 +230,7 @@ async fn check_morning_digest(app: &tauri::AppHandle, pool: &SqlitePool, muted: 
     let due_row = sqlx::query(
         "SELECT COUNT(*) AS due,
                 SUM(CASE WHEN deadline < ? THEN 1 ELSE 0 END) AS overdue
-         FROM tasks WHERE hidden = 0 AND status != 'Done'
+         FROM tasks WHERE hidden = 0 AND status != 'Done' AND deleted_at IS NULL
            AND deadline IS NOT NULL AND deadline < ?"
     )
     .bind(now.to_rfc3339())

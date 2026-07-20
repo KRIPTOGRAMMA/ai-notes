@@ -71,7 +71,7 @@ pub async fn plan_day_context(pool: &SqlitePool, now: DateTime<Utc>) -> Result<P
     let today = now.with_timezone(&chrono::Local).date_naive();
     let rows = sqlx::query(
         "SELECT title, scheduled_at, COALESCE(scheduled_mins, 60) AS mins
-         FROM tasks WHERE hidden = 0 AND scheduled_at IS NOT NULL",
+         FROM tasks WHERE hidden = 0 AND scheduled_at IS NOT NULL AND deleted_at IS NULL",
     )
     .fetch_all(pool)
     .await
@@ -102,7 +102,7 @@ pub async fn plan_day_context(pool: &SqlitePool, now: DateTime<Utc>) -> Result<P
     // Кандидаты: бэклог без блока, важные и горящие — первыми
     let rows = sqlx::query(
         "SELECT id, title, priority, deadline FROM tasks
-         WHERE hidden = 0 AND scheduled_at IS NULL AND status IN ('Todo', 'InProgress')
+         WHERE hidden = 0 AND scheduled_at IS NULL AND status IN ('Todo', 'InProgress') AND deleted_at IS NULL
          ORDER BY CASE priority WHEN 'Critical' THEN 0 WHEN 'High' THEN 1 WHEN 'Medium' THEN 2 ELSE 3 END,
                   deadline IS NULL, deadline
          LIMIT ?",
@@ -233,7 +233,7 @@ pub async fn what_now_context(pool: &SqlitePool, now: DateTime<Utc>) -> Result<S
 
     let rows = sqlx::query(
         "SELECT title, scheduled_at, COALESCE(scheduled_mins, 60) AS mins
-         FROM tasks WHERE hidden = 0 AND scheduled_at IS NOT NULL",
+         FROM tasks WHERE hidden = 0 AND scheduled_at IS NOT NULL AND deleted_at IS NULL",
     )
     .fetch_all(pool)
     .await
@@ -260,7 +260,7 @@ pub async fn what_now_context(pool: &SqlitePool, now: DateTime<Utc>) -> Result<S
     }
 
     let overdue: Vec<String> = sqlx::query(
-        "SELECT title FROM tasks WHERE hidden = 0 AND completed_at IS NULL
+        "SELECT title FROM tasks WHERE hidden = 0 AND completed_at IS NULL AND deleted_at IS NULL
          AND deadline IS NOT NULL AND deadline <= ? ORDER BY deadline LIMIT 3",
     )
     .bind(now.to_rfc3339())
@@ -276,7 +276,7 @@ pub async fn what_now_context(pool: &SqlitePool, now: DateTime<Utc>) -> Result<S
 
     let top: Vec<String> = sqlx::query(
         "SELECT title, priority FROM tasks
-         WHERE hidden = 0 AND status IN ('Todo', 'InProgress')
+         WHERE hidden = 0 AND status IN ('Todo', 'InProgress') AND deleted_at IS NULL
          ORDER BY CASE priority WHEN 'Critical' THEN 0 WHEN 'High' THEN 1 WHEN 'Medium' THEN 2 ELSE 3 END,
                   deadline IS NULL, deadline
          LIMIT 3",

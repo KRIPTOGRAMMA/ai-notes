@@ -63,7 +63,7 @@ pub async fn missed_days(pool: &SqlitePool) -> std::collections::HashSet<chrono:
     let rows = sqlx::query(
         "SELECT DISTINCT date(deadline) as d FROM tasks
          WHERE deadline IS NOT NULL AND date(deadline) < date('now')
-           AND status NOT IN ('Done', 'Archived') AND hidden = 0",
+           AND status NOT IN ('Done', 'Archived') AND hidden = 0 AND deleted_at IS NULL",
     )
     .fetch_all(pool)
     .await
@@ -94,7 +94,7 @@ pub async fn overdue_count(pool: &SqlitePool, now: &str) -> i64 {
     sqlx::query(
         "SELECT COUNT(*) as c FROM tasks
          WHERE deadline IS NOT NULL AND deadline < ?
-           AND status NOT IN ('Done', 'Archived') AND hidden = 0",
+           AND status NOT IN ('Done', 'Archived') AND hidden = 0 AND deleted_at IS NULL",
     )
     .bind(now)
     .fetch_one(pool)

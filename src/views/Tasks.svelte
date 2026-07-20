@@ -17,6 +17,7 @@
   let goalHistoryLoading = $state<Record<string, boolean>>({});
 
   let showHistory = $state(false);
+  let showTrash = $state(false);
   let showCreateModal = $state(false);
   let editingTask: Task | null = $state(null);
 
@@ -725,6 +726,7 @@
     {/if}
     <button onclick={() => { showProjects = true; projectStore.load(); }}>Проекты</button>
     <button class:active-toggle={showHistory} onclick={() => showHistory = !showHistory}>История</button>
+    <button class:active-toggle={showTrash} onclick={() => { showTrash = !showTrash; if (showTrash) taskStore.loadDeleted(); }}>Корзина</button>
     <button class="btn-primary" onclick={() => showCreateModal = true}>+ Новая</button>
   </div>
 
@@ -853,6 +855,36 @@
               </div>
               <div class="task-actions">
                 <button class="btn-icon btn-danger" title="Удалить" onclick={() => taskStore.remove(task.id)}>✕</button>
+              </div>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    {/if}
+
+    {#if showTrash}
+      <div class="section-title" style="margin-top:20px;">Корзина</div>
+      {#if taskStore.deletedTasks.length === 0}
+        <div class="empty">Корзина пуста</div>
+      {:else}
+        <ul class="task-list card history">
+          {#each taskStore.deletedTasks as task (task.id)}
+            <li class="task-row">
+              <span class="task-check done">🗑</span>
+              <div class="task-main">
+                <div class="task-title done-title">{task.title}</div>
+                {#if task.description}
+                  <div class="task-desc">{task.description}</div>
+                {/if}
+              </div>
+              <div class="task-meta">
+                {#if task.subtasks.length > 0}
+                  <span class="chip">{doneCount(task)}/{task.subtasks.length}</span>
+                {/if}
+              </div>
+              <div class="task-actions">
+                <button class="btn-sm" title="Восстановить" onclick={() => taskStore.restore(task.id)}>Восстановить</button>
+                <button class="btn-icon btn-danger" title="Удалить навсегда" onclick={() => taskStore.purge(task.id)}>✕</button>
               </div>
             </li>
           {/each}

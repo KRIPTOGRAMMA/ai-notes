@@ -56,7 +56,7 @@ pub async fn status_payload(pool: &SqlitePool, now: DateTime<Utc>) -> Result<Sta
     // Тайм-блоки сегодняшнего локального дня (не Done, не скрытые)
     let rows = sqlx::query(
         "SELECT title, scheduled_at, COALESCE(scheduled_mins, 60) AS mins FROM tasks
-         WHERE hidden = 0 AND status != 'Done' AND scheduled_at IS NOT NULL",
+         WHERE hidden = 0 AND status != 'Done' AND scheduled_at IS NOT NULL AND deleted_at IS NULL",
     )
     .fetch_all(pool)
     .await?;
@@ -115,7 +115,7 @@ pub async fn status_payload(pool: &SqlitePool, now: DateTime<Utc>) -> Result<Sta
     let routine_next = routine_blocks.iter().find(|b| b.start > now);
 
     let in_progress: Option<String> = sqlx::query(
-        "SELECT title FROM tasks WHERE hidden = 0 AND status = 'InProgress'
+        "SELECT title FROM tasks WHERE hidden = 0 AND status = 'InProgress' AND deleted_at IS NULL
          ORDER BY updated_at DESC LIMIT 1",
     )
     .fetch_optional(pool)
@@ -134,7 +134,7 @@ pub async fn status_payload(pool: &SqlitePool, now: DateTime<Utc>) -> Result<Sta
         "SELECT COUNT(*) AS due,
                 SUM(CASE WHEN deadline < ? THEN 1 ELSE 0 END) AS overdue
          FROM tasks
-         WHERE hidden = 0 AND status != 'Done' AND deadline IS NOT NULL AND deadline < ?",
+         WHERE hidden = 0 AND status != 'Done' AND deadline IS NOT NULL AND deadline < ? AND deleted_at IS NULL",
     )
     .bind(now.to_rfc3339())
     .bind(tomorrow_utc.to_rfc3339())

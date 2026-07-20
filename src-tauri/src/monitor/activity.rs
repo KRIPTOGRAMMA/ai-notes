@@ -220,7 +220,7 @@ pub async fn nearest_task(pool: &SqlitePool, statuses: &[&str]) -> Option<String
     let placeholders = vec!["?"; statuses.len()].join(", ");
     let sql = format!(
         "SELECT title FROM tasks
-         WHERE status IN ({placeholders}) AND hidden = 0
+         WHERE status IN ({placeholders}) AND hidden = 0 AND deleted_at IS NULL
          ORDER BY deadline IS NULL, deadline ASC,
                   CASE priority
                       WHEN 'Critical' THEN 0

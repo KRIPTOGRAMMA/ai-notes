@@ -59,7 +59,7 @@ pub async fn get_tasks(
 }
 
 pub async fn get_tasks_impl(pool: &SqlitePool) -> Result<Vec<Task>, String> {
-    let rows = sqlx::query_as::<_, TaskRow>("SELECT * FROM tasks ORDER BY sort_order")
+    let rows = sqlx::query_as::<_, TaskRow>("SELECT * FROM tasks WHERE deleted_at IS NULL ORDER BY sort_order")
         .fetch_all(pool)
         .await
         .map_err(|e| e.to_string())?;
@@ -77,15 +77,66 @@ pub async fn delete_task(
   delete_task_impl(pool.inner(), id).await
 }
 
+// Мягкое удаление (v0.8.12, «Корзина»): задача остаётся в таблице (со
+// своими подзадачами и привязками заметок нетронутыми), просто перестаёт
+// показываться в активных/истории — фильтруется в get_tasks_impl.
+// Настоящее удаление — через purge_deleted_task.
 pub async fn delete_task_impl(pool: &SqlitePool, id: String) -> Result<(), String> {
-  // Чистим подзадачи вручную — FK в SQLite по умолчанию не enforced
+  sqlx::query("UPDATE tasks SET deleted_at = ? WHERE id = ?")
+    .bind(Utc::now().to_rfc3339())
+    .bind(id)
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+  Ok(())
+}
+
+#[tauri::command]
+pub async fn get_deleted_tasks(pool: State<'_, SqlitePool>) -> Result<Vec<Task>, String> {
+  get_deleted_tasks_impl(pool.inner()).await
+}
+
+pub async fn get_deleted_tasks_impl(pool: &SqlitePool) -> Result<Vec<Task>, String> {
+  let rows = sqlx::query_as::<_, TaskRow>("SELECT * FROM tasks WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC")
+    .fetch_all(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+  let mut tasks: Vec<Task> = rows.into_iter().map(|r| r.into_task()).collect();
+  crate::commands::subtasks::attach_subtasks(pool, &mut tasks).await?;
+  Ok(tasks)
+}
+
+#[tauri::command]
+pub async fn restore_task(pool: State<'_, SqlitePool>, id: String) -> Result<(), String> {
+  restore_task_impl(pool.inner(), id).await
+}
+
+pub async fn restore_task_impl(pool: &SqlitePool, id: String) -> Result<(), String> {
+  sqlx::query("UPDATE tasks SET deleted_at = NULL WHERE id = ?")
+    .bind(id)
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+  Ok(())
+}
+
+#[tauri::command]
+pub async fn purge_deleted_task(pool: State<'_, SqlitePool>, id: String) -> Result<(), String> {
+  purge_deleted_task_impl(pool.inner(), id).await
+}
+
+// Настоящее удаление строки из корзины — та же зачистка подзадач/привязок
+// заметок, что раньше делал delete_task_impl (жёсткое удаление).
+pub async fn purge_deleted_task_impl(pool: &SqlitePool, id: String) -> Result<(), String> {
   sqlx::query("DELETE FROM subtasks WHERE task_id = ?")
     .bind(&id)
     .execute(pool)
     .await
     .map_err(|e| e.to_string())?;
 
-  // Обнуляем привязку заметок к удаляемой задаче (FK не enforced)
   sqlx::query("UPDATE notes SET linked_task_id = NULL WHERE linked_task_id = ?")
     .bind(&id)
     .execute(pool)
@@ -337,6 +388,7 @@ pub async fn search_tasks_impl(pool: &SqlitePool, query: String) -> Result<Vec<T
      INNER JOIN tasks_fts ON tasks_fts.rowid = t.rowid
      WHERE tasks_fts MATCH ?
        AND t.hidden = 0
+       AND t.deleted_at IS NULL
      ORDER BY rank"
   )
   .bind(fts_query)
@@ -376,6 +428,7 @@ pub async fn search_tasks_snippet_impl(pool: &SqlitePool, query: String) -> Resu
      INNER JOIN tasks_fts ON tasks_fts.rowid = t.rowid
      WHERE tasks_fts MATCH ?
        AND t.hidden = 0
+       AND t.deleted_at IS NULL
      ORDER BY rank"
   )
   .bind(fts_query)
@@ -401,6 +454,7 @@ pub async fn search_tasks_snippet_impl(pool: &SqlitePool, query: String) -> Resu
       completed_at: row.get("completed_at"),
       recurrence: row.get("recurrence"),
       hidden: row.get("hidden"),
+      deleted_at: row.get("deleted_at"),
       project_id: row.get("project_id"),
       scheduled_at: row.get("scheduled_at"),
       scheduled_mins: row.get("scheduled_mins"),
@@ -596,11 +650,70 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn delete_removes_task() {
+    async fn delete_is_soft_hides_from_active_but_keeps_row() {
         let pool = test_pool().await;
         let t = create_task_impl(&pool, new_task("на удаление")).await.unwrap();
-        delete_task_impl(&pool, t.id).await.unwrap();
+        delete_task_impl(&pool, t.id.clone()).await.unwrap();
+
+        // Не в активных...
         assert!(get_tasks_impl(&pool).await.unwrap().is_empty());
+        // ...но строка жива и видна в корзине.
+        let trash = get_deleted_tasks_impl(&pool).await.unwrap();
+        assert_eq!(trash.len(), 1);
+        assert_eq!(trash[0].id, t.id);
+        assert!(trash[0].deleted_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn restore_returns_task_to_active_list() {
+        let pool = test_pool().await;
+        let t = create_task_impl(&pool, new_task("восстановить")).await.unwrap();
+        delete_task_impl(&pool, t.id.clone()).await.unwrap();
+        assert!(get_tasks_impl(&pool).await.unwrap().is_empty());
+
+        restore_task_impl(&pool, t.id.clone()).await.unwrap();
+
+        let active = get_tasks_impl(&pool).await.unwrap();
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].id, t.id);
+        assert_eq!(active[0].deleted_at, None);
+        assert!(get_deleted_tasks_impl(&pool).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn purge_actually_removes_row_and_unlinks_notes() {
+        use crate::commands::notes::{create_note_impl, get_notes_impl, CreateNote};
+        let pool = test_pool().await;
+        let t = create_task_impl(&pool, new_task("в корзину и навсегда")).await.unwrap();
+        create_note_impl(&pool, CreateNote {
+            title: "привязанная".into(),
+            content: "x".into(),
+            tags: vec![],
+            linked_task_id: Some(t.id.clone()),
+            project_id: None,
+        }).await.unwrap();
+
+        delete_task_impl(&pool, t.id.clone()).await.unwrap();
+        purge_deleted_task_impl(&pool, t.id.clone()).await.unwrap();
+
+        assert!(get_deleted_tasks_impl(&pool).await.unwrap().is_empty());
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tasks WHERE id = ?")
+            .bind(&t.id).fetch_one(&pool).await.unwrap();
+        assert_eq!(count, 0);
+
+        let notes = get_notes_impl(&pool).await.unwrap();
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].linked_task_id, None);
+    }
+
+    #[tokio::test]
+    async fn soft_deleted_task_excluded_from_search() {
+        let pool = test_pool().await;
+        let t = create_task_impl(&pool, new_task("искомая задача про хлеб")).await.unwrap();
+        assert_eq!(search_tasks_impl(&pool, "хлеб".into()).await.unwrap().len(), 1);
+
+        delete_task_impl(&pool, t.id).await.unwrap();
+        assert!(search_tasks_impl(&pool, "хлеб".into()).await.unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -639,7 +752,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn delete_task_unlinks_notes() {
+    async fn soft_delete_keeps_note_link_intact() {
+        // v0.8.12: мягкое удаление НЕ трогает привязки заметок/подзадач —
+        // это отличие от purge_deleted_task (см. purge_actually_removes_row_and_unlinks_notes).
         use crate::commands::notes::{create_note_impl, get_notes_impl, CreateNote};
         let pool = test_pool().await;
         let t = create_task_impl(&pool, new_task("с заметкой")).await.unwrap();
@@ -651,11 +766,10 @@ mod tests {
             project_id: None,
         }).await.unwrap();
 
-        delete_task_impl(&pool, t.id).await.unwrap();
+        delete_task_impl(&pool, t.id.clone()).await.unwrap();
 
-        // Заметка осталась, но привязка обнулена
         let notes = get_notes_impl(&pool).await.unwrap();
         assert_eq!(notes.len(), 1);
-        assert_eq!(notes[0].linked_task_id, None);
+        assert_eq!(notes[0].linked_task_id, Some(t.id));
     }
 }

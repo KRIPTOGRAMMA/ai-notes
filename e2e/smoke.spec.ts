@@ -97,9 +97,51 @@ test("задача: создание, редактирование, выполн
   await page.getByRole("button", { name: "История" }).click();
   await expect(page.getByText("переименованная задача")).toBeVisible();
 
-  // удаление из истории
+  // удаление из истории — мягкое (v0.8.12): уходит из истории, но не исчезает насовсем
   await page.getByTitle("Удалить").click();
   await expect(page.getByText("переименованная задача")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Корзина" }).click();
+  await expect(page.locator(".task-list.history", { hasText: "переименованная задача" })).toBeVisible();
+});
+
+test("корзина: мягкое удаление, восстановление возвращает в активные, «навсегда» удаляет", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+
+  // Скоуп на панель корзины (после заголовка «Корзина») — активные задачи
+  // тоже рендерятся как .task-row, простой .task-row-локатор был бы неоднозначен.
+  const trashPanel = page.locator(".section-title", { hasText: "Корзина" }).locator("xpath=following-sibling::*[1]");
+
+  await createTask(page, "черновик задачи");
+  await expect(page.locator(".task-main", { hasText: "черновик задачи" })).toBeVisible();
+
+  await page.locator(".task-row", { hasText: "черновик задачи" }).getByTitle("Удалить").click();
+  await expect(page.locator(".task-main", { hasText: "черновик задачи" })).toHaveCount(0);
+
+  // В корзине, не в истории
+  await page.getByRole("button", { name: "История" }).click();
+  await expect(page.getByText("черновик задачи")).toHaveCount(0);
+  await page.getByRole("button", { name: "История" }).click(); // закрыть
+
+  await page.getByRole("button", { name: "Корзина" }).click();
+  const trashRow = trashPanel.locator(".task-row", { hasText: "черновик задачи" });
+  await expect(trashRow).toBeVisible();
+
+  // Восстановить — снова в активных, из корзины пропадает
+  await trashRow.getByRole("button", { name: "Восстановить" }).click();
+  await expect(trashPanel.locator(".task-row", { hasText: "черновик задачи" })).toHaveCount(0);
+  await expect(page.locator(".task-main", { hasText: "черновик задачи" })).toBeVisible();
+
+  // Удалить снова, затем стереть навсегда
+  await page.locator(".task-row", { hasText: "черновик задачи" }).getByTitle("Удалить").click();
+  await expect(trashPanel.locator(".task-row", { hasText: "черновик задачи" })).toBeVisible();
+  await trashPanel.locator(".task-row", { hasText: "черновик задачи" }).getByTitle("Удалить навсегда").click();
+  await expect(trashPanel.locator(".task-row", { hasText: "черновик задачи" })).toHaveCount(0);
+
+  await page.reload();
+  await page.getByRole("button", { name: "Корзина" }).click();
+  await expect(page.getByText("Корзина пуста")).toBeVisible();
 });
 
 test("история: клик по строке открывает read-only детали с подзадачами и датой завершения", async ({ page }) => {

@@ -45,6 +45,7 @@ export interface Task {
   completed_at: string | null;
   recurrence: Recurrence;
   hidden: boolean;
+  deleted_at: string | null; // мягкое удаление (v0.8.12) — не null = в корзине
   project_id: string | null;
   scheduled_at: string | null; // тайм-блок: начало (RFC3339)
   scheduled_mins: number | null; // тайм-блок: длительность

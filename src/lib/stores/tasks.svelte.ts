@@ -2,6 +2,7 @@ import { api } from "../api/tauri";
 import type { Task, CreateTaskPayload, UpdateTaskPayload } from "../types";
 
 let tasks: Task[] = $state([]);
+let deletedTasks: Task[] = $state([]);
 let error: string | null = $state(null);
 // Сигнал «открыть эту задачу» — ставится из глобального поиска, Tasks.svelte
 // реагирует через $effect и открывает TaskModal.
@@ -19,6 +20,7 @@ export const taskStore = {
   get tasks() { return tasks; },
   get activeTasks() { return tasks.filter(t => !t.hidden); },
   get historyTasks() { return tasks.filter(t => t.hidden); },
+  get deletedTasks() { return deletedTasks; },
   get error() { return error; },
   clearError() { error = null; },
   get focusTaskId() { return focusTaskId; },
@@ -72,6 +74,36 @@ export const taskStore = {
     try {
       await api.deleteTask(id);
       await taskStore.load();
+      // Обновляем и корзину — если панель сейчас открыта, задача должна
+      // появиться в ней сразу, а не только при следующем ручном переключении.
+      await taskStore.loadDeleted();
+    } catch (e) {
+      error = describeError(e);
+    }
+  },
+
+  async loadDeleted() {
+    try {
+      deletedTasks = await api.getDeletedTasks();
+    } catch (e) {
+      error = describeError(e);
+    }
+  },
+
+  async restore(id: string) {
+    try {
+      await api.restoreTask(id);
+      await taskStore.loadDeleted();
+      await taskStore.load();
+    } catch (e) {
+      error = describeError(e);
+    }
+  },
+
+  async purge(id: string) {
+    try {
+      await api.purgeDeletedTask(id);
+      await taskStore.loadDeleted();
     } catch (e) {
       error = describeError(e);
     }

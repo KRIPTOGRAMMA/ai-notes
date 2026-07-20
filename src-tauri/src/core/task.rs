@@ -41,6 +41,10 @@ pub struct Task {
   pub completed_at: Option<DateTime<Utc>>,
   pub recurrence: Recurrence,
   pub hidden: bool,
+  // Мягкое удаление (v0.8.12): задача не показывается в активных/истории,
+  // но остаётся в таблице до restore или purge из «Корзины».
+  #[serde(default)]
+  pub deleted_at: Option<DateTime<Utc>>,
   #[serde(default)]
   pub project_id: Option<String>,
   // Тайм-блок: запланированное время работы (не дедлайн)
@@ -79,6 +83,7 @@ pub struct TaskRow {
     pub completed_at: Option<String>,
     pub recurrence: String,
     pub hidden: bool,
+    pub deleted_at: Option<String>,
     pub project_id: Option<String>,
     pub scheduled_at: Option<String>,
     pub scheduled_mins: Option<i64>,
@@ -209,6 +214,7 @@ impl CreateTask {
             completed_at: None,
             recurrence: self.recurrence.unwrap_or(Recurrence::None),
             hidden: false,
+            deleted_at: None,
             project_id: self.project_id.filter(|p| !p.is_empty()),
             scheduled_at: None,
             scheduled_mins: None,
@@ -248,6 +254,9 @@ impl TaskRow {
                 .map(|d| d.with_timezone(&Utc)),
             recurrence: Recurrence::from_db(&self.recurrence),
             hidden: self.hidden,
+            deleted_at: self.deleted_at
+                .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
+                .map(|d| d.with_timezone(&Utc)),
             project_id: self.project_id,
             scheduled_at: self.scheduled_at
                 .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
@@ -277,6 +286,7 @@ mod tests {
             completed_at: None,
             recurrence: "None".into(),
             hidden: false,
+            deleted_at: None,
             project_id: None,
             scheduled_at: None,
             scheduled_mins: None,
