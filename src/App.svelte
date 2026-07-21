@@ -7,10 +7,11 @@
   import { listen } from "@tauri-apps/api/event";
   import type { AppSettings } from "./lib/types";
   import { applyCachedTheme, applyTheme } from "./lib/theme";
-  import { parseKeybinds, comboFor, comboMatches, type Keybinds } from "./lib/keybinds";
+  import { parseKeybinds, comboFor, comboMatches, formatCombo, type Keybinds } from "./lib/keybinds";
   import Onboarding from "./views/Onboarding.svelte";
   import Tasks from "./views/Tasks.svelte";
   import Notes from "./views/Notes.svelte";
+  import NotesGraph from "./views/NotesGraph.svelte";
   import Settings from "./views/Settings.svelte";
   import Dashboard from "./views/Dashboard.svelte";
   import Calendar from "./views/Calendar.svelte";
@@ -19,7 +20,7 @@
   import TrackingWidget from "./lib/components/TrackingWidget.svelte";
   import "./app.css";
 
-  type View = "tasks" | "notes" | "dashboard" | "calendar" | "settings";
+  type View = "tasks" | "notes" | "graph" | "dashboard" | "calendar" | "settings";
   let activeView: View = $state("tasks");
   let showSearch = $state(false);
 
@@ -62,12 +63,13 @@
     }
   });
 
-  const NAV: { view: View; label: string; icon: string }[] = [
-    { view: "tasks",     label: "Задачи",    icon: "M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z M9 12l2 2 4-4" },
-    { view: "notes",     label: "Заметки",   icon: "M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z M14 3v6h6 M8 14h8 M8 17h5" },
-    { view: "dashboard", label: "Дашборд",   icon: "M6 20v-4 M12 20V10 M18 20V4" },
-    { view: "calendar",  label: "Календарь", icon: "M5 5h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z M16 3v4 M8 3v4 M3 11h18" },
-    { view: "settings",  label: "Настройки", icon: "M21 5h-7 M10 5H3 M21 12h-9 M8 12H3 M21 19h-5 M12 19H3 M14 3v4 M8 10v4 M16 17v4" },
+  const NAV: { view: View; label: string; icon: string; actionId: string }[] = [
+    { view: "tasks",     label: "Задачи",    actionId: "view_tasks",     icon: "M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z M9 12l2 2 4-4" },
+    { view: "notes",     label: "Заметки",   actionId: "view_notes",     icon: "M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z M14 3v6h6 M8 14h8 M8 17h5" },
+    { view: "graph",     label: "Граф",      actionId: "view_graph",     icon: "M6 6a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z M18 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z M6 20a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z M17 18a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z M7.5 5.5l6 1 M7 7l8.5 9 M6 16l9.5-9.7" },
+    { view: "dashboard", label: "Дашборд",   actionId: "view_dashboard", icon: "M6 20v-4 M12 20V10 M18 20V4" },
+    { view: "calendar",  label: "Календарь", actionId: "view_calendar", icon: "M5 5h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z M16 3v4 M8 3v4 M3 11h18" },
+    { view: "settings",  label: "Настройки", actionId: "view_settings", icon: "M21 5h-7 M10 5H3 M21 12h-9 M8 12H3 M21 19h-5 M12 19H3 M14 3v4 M8 10v4 M16 17v4" },
   ];
 
   // Командная палитра: «Сменить тему» — цикл light → dark → system, применяет
@@ -88,6 +90,7 @@
     { label: "Заметка дня", hint: "Открыть/создать дневную заметку", keywords: "заметка дня daily note today", run: () => { activeView = "notes"; noteStore.requestDaily(); } },
     { label: "Перейти: Задачи", keywords: "перейти задачи go tasks", run: () => { activeView = "tasks"; } },
     { label: "Перейти: Заметки", keywords: "перейти заметки go notes", run: () => { activeView = "notes"; } },
+    { label: "Перейти: Граф заметок", keywords: "перейти граф graph notes", run: () => { activeView = "graph"; } },
     { label: "Перейти: Дашборд", keywords: "перейти дашборд go dashboard", run: () => { activeView = "dashboard"; } },
     { label: "Перейти: Календарь", keywords: "перейти календарь go calendar", run: () => { activeView = "calendar"; } },
     { label: "Перейти: Настройки", keywords: "перейти настройки go settings", run: () => { activeView = "settings"; } },
@@ -130,7 +133,7 @@
     } else {
       const viewActions: [string, View][] = [
         ["view_tasks", "tasks"], ["view_notes", "notes"], ["view_dashboard", "dashboard"],
-        ["view_calendar", "calendar"], ["view_settings", "settings"],
+        ["view_calendar", "calendar"], ["view_settings", "settings"], ["view_graph", "graph"],
       ];
       for (const [actionId, view] of viewActions) {
         if (comboMatches(comboFor(keybinds, actionId), e)) {
@@ -164,12 +167,12 @@
     <div class="brand">AI Notes</div>
 
     <nav class="nav">
-      {#each NAV as item, i (item.view)}
+      {#each NAV as item (item.view)}
         <button
           class="nav-item"
           class:active={activeView === item.view}
           onclick={() => activeView = item.view}
-          title="{item.label} (Ctrl+{i + 1})"
+          title="{item.label} ({formatCombo(comboFor(keybinds, item.actionId))})"
         >
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none"
             stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -213,6 +216,8 @@
       <Tasks />
     {:else if activeView === "notes"}
       <Notes />
+    {:else if activeView === "graph"}
+      <NotesGraph onOpenNote={(id) => { activeView = "notes"; noteStore.requestFocus(id); }} />
     {:else if activeView === "settings"}
       <Settings />
     {:else if activeView === "dashboard"}

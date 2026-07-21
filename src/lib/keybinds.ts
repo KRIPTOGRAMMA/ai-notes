@@ -18,6 +18,7 @@ export const KEYBIND_ACTIONS: KeybindAction[] = [
   { id: "view_dashboard", label: "Перейти: Дашборд", defaultCombo: "Ctrl+Digit3" },
   { id: "view_calendar", label: "Перейти: Календарь", defaultCombo: "Ctrl+Digit4" },
   { id: "view_settings", label: "Перейти: Настройки", defaultCombo: "Ctrl+Digit5" },
+  { id: "view_graph", label: "Перейти: Граф заметок", defaultCombo: "Ctrl+Digit6" },
 ];
 
 export type Keybinds = Record<string, string>;
