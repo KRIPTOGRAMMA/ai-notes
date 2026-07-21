@@ -25,6 +25,12 @@
     pin:      "M9 4h6 M10 4v5.5L6 14v2h5v6l1 2 1-2v-6h5v-2l-4-4.5V4",
     expand:   "M8 3H5a2 2 0 0 0-2 2v3 M16 3h3a2 2 0 0 1 2 2v3 M21 16v3a2 2 0 0 1-2 2h-3 M3 16v3a2 2 0 0 0 2 2h3",
     collapse: "M9 3v3a2 2 0 0 1-2 2H4 M15 3v3a2 2 0 0 0 2 2h3 M15 21v-3a2 2 0 0 1 2-2h3 M9 21v-3a2 2 0 0 0-2-2H4",
+    bold:     "M7 4h6.5a3.5 3.5 0 0 1 0 7H7Z M7 11h7a3.5 3.5 0 0 1 0 7H7Z",
+    italic:   "M11 4h6 M7 20h6 M14 4 10 20",
+    heading:  "M6 4v16 M18 4v16 M6 12h12",
+    checklist:"M9 6h11 M9 12h11 M9 18h11 M4 6l1.5 1.5L7.5 5 M4 12l1.5 1.5L7.5 11 M4 18l1.5 1.5L7.5 16",
+    wikilink: "M7 8H6a4 4 0 0 0 0 8h1 M17 8h1a4 4 0 0 1 0 8h-1 M9 12h6",
+    code:     "M9 6 3 12l6 6 M15 6l6 6-6 6",
   };
 
   let { name, size = 14 }: { name: string; size?: number } = $props();

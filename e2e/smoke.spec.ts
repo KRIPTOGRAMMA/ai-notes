@@ -1108,6 +1108,59 @@ test("zen-режим редактора: кнопка и хоткей раскр
   await expect(page.locator(".editor-pane.zen")).toHaveCount(0);
 });
 
+test("панель форматирования: кнопки оборачивают выделение markdown-маркерами, Ctrl+B работает как хоткей", async ({ page }) => {
+  await seedDb(page, {
+    tasks: [], notes: [], settings: { onboarding_complete: true },
+  });
+  await withMock(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.getByRole("button", { name: "+ Новая заметка" }).click();
+
+  const editor = noteEditor(page);
+  await editor.click();
+  await page.keyboard.insertText("hello");
+  await page.keyboard.press("ControlOrMeta+a");
+  await page.getByTitle("Жирный (Ctrl+B)").click();
+  await page.keyboard.press("End");
+  await page.keyboard.insertText("\n");
+
+  await page.getByTitle("Чек-лист").click();
+  await page.keyboard.insertText("пункт списка");
+  await page.keyboard.press("End");
+  await page.keyboard.insertText("\n");
+
+  await page.getByTitle(/Вики-ссылка/).click();
+  await page.keyboard.insertText("другая заметка");
+  await page.keyboard.press("End");
+  await page.keyboard.insertText("\n");
+
+  // Курсор сейчас на новой (последней) строке — предыдущие строки больше не
+  // "сырые", декорации на них должны быть отрендерены.
+  await expect(page.locator(".cm-strong", { hasText: "hello" })).toBeVisible();
+  await expect(page.locator(".cm-task-checkbox")).toHaveCount(1);
+  await expect(page.locator(".cm-wikilink", { hasText: "другая заметка" })).toBeVisible();
+
+  // Ctrl+B как хоткей: выделяем "hello" (уже **hello**) заново и снимаем жирный.
+  await page.keyboard.press("ControlOrMeta+Home");
+  await page.keyboard.press("Shift+End");
+  await page.keyboard.press("ControlOrMeta+b");
+  await page.keyboard.press("ControlOrMeta+Home"); // курсор больше не на этой строке — декорация должна вернуться
+
+  // Сохранённый markdown — источник истины (декорации могут визуально
+  // прятать сырые маркеры, textContent() DOM тут ненадёжен).
+  await page.waitForTimeout(1000);
+  const saved = await page.evaluate(() => {
+    const db = JSON.parse(localStorage.getItem("__mock_db") || "{}");
+    return db.notes?.[0]?.content ?? "";
+  });
+  expect(saved).toContain("hello"); // жирный снят Ctrl+B, markers should be gone
+  expect(saved).not.toContain("**hello**");
+  expect(saved).toContain("- [ ] пункт списка");
+  expect(saved).toContain("[[другая заметка]]");
+});
+
 test("экспорт/импорт заметок в .md: roundtrip через папку", async ({ page }) => {
   await seedDb(page, {
     tasks: [],

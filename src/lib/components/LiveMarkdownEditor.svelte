@@ -10,7 +10,7 @@
   // (а не paste/insertText) в e2e триггерит ту же логику и дублирует маркер —
   // учтено в e2e-хелпере fillNoteEditor (использует insertText).
   import { onMount, onDestroy } from "svelte";
-  import { EditorState, type Extension } from "@codemirror/state";
+  import { EditorState, EditorSelection, type Extension } from "@codemirror/state";
   import {
     EditorView, Decoration, type DecorationSet, WidgetType, keymap, ViewPlugin, type ViewUpdate,
     drawSelection, dropCursor, placeholder as cmPlaceholder,
@@ -517,6 +517,9 @@
           key: "Mod-Enter",
           run: () => { onSubmitShortcut?.(); return true; },
         },
+        { key: "Mod-b", run: () => { formatBold(); return true; } },
+        { key: "Mod-i", run: () => { formatItalic(); return true; } },
+        { key: "Mod-Shift-k", run: () => { formatWikiLink(); return true; } },
         ...historyKeymap,
         ...completionKeymap,
         ...defaultKeymap,
@@ -562,6 +565,68 @@
   export function focus() {
     view?.focus();
   }
+
+  // Форматирование из внешней панели инструментов (v0.9.05): оборачивает
+  // выделение маркерами (жирный/курсив/код) или переключает префикс строки
+  // (заголовок/чек-лист). Работает и без выделения — вставляет пустую пару
+  // маркеров с курсором внутри (жирный/курсив/код) либо просто добавляет
+  // префикс на текущей строке (заголовок/чек-лист/вики-ссылка).
+  // Повторное нажатие на уже обёрнутом тексте снимает обёртку — иначе Ctrl+B
+  // на **жирном** тексте продолжал бы плодить лишние ** снаружи (стандартное
+  // поведение toggle-форматирования в любом текстовом редакторе).
+  function wrapSelection(before: string, after: string) {
+    if (!view) return;
+    const { state } = view;
+    const changes = state.changeByRange(range => {
+      const selected = state.sliceDoc(range.from, range.to);
+      const alreadyWrapped = !range.empty
+        && selected.startsWith(before) && selected.endsWith(after)
+        && selected.length >= before.length + after.length;
+      if (alreadyWrapped) {
+        const inner = selected.slice(before.length, selected.length - after.length);
+        return {
+          changes: [{ from: range.from, to: range.to, insert: inner }],
+          range: EditorSelection.range(range.from, range.from + inner.length),
+        };
+      }
+      const insertBefore = { from: range.from, insert: before };
+      const insertAfter = { from: range.to, insert: after };
+      return {
+        changes: [insertBefore, insertAfter],
+        range: range.empty
+          ? EditorSelection.cursor(range.from + before.length)
+          : EditorSelection.range(range.from + before.length, range.to + before.length),
+      };
+    });
+    view.dispatch(state.update(changes, { scrollIntoView: true }));
+    view.focus();
+  }
+
+  function toggleLinePrefix(prefix: string) {
+    if (!view) return;
+    const { state } = view;
+    const changes = state.changeByRange(range => {
+      const line = state.doc.lineAt(range.from);
+      const has = line.text.startsWith(prefix);
+      const change = has
+        ? { from: line.from, to: line.from + prefix.length, insert: "" }
+        : { from: line.from, insert: prefix };
+      const delta = has ? -prefix.length : prefix.length;
+      return {
+        changes: [change],
+        range: EditorSelection.range(range.from + delta, range.to + delta),
+      };
+    });
+    view.dispatch(state.update(changes, { scrollIntoView: true }));
+    view.focus();
+  }
+
+  export function formatBold() { wrapSelection("**", "**"); }
+  export function formatItalic() { wrapSelection("*", "*"); }
+  export function formatCode() { wrapSelection("`", "`"); }
+  export function formatHeading() { toggleLinePrefix("## "); }
+  export function formatChecklist() { toggleLinePrefix("- [ ] "); }
+  export function formatWikiLink() { wrapSelection("[[", "]]"); }
 </script>
 
 <div class="cm-host" bind:this={hostEl}></div>

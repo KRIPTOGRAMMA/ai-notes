@@ -8,7 +8,8 @@
   import { extractWikiLinks } from "../lib/markdown";
   import Icon from "../lib/components/Icon.svelte";
   import type { Note, NoteRevision } from "../lib/types";
-  type EditorComponent = typeof import("../lib/components/LiveMarkdownEditor.svelte").default;
+  type EditorExports = { focus: () => void; formatBold: () => void; formatItalic: () => void; formatCode: () => void; formatHeading: () => void; formatChecklist: () => void; formatWikiLink: () => void };
+  let editorRef: EditorExports | undefined = $state();
 
   let selectedId: string | null = $state(null);
   let dailyKey = $state(0); // отслеживаем dailyRequested
@@ -472,10 +473,28 @@
         </div>
       {/if}
 
+      <!-- Панель форматирования (v0.9.05): кнопки оборачивают выделение
+           markdown-маркерами через editorRef, тот же путь, что и хоткеи
+           (Ctrl+B/Ctrl+I/Ctrl+Shift+K), зарегистрированные внутри CM6-кеймапа
+           редактора — единая логика, а не дублирование в двух местах.
+           Скрыта в zen-режиме вместе с остальным «хромом» — хоткеи там
+           продолжают работать, панель не нужна. -->
+      {#if !zenMode}
+        <div class="format-toolbar">
+          <button class="btn-icon" title="Жирный (Ctrl+B)" onclick={() => editorRef?.formatBold()}><Icon name="bold" /></button>
+          <button class="btn-icon" title="Курсив (Ctrl+I)" onclick={() => editorRef?.formatItalic()}><Icon name="italic" /></button>
+          <button class="btn-icon" title="Заголовок" onclick={() => editorRef?.formatHeading()}><Icon name="heading" /></button>
+          <button class="btn-icon" title="Чек-лист" onclick={() => editorRef?.formatChecklist()}><Icon name="checklist" /></button>
+          <button class="btn-icon" title="Вики-ссылка (Ctrl+Shift+K)" onclick={() => editorRef?.formatWikiLink()}><Icon name="wikilink" /></button>
+          <button class="btn-icon" title="Код" onclick={() => editorRef?.formatCode()}><Icon name="code" /></button>
+        </div>
+      {/if}
+
       <div class="editor-body">
         {#key selectedId}
           {#await import("../lib/components/LiveMarkdownEditor.svelte") then { default: Editor }}
             <Editor
+              bind:this={editorRef}
               bind:value={editContent}
               placeholder="Начните писать... (Markdown, чек-листы: - [ ] пункт, ссылки: [[заметка]])"
               knownTitles={otherTitles}
@@ -731,6 +750,14 @@
     background: color-mix(in srgb, var(--accent) 15%, transparent);
     color: var(--accent);
     white-space: nowrap;
+  }
+
+  .format-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 4px 10px;
+    border-bottom: 1px solid var(--border);
   }
 
   .editor-meta {
