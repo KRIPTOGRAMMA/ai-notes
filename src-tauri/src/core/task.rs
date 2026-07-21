@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Datelike, Utc};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -135,6 +135,10 @@ pub enum Recurrence {
     Daily,
     Weekly,
     Custom(u32, RecurrenceUnit),
+    // Битовая маска дней недели: бит 0 = Пн ... бит 6 = Вс (тот же паттерн,
+    // что days_mask у routines). Не подходит для to_duration — следующая
+    // дата не фиксированный интервал, см. next_occurrence.
+    Weekdays(u8),
 }
 
 impl Recurrence {
@@ -163,6 +167,14 @@ impl Recurrence {
                     Recurrence::None
                 }
             }
+            _ if s.starts_with("Weekdays") => {
+                // Формат: "Weekdays(37)"
+                let inner = s.trim_start_matches("Weekdays(").trim_end_matches(')');
+                match inner.trim().parse::<u8>() {
+                    Ok(mask) if mask != 0 => Recurrence::Weekdays(mask),
+                    _ => Recurrence::None,
+                }
+            }
             _ => Recurrence::None,
         }
     }
@@ -175,6 +187,7 @@ impl Recurrence {
             Recurrence::Daily          => "Daily".into(),
             Recurrence::Weekly         => "Weekly".into(),
             Recurrence::Custom(n, u)   => format!("Custom({},{:?})", n, u),
+            Recurrence::Weekdays(mask) => format!("Weekdays({})", mask),
         }
     }
 
@@ -194,7 +207,29 @@ impl Recurrence {
                     RecurrenceUnit::Weeks   => chrono::Duration::weeks(n),
                 })
             }
+            Recurrence::Weekdays(_)       => None, // не фиксированный интервал, см. next_occurrence
         }
+    }
+
+    // Следующая дата выполнения для recurring-задачи, единая точка для всех
+    // вариантов (включая Weekdays, для которого to_duration неприменим).
+    // None — не recurring (то же условие, что и у to_duration == None).
+    pub fn next_occurrence(&self, from: chrono::DateTime<chrono::Utc>) -> Option<chrono::DateTime<chrono::Utc>> {
+        if let Recurrence::Weekdays(mask) = self {
+            if *mask == 0 { return None; }
+            // Ищем ближайший будущий день недели из маски: от +1 дня (никогда
+            // не "сегодня же" — иначе завершение задачи в её же день недели
+            // не двигало бы дедлайн вперёд) до +7 дней (маска непуста -> найдётся).
+            for delta in 1..=7 {
+                let candidate = from + chrono::Duration::days(delta);
+                let weekday_bit = 1u8 << candidate.weekday().num_days_from_monday();
+                if mask & weekday_bit != 0 {
+                    return Some(candidate);
+                }
+            }
+            return None; // недостижимо при mask != 0, но без паники на всякий случай
+        }
+        self.to_duration().map(|d| from + d)
     }
 }
 
@@ -307,6 +342,8 @@ mod tests {
             Recurrence::Custom(90, RecurrenceUnit::Minutes),
             Recurrence::Custom(2, RecurrenceUnit::Weeks),
             Recurrence::Custom(10, RecurrenceUnit::Days),
+            Recurrence::Weekdays(0b0000101), // Пн, Ср
+            Recurrence::Weekdays(0b1111111), // все дни
         ];
         for rec in cases {
             assert_eq!(Recurrence::from_db(&rec.to_db()), rec);
@@ -318,6 +355,8 @@ mod tests {
         assert_eq!(Recurrence::from_db("abrakadabra"), Recurrence::None);
         assert_eq!(Recurrence::from_db(""), Recurrence::None);
         assert_eq!(Recurrence::from_db("Custom(broken"), Recurrence::None);
+        assert_eq!(Recurrence::from_db("Weekdays(0)"), Recurrence::None); // пустая маска — не recurring
+        assert_eq!(Recurrence::from_db("Weekdays(broken"), Recurrence::None);
     }
 
     #[test]
@@ -328,6 +367,61 @@ mod tests {
             Recurrence::Custom(90, RecurrenceUnit::Minutes).to_duration(),
             Some(chrono::Duration::minutes(90))
         );
+        // Weekdays — не фиксированный интервал, to_duration не подходит (см. next_occurrence)
+        assert_eq!(Recurrence::Weekdays(0b1111111).to_duration(), None);
+    }
+
+    // --- next_occurrence: v0.8.13, повторы по дням недели ---
+
+    fn utc_ymd(y: i32, m: u32, d: u32) -> DateTime<Utc> {
+        use chrono::TimeZone;
+        Utc.with_ymd_and_hms(y, m, d, 12, 0, 0).unwrap()
+    }
+
+    #[test]
+    fn weekdays_none_mask_is_not_recurring() {
+        assert_eq!(Recurrence::Weekdays(0).next_occurrence(utc_ymd(2026, 7, 20)), None);
+    }
+
+    #[test]
+    fn weekdays_next_occurrence_never_same_day_even_if_today_matches() {
+        // 2026-07-20 — понедельник (бит 0). Маска включает Пн — но следующий
+        // раз должен быть через 7 дней, а не "сегодня же".
+        let monday = utc_ymd(2026, 7, 20);
+        let mask_monday = 0b0000001;
+        assert_eq!(
+            Recurrence::Weekdays(mask_monday).next_occurrence(monday),
+            Some(monday + chrono::Duration::days(7))
+        );
+    }
+
+    #[test]
+    fn weekdays_single_day_mask_finds_nearest_within_week() {
+        // Маска только на пятницу (бит 4); сегодня — понедельник -> через 4 дня.
+        let monday = utc_ymd(2026, 7, 20);
+        let mask_friday = 1u8 << 4;
+        assert_eq!(
+            Recurrence::Weekdays(mask_friday).next_occurrence(monday),
+            Some(monday + chrono::Duration::days(4))
+        );
+    }
+
+    #[test]
+    fn weekdays_mask_spanning_weekend_picks_nearest_bit() {
+        // Маска Сб+Вс (биты 5,6); сегодня — пятница -> завтра (суббота).
+        let friday = utc_ymd(2026, 7, 24);
+        let mask_weekend = (1u8 << 5) | (1u8 << 6);
+        assert_eq!(
+            Recurrence::Weekdays(mask_weekend).next_occurrence(friday),
+            Some(friday + chrono::Duration::days(1))
+        );
+    }
+
+    #[test]
+    fn non_weekdays_next_occurrence_matches_to_duration() {
+        let now = utc_ymd(2026, 7, 20);
+        assert_eq!(Recurrence::None.next_occurrence(now), None);
+        assert_eq!(Recurrence::Daily.next_occurrence(now), Some(now + chrono::Duration::days(1)));
     }
 
     #[test]

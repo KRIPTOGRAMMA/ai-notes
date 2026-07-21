@@ -47,7 +47,7 @@
 
   let deadline = $state(task?.deadline ? toLocalInput(task.deadline) : (initialDeadline ?? ""));
 
-  type RecurrenceKey = "None" | "Hourly" | "Daily" | "Weekly" | "Custom";
+  type RecurrenceKey = "None" | "Hourly" | "Daily" | "Weekly" | "Custom" | "Weekdays";
 
   function initRecurrenceKey(): RecurrenceKey {
     const r = task?.recurrence;
@@ -55,6 +55,7 @@
     if (r === "Hourly") return "Hourly";
     if (r === "Daily") return "Daily";
     if (r === "Weekly") return "Weekly";
+    if (typeof r === "object" && r !== null && "Weekdays" in r) return "Weekdays";
     return "Custom";
   }
 
@@ -72,6 +73,21 @@
 
   let customN = $state(initCustomN());
   let customUnit = $state<RecurrenceUnit>(initCustomUnit());
+
+  // Дни недели для Recurrence::Weekdays — тот же паттерн, что days_mask у
+  // рутин (RoutinesModal.svelte): бит 0 = Пн ... бит 6 = Вс.
+  const WEEKDAY_LABELS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+  function initWeekdays(): boolean[] {
+    const r = task?.recurrence;
+    if (typeof r === "object" && r !== null && "Weekdays" in r) {
+      return WEEKDAY_LABELS.map((_, i) => (r.Weekdays & (1 << i)) !== 0);
+    }
+    return WEEKDAY_LABELS.map(() => false);
+  }
+  let weekdays = $state<boolean[]>(initWeekdays());
+  function weekdaysMask(): number {
+    return weekdays.reduce((acc, on, i) => acc | (on ? 1 << i : 0), 0);
+  }
 
   let saving = $state(false);
   let error = $state("");
@@ -169,11 +185,15 @@
 
   function buildRecurrence(): Recurrence {
     switch (recurrenceKey) {
-      case "Hourly": return "Hourly";
-      case "Daily":  return "Daily";
-      case "Weekly": return "Weekly";
-      case "Custom": return { Custom: [customN, customUnit] };
-      default:       return "None";
+      case "Hourly":   return "Hourly";
+      case "Daily":    return "Daily";
+      case "Weekly":   return "Weekly";
+      case "Custom":   return { Custom: [customN, customUnit] };
+      case "Weekdays": {
+        const mask = weekdaysMask();
+        return mask === 0 ? "None" : { Weekdays: mask };
+      }
+      default:         return "None";
     }
   }
 
@@ -377,6 +397,7 @@
           <option value="Daily">Каждый день</option>
           <option value="Weekly">Каждую неделю</option>
           <option value="Custom">Свой интервал</option>
+          <option value="Weekdays">По дням недели</option>
         </select>
       </label>
     </div>
@@ -391,6 +412,17 @@
           <option value="Days">дней</option>
           <option value="Weeks">недель</option>
         </select>
+      </div>
+    {/if}
+
+    {#if recurrenceKey === "Weekdays"}
+      <div class="day-picker">
+        {#each WEEKDAY_LABELS as d, i}
+          <label class="day-chip">
+            <input type="checkbox" bind:checked={weekdays[i]} />
+            <span>{d}</span>
+          </label>
+        {/each}
       </div>
     {/if}
 
@@ -459,6 +491,22 @@
     gap: 8px;
     align-items: center;
     font-size: 13px;
+  }
+
+  .day-picker {
+    display: flex;
+    gap: 4px;
+  }
+
+  .day-chip {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    font-size: 12px;
+  }
+
+  .day-chip input {
+    margin: 0;
   }
 
   /* Инлайн-чеклист подзадач (v0.8.3): строки без рамок, как в блокнотах */

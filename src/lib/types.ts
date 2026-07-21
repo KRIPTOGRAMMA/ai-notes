@@ -21,7 +21,8 @@ export type Recurrence =
   | "Hourly"
   | "Daily"
   | "Weekly"
-  | { Custom: [number, RecurrenceUnit] };
+  | { Custom: [number, RecurrenceUnit] }
+  | { Weekdays: number }; // битовая маска: бит 0 = Пн ... бит 6 = Вс
 
 export interface Subtask {
   id: string;

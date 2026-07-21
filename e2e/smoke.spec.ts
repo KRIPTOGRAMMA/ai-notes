@@ -105,6 +105,38 @@ test("задача: создание, редактирование, выполн
   await expect(page.locator(".task-list.history", { hasText: "переименованная задача" })).toBeVisible();
 });
 
+test("повтор по дням недели: выбор в модалке сохраняется и отображается индикатором", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "+ Новая", exact: true }).click();
+  const modal = page.locator(".modal");
+  await modal.getByPlaceholder("Название задачи").fill("зарядка");
+  await modal.getByLabel("Повтор").selectOption("Weekdays");
+
+  const dayPicker = modal.locator(".day-picker");
+  await expect(dayPicker).toBeVisible();
+  await dayPicker.locator(".day-chip", { hasText: "Пн" }).locator("input").check();
+  await dayPicker.locator(".day-chip", { hasText: "Ср" }).locator("input").check();
+  await dayPicker.locator(".day-chip", { hasText: "Пт" }).locator("input").check();
+
+  await modal.getByRole("button", { name: "Создать" }).click();
+
+  const row = page.locator(".task-row", { hasText: "зарядка" });
+  await expect(row.locator(".muted[title*='Пн']")).toHaveCount(1);
+
+  // Редактирование — чекбоксы восстанавливаются из сохранённой маски
+  await row.locator(".task-main").click();
+  const editModal = page.locator(".modal");
+  await expect(editModal.getByLabel("Повтор")).toHaveValue("Weekdays");
+  const editPicker = editModal.locator(".day-picker");
+  await expect(editPicker.locator(".day-chip", { hasText: "Пн" }).locator("input")).toBeChecked();
+  await expect(editPicker.locator(".day-chip", { hasText: "Ср" }).locator("input")).toBeChecked();
+  await expect(editPicker.locator(".day-chip", { hasText: "Пт" }).locator("input")).toBeChecked();
+  await expect(editPicker.locator(".day-chip", { hasText: "Вт" }).locator("input")).not.toBeChecked();
+  await editModal.getByRole("button", { name: "Отмена" }).click();
+});
+
 test("корзина: мягкое удаление, восстановление возвращает в активные, «навсегда» удаляет", async ({ page }) => {
   await withMock(page);
   await page.goto("/");

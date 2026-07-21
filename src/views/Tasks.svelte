@@ -384,6 +384,12 @@
         unit === "Days"    ? "дн." : "нед.";
       return `раз в ${n} ${unitLabel}`;
     }
+    if (typeof r === "object" && r !== null && "Weekdays" in r) {
+      const labels = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+      const mask = (r as any).Weekdays as number;
+      const days = labels.filter((_, i) => mask & (1 << i));
+      return `по ${days.join(", ")}`;
+    }
     return null;
   }
 

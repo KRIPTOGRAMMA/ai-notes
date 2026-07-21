@@ -281,16 +281,20 @@ pub async fn complete_task_impl(pool: &SqlitePool, id: String) -> Result<Task, S
   // больше не уведомит об этой задаче (баг: флаги раньше не сбрасывались).
   let mut reset_notifications = false;
 
-  match task.recurrence.to_duration() {
+  match task.recurrence.next_occurrence(now) {
     None => {
       task.status = TaskStatus::Done;
       task.hidden = true;
       task.completed_at = Some(now);
     }
-    Some(duration) => {
-      task.deadline = Some(now + duration);
+    Some(next_deadline) => {
+      // Сдвиг scheduled_at на ту же дельту, что и дедлайн — для Weekdays это
+      // не фиксированная Duration (интервал зависит от текущего дня недели),
+      // поэтому считаем её явно как next_deadline - now, а не через to_duration.
+      let delta = next_deadline - now;
+      task.deadline = Some(next_deadline);
       if let Some(scheduled) = &task.scheduled_at {
-        task.scheduled_at = Some(*scheduled + duration);
+        task.scheduled_at = Some(*scheduled + delta);
       }
       reset_notifications = true;
     }
@@ -608,6 +612,28 @@ mod tests {
             "SELECT notified_block FROM tasks WHERE id = ?")
             .bind(&t.id).fetch_one(&pool).await.unwrap();
         assert!(!block_flag, "notified_block should be reset");
+    }
+
+    #[tokio::test]
+    async fn complete_weekdays_recurring_moves_to_next_matching_day_not_same_day() {
+        use chrono::Datelike;
+        let pool = test_pool().await;
+        let mut ct = new_task("по будням");
+        // Маска — только сегодняшний день недели: гарантирует, что naive
+        // "now + что-то фиксированное" сломался бы, показывая сегодняшнюю же дату.
+        let today_bit = 1u8 << Utc::now().weekday().num_days_from_monday();
+        ct.recurrence = Some(Recurrence::Weekdays(today_bit));
+        let t = create_task_impl(&pool, ct).await.unwrap();
+
+        let before = Utc::now();
+        let done = complete_task_impl(&pool, t.id.clone()).await.unwrap();
+
+        assert_eq!(done.status, TaskStatus::Todo); // не закрыта — сдвинута
+        assert!(!done.hidden);
+        let dl = done.deadline.unwrap();
+        // Следующее совпадение той же маски — ровно через 7 дней, не "сегодня же"
+        assert!((dl - (before + chrono::Duration::days(7))).num_seconds().abs() < 5,
+            "expected ~+7 days, got delta {:?}", dl - before);
     }
 
     #[tokio::test]
