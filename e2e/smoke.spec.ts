@@ -1161,6 +1161,76 @@ test("панель форматирования: кнопки оборачива
   expect(saved).toContain("[[другая заметка]]");
 });
 
+test("таблицы в заметках: рендерится <table>, ячейка редактируется кликом, +строка/+столбец, курсор внутри блока показывает сырой markdown", async ({ page }) => {
+  await seedDb(page, {
+    tasks: [],
+    notes: [{
+      id: "n1", title: "заметка с таблицей",
+      content: "текст до\n\n| Имя | Возраст |\n| --- | ---: |\n| Аня | 30 |\n| Боб | 7 |\n\nтекст после",
+      tags: [], linked_task_id: null, project_id: null,
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    }],
+    settings: { onboarding_complete: true },
+  });
+  await withMock(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.locator(".note-item", { hasText: "заметка с таблицей" }).click();
+
+  await expect(page.locator(".cm-table")).toBeVisible();
+  await expect(page.locator(".cm-table th")).toHaveCount(2);
+  await expect(page.locator(".cm-table td")).toHaveCount(4);
+
+  // Редактирование ячейки кликом: выделяем весь текст внутри именно этой
+  // ячейки (не всего документа — это была реальная регрессия при разработке,
+  // contenteditable="false" на обёртке виджета не создаёт отдельный edit-host
+  // для Selection API в Chromium) и заменяем.
+  await page.locator(".cm-table td", { hasText: "Аня" }).click();
+  await page.keyboard.press("ControlOrMeta+a");
+  await page.keyboard.insertText("Оля");
+  await page.keyboard.press("Tab"); // коммитит правку и переходит в соседнюю ячейку
+
+  await page.getByRole("button", { name: "+ строка" }).click();
+  await page.getByRole("button", { name: "+ столбец" }).click();
+
+  await page.waitForTimeout(1000); // автосейв
+  const saved = await page.evaluate(() => {
+    const db = JSON.parse(localStorage.getItem("__mock_db") || "{}");
+    return db.notes?.[0]?.content ?? "";
+  });
+  expect(saved).toContain("Оля");
+  expect(saved).not.toContain("| Аня ");
+  expect(saved).toMatch(/\|\s*\|\s*\|\s*\|\s*\n/); // добавленная пустая строка (3 столбца после +столбец)
+  expect(saved).toContain("Колонка 3"); // авто-название нового столбца
+  expect(saved).toContain("текст до");
+  expect(saved).toContain("текст после");
+
+  // Печатание таблицы с нуля: пока курсор на строке заголовка/разделителя,
+  // виджет не подменяет текст (иначе редактировать вслепую) — рендерится
+  // только когда курсор покидает диапазон строк таблицы.
+  await page.getByRole("button", { name: "+ Новая заметка" }).click();
+  const editor = noteEditor(page);
+  await editor.click();
+  await page.keyboard.insertText("| A | B |");
+  await page.keyboard.press("End");
+  await page.keyboard.insertText("\n");
+  await page.keyboard.insertText("| --- | --- |");
+  await expect(page.locator(".cm-table")).toHaveCount(0);
+  await page.keyboard.press("End");
+  await page.keyboard.insertText("\n");
+  await expect(page.locator(".cm-table")).toBeVisible();
+
+  // Кнопка "Таблица" в панели форматирования вставляет стартовую 2x2-таблицу.
+  await page.getByRole("button", { name: "+ Новая заметка" }).click();
+  await editor.click();
+  await page.keyboard.insertText("текст перед вставкой");
+  await page.getByTitle("Таблица").click();
+  await expect(page.locator(".cm-table")).toBeVisible();
+  await expect(page.locator(".cm-table th")).toHaveCount(2);
+  await expect(page.locator(".cm-table td")).toHaveCount(4);
+});
+
 test("экспорт/импорт заметок в .md: roundtrip через папку", async ({ page }) => {
   await seedDb(page, {
     tasks: [],

@@ -10,7 +10,7 @@
   // (а не paste/insertText) в e2e триггерит ту же логику и дублирует маркер —
   // учтено в e2e-хелпере fillNoteEditor (использует insertText).
   import { onMount, onDestroy } from "svelte";
-  import { EditorState, EditorSelection, type Extension } from "@codemirror/state";
+  import { EditorState, EditorSelection, StateField, type Extension } from "@codemirror/state";
   import {
     EditorView, Decoration, type DecorationSet, WidgetType, keymap, ViewPlugin, type ViewUpdate,
     drawSelection, dropCursor, placeholder as cmPlaceholder,
@@ -24,7 +24,7 @@
   } from "@codemirror/autocomplete";
   import { convertFileSrc } from "@tauri-apps/api/core";
   import { api } from "../api/tauri";
-  import { IMAGE_RE, imageMarkdown, extImageExt } from "../markdown";
+  import { IMAGE_RE, imageMarkdown, extImageExt, parseTableAt, serializeTable, emptyTable, type ParsedTable, type TableAlign } from "../markdown";
 
   let {
     value = $bindable(""),
@@ -166,6 +166,240 @@
     ignoreEvent() { return false; }
   }
 
+  // Таблица (v0.9.06): единственный виджет, представляющий многострочный
+  // блок как одну DOM-структуру — click-to-edit оверлей поверх реального
+  // <table>, а не просто подсветка синтаксиса (не влезает в mark-decoration
+  // паттерн заголовков/жирного: нужна настоящая 2D-раскладка ячеек).
+  // Правки в ячейках накапливаются в this.table (мутируется на месте) и
+  // сериализуются обратно в markdown одним view.dispatch на blur/Tab/Enter —
+  // не на каждый keystroke, иначе каждая буква пересобирала бы весь виджет
+  // и сбрасывала фокус/каретку в contenteditable-ячейке.
+  // Ячейка, которую нужно сфокусировать после ближайшей пересборки виджета
+  // (Tab/Enter в ячейке коммитят правку → CM6 синхронно пересобирает DOM
+  // таблицы → старые ссылки на DOM-узлы протухают вместе с замкнутыми
+  // cellsGrid()/headRow/tbody). toDOM() читает и сбрасывает этот флаг сразу
+  // после построения новой DOM-структуры — межвиджетный, а не per-instance,
+  // потому что "следующий" виджет — это буквально другой JS-объект.
+  let pendingTableFocus: { rowIndex: number; colIndex: number } | null = null;
+
+  class TableWidget extends WidgetType {
+    table: ParsedTable;
+    constructor(table: ParsedTable) {
+      super();
+      this.table = table;
+    }
+    // eq() сравнивает только содержимое таблицы, не диапазон — CodeMirror
+    // переиспользует старый DOM-узел виджета (и, что важно, сам JS-инстанс)
+    // при любой правке документа, если новый TableWidget оказался "равен"
+    // старому. Диапазон [from, to) поэтому НЕ хранится в полях инстанса
+    // (там он бы протух после первой же правки, ведущей к пересозданию
+    // виджета с новыми позициями, пока переиспользуется старый JS-объект) —
+    // вместо этого commit() всегда находит текущую позицию блока заново
+    // через view.posAtDOM(wrap), на момент самого коммита.
+    eq(other: TableWidget) {
+      return JSON.stringify(other.table) === JSON.stringify(this.table);
+    }
+    commit(wrap: HTMLElement, next: ParsedTable) {
+      if (!view || !wrap.isConnected) return;
+      // Правки в разных ячейках (клик по кнопке "+ строка"/переход по Tab)
+      // могут инициировать почти одновременный blur старой ячейки и клик
+      // новой команды — оба пытаются закоммитить одну и ту же (уже
+      // устаревшую к моменту второго вызова) DOM-структуру виджета.
+      // wrap.isConnected выше отсеивает большинство случаев, но CM6 может
+      // отсоединить узел синхронно, уже во время выполнения posAtDOM/dispatch
+      // ниже (реентрантно, изнутри своего же цикла DOM-обновления) — поэтому
+      // ловим исключение вместо попытки предугадать любую гонку заранее:
+      // устаревший коммит — по определению no-op, а не то, что стоит чинить
+      // жёстче ценой более хрупкой логики синхронизации.
+      try {
+        const from = view.posAtDOM(wrap);
+        const line = view.state.doc.lineAt(from);
+        const parsed = parseTableAt(view.state.doc.toString(), line.number);
+        if (!parsed) return; // документ уже не начинается с таблицы в этой позиции — не коммитим вслепую
+        const to = view.state.doc.line(parsed.endLine).to;
+        const md = serializeTable(next);
+        view.dispatch({ changes: { from: line.from, to, insert: md } });
+      } catch {
+        // Гонка на пересборке DOM виджета — коммитить уже нечего, безопасно игнорировать.
+      }
+    }
+    toDOM() {
+      const wrap = document.createElement("div");
+      wrap.className = "cm-table-wrap";
+      const table = document.createElement("table");
+      table.className = "cm-table";
+      wrap.appendChild(table);
+
+      const alignStyle = (a: TableAlign) => a ? `text-align:${a};` : "";
+
+      const thead = document.createElement("thead");
+      const headRow = document.createElement("tr");
+      this.table.header.forEach((text, c) => {
+        const th = document.createElement("th");
+        th.contentEditable = "true";
+        th.textContent = text;
+        th.style.cssText = alignStyle(this.table.align[c]);
+        wireCell(th, 0, c);
+        headRow.appendChild(th);
+      });
+      thead.appendChild(headRow);
+      table.appendChild(thead);
+
+      const tbody = document.createElement("tbody");
+      this.table.rows.forEach((row, r) => {
+        const tr = document.createElement("tr");
+        row.forEach((text, c) => {
+          const td = document.createElement("td");
+          td.contentEditable = "true";
+          td.textContent = text;
+          td.style.cssText = alignStyle(this.table.align[c]);
+          wireCell(td, r + 1, c);
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+
+      const toolbar = document.createElement("div");
+      toolbar.className = "cm-table-toolbar";
+      const addRowBtn = document.createElement("button");
+      addRowBtn.textContent = "+ строка";
+      addRowBtn.onmousedown = (e) => e.preventDefault();
+      addRowBtn.onclick = () => {
+        const next: ParsedTable = { ...this.table, rows: [...this.table.rows, this.table.header.map(() => "")] };
+        this.commit(wrap, next);
+      };
+      const addColBtn = document.createElement("button");
+      addColBtn.textContent = "+ столбец";
+      addColBtn.onmousedown = (e) => e.preventDefault();
+      addColBtn.onclick = () => {
+        const next: ParsedTable = {
+          header: [...this.table.header, `Колонка ${this.table.header.length + 1}`],
+          align: [...this.table.align, null],
+          rows: this.table.rows.map(r => [...r, ""]),
+        };
+        this.commit(wrap, next);
+      };
+      toolbar.appendChild(addRowBtn);
+      toolbar.appendChild(addColBtn);
+      wrap.appendChild(toolbar);
+
+      // rowIndex 0 = заголовок, 1..N = тело (table.rows[rowIndex-1])
+      const self = this;
+      // Tab/Enter коммитят явно и сразу после сами переводят фокус — из-за
+      // чего у старой ячейки тоже срабатывает blur (фокус ушёл с неё) и
+      // повторно зовёт commitFromDom() на уже отсоединённом wrap этого же
+      // (старого) DOM-дерева. wrap.isConnected в TableWidget.commit() уже
+      // отсеивает часть случаев, но повторный вызов может попасть ровно в
+      // момент, когда CM6 ещё синхронно перестраивает DOM после первого
+      // коммита (реентрантный dispatch) — проще и надёжнее не пытаться
+      // коммитить дважды с одного и того же построения виджета вообще.
+      let committedOnce = false;
+      function cellsGrid(): HTMLElement[][] {
+        const headCells = Array.from(headRow.children) as HTMLElement[];
+        const bodyRows = Array.from(tbody.children).map(tr => Array.from(tr.children) as HTMLElement[]);
+        return [headCells, ...bodyRows];
+      }
+      function readCellText(el: HTMLElement): string {
+        return el.textContent ?? "";
+      }
+      function commitFromDom() {
+        if (committedOnce) return;
+        committedOnce = true;
+        const grid = cellsGrid();
+        const header = grid[0].map(readCellText);
+        const rows = grid.slice(1).map(r => r.map(readCellText));
+        self.commit(wrap, { header, align: self.table.align, rows });
+      }
+      function focusCell(rowIndex: number, colIndex: number) {
+        const grid = cellsGrid();
+        const row = grid[Math.max(0, Math.min(grid.length - 1, rowIndex))];
+        if (!row) return;
+        const cell = row[Math.max(0, Math.min(row.length - 1, colIndex))];
+        cell?.focus();
+        // Каретку — в конец текста ячейки, иначе фокус ставится перед текстом.
+        if (cell) {
+          const range = document.createRange();
+          range.selectNodeContents(cell);
+          range.collapse(false);
+          const sel = window.getSelection();
+          sel?.removeAllRanges();
+          sel?.addRange(range);
+        }
+      }
+      function wireCell(el: HTMLElement, rowIndex: number, colIndex: number) {
+        el.onblur = () => commitFromDom();
+        el.onkeydown = (e) => {
+          // Останавливаем всплытие к CM6-кеймапу (Mod-b и т.п. не должны
+          // применяться внутри ячейки таблицы, это её содержимое, а не
+          // документ редактора).
+          e.stopPropagation();
+          // Ctrl/Cmd+A: contenteditable="false" на обёртке виджета НЕ создаёт
+          // отдельный edit-host для Selection API в Chromium — нативный
+          // select-all внутри вложенного contenteditable="true" всё равно
+          // выделяет весь contentDOM CM6 целиком (проверено вручную: после
+          // Ctrl+A в ячейке window.getSelection() отдавал текст всего
+          // документа). Поэтому выделение "всё в этой ячейке" делаем сами
+          // через Range/Selection API, а не полагаемся на браузер.
+          if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
+            e.preventDefault();
+            const range = document.createRange();
+            range.selectNodeContents(el);
+            const sel = window.getSelection();
+            sel?.removeAllRanges();
+            sel?.addRange(range);
+            return;
+          }
+          if (e.key === "Tab") {
+            e.preventDefault();
+            const grid = cellsGrid();
+            const rowLen = grid[rowIndex]?.length ?? 0;
+            let target: { rowIndex: number; colIndex: number };
+            if (e.shiftKey) {
+              target = colIndex > 0
+                ? { rowIndex, colIndex: colIndex - 1 }
+                : { rowIndex: rowIndex - 1, colIndex: (grid[rowIndex - 1]?.length ?? 1) - 1 };
+            } else {
+              target = colIndex < rowLen - 1
+                ? { rowIndex, colIndex: colIndex + 1 }
+                : { rowIndex: rowIndex + 1, colIndex: 0 };
+            }
+            // commitFromDom() пересобирает DOM таблицы синхронно внутри
+            // view.dispatch — сохраняем цель фокуса заранее, а не зовём
+            // focusCell() сразу после: к этому моменту headRow/tbody уже
+            // могут указывать на удалённые узлы старого виджета.
+            pendingTableFocus = target;
+            commitFromDom();
+          } else if (e.key === "Enter") {
+            e.preventDefault();
+            pendingTableFocus = { rowIndex: rowIndex + 1, colIndex };
+            commitFromDom();
+          } else if (e.key === "Escape") {
+            (el as HTMLElement).blur();
+          }
+        };
+      }
+
+      // Если предыдущая ячейка (в старом, уже удалённом виджете) запросила
+      // фокус после коммита — выполняем это здесь, в свежепостроенном DOM.
+      if (pendingTableFocus) {
+        const target = pendingTableFocus;
+        pendingTableFocus = null;
+        queueMicrotask(() => focusCell(target.rowIndex, target.colIndex));
+      }
+
+      return wrap;
+    }
+    // ignoreEvent(event) === true означает "CodeMirror, не трогай это событие
+    // вообще" (см. eventBelongsToEditor в @codemirror/view — при true CM6 не
+    // запускает на нём ни один свой обработчик/кеймап) — нужно для кликов по
+    // ячейкам/кнопкам +строка/+столбец, иначе CM6 перехватывает mousedown и
+    // не даёт реально кликнуть внутрь виджета.
+    ignoreEvent(event: Event) {
+      return event.type === "mousedown" || event.type === "click" || event.type === "keydown" || event.type === "blur";
+    }
+  }
+
   // Собирает Lezer-диапазоны кода (FencedCode, InlineCode), чтобы
   // не применять инлайн-стили и вики-ссылки внутри них.
   function codeRanges(state: EditorState): Set<number> {
@@ -190,10 +424,55 @@
     return set.has(pos);
   }
 
+  // Таблицы — блочные decoration'ы (block: true), а CodeMirror запрещает
+  // блочные decoration'ы из ViewPlugin-источника (динамического facet) —
+  // "Block decorations may not be specified via plugins". Поэтому таблицы
+  // строятся отдельным StateField (статический источник), не вместе с
+  // остальным live-preview в livePreviewPlugin. Раз это блочный виджет,
+  // не однострочная mark-decoration, скрывать его "только пока в фокусе"
+  // не нужно — так же, как ImageWidget не проверяет hasFocus. Курсор
+  // внутри диапазона строк таблицы (по selection, не завязано на hasFocus)
+  // показывает сырой markdown для редактирования textual-diff/копирования.
+  function buildTableDecorations(state: EditorState): DecorationSet {
+    const cursorLine = state.doc.lineAt(state.selection.main.head).number;
+    const codePositions = codeRanges(state);
+    const items: { from: number; to: number; deco: Decoration }[] = [];
+    const docText = state.doc.toString();
+
+    for (let i = 1; i <= state.doc.lines; i++) {
+      const line = state.doc.line(i);
+      if (inCode(line.from, codePositions) || !line.text.includes("|")) continue;
+      const parsed = parseTableAt(docText, i);
+      if (!parsed) continue;
+      const lastLineNum = parsed.endLine;
+      const cursorInBlock = cursorLine >= i && cursorLine <= lastLineNum;
+      if (!cursorInBlock) {
+        const blockFrom = line.from;
+        const blockTo = state.doc.line(lastLineNum).to;
+        items.push({
+          from: blockFrom, to: blockTo,
+          deco: Decoration.replace({ widget: new TableWidget(parsed.table), block: true }),
+        });
+      }
+      i = lastLineNum; // следующая итерация цикла (i++) продолжит сразу за таблицей
+    }
+
+    return Decoration.set(items.map(it => it.deco.range(it.from, it.to)), true);
+  }
+
+  const tableField = StateField.define<DecorationSet>({
+    create(state) { return buildTableDecorations(state); },
+    update(deco, tr) {
+      return tr.docChanged || tr.selection ? buildTableDecorations(tr.state) : deco;
+    },
+    provide: f => EditorView.decorations.from(f),
+  });
+
   // Строит decoration-набор для всего документа: строка с курсором показывает
   // сырой markdown (но только пока редактор реально в фокусе — иначе после
   // программной подмены value/пересинхронизации курсор на строке 1 навсегда
   // прятал бы виджеты в однострочных заметках), остальные — отрендеренный вид.
+  // Таблицы сюда не входят — см. tableField выше.
   function buildDecorations(state: EditorState, hasFocus: boolean): DecorationSet {
     const cursorLine = hasFocus ? state.doc.lineAt(state.selection.main.head).number : -1;
     const codePositions = codeRanges(state);
@@ -404,6 +683,46 @@
       background: "var(--bg-secondary)",
       border: "1px dashed var(--border)",
     },
+    ".cm-table-wrap": {
+      margin: "6px 0",
+    },
+    ".cm-table": {
+      borderCollapse: "collapse",
+      width: "auto",
+      maxWidth: "100%",
+      fontSize: "0.95em",
+    },
+    ".cm-table th, .cm-table td": {
+      border: "1px solid var(--border)",
+      padding: "4px 8px",
+      minWidth: "60px",
+      outline: "none",
+    },
+    ".cm-table th": {
+      background: "var(--bg-secondary)",
+      fontWeight: "600",
+    },
+    ".cm-table td:focus, .cm-table th:focus": {
+      boxShadow: "inset 0 0 0 1.5px var(--accent)",
+    },
+    ".cm-table-toolbar": {
+      display: "flex",
+      gap: "6px",
+      marginTop: "4px",
+    },
+    ".cm-table-toolbar button": {
+      fontSize: "11px",
+      padding: "2px 8px",
+      border: "1px solid var(--border)",
+      borderRadius: "4px",
+      background: "var(--bg-secondary)",
+      color: "var(--text-secondary)",
+      cursor: "pointer",
+    },
+    ".cm-table-toolbar button:hover": {
+      color: "var(--text-primary)",
+      borderColor: "var(--accent)",
+    },
   });
 
   // Вставка картинки из буфера: перехватываем paste, если среди файлов буфера
@@ -511,6 +830,7 @@
       dropCursor(),
       markdown(),
       livePreviewPlugin,
+      tableField,
       autocompletion({ override: [wikiLinkCompletion] }),
       keymap.of([
         {
@@ -627,6 +947,27 @@
   export function formatHeading() { toggleLinePrefix("## "); }
   export function formatChecklist() { toggleLinePrefix("- [ ] "); }
   export function formatWikiLink() { wrapSelection("[[", "]]"); }
+
+  // Вставка таблицы (v0.9.06, добавлено в панель после первого прохода):
+  // стартовая 2x2-таблица на новой строке под курсором. Пустые строки
+  // до/после — не потому что parseTableAt их требует (не требует, таблица
+  // парсится и вплотную к соседнему тексту), а чтобы вставка не сливалась
+  // с текстом текущей строки, если курсор был не в её начале/конце.
+  export function insertTable() {
+    if (!view) return;
+    const { state } = view;
+    const pos = state.selection.main.head;
+    const line = state.doc.lineAt(pos);
+    const needsLeadingBlank = line.text.trim() !== "";
+    const table = serializeTable(emptyTable(2, 2));
+    const insert = (needsLeadingBlank ? "\n\n" : "\n") + table + "\n\n";
+    view.dispatch({
+      changes: { from: line.to, insert },
+      selection: EditorSelection.cursor(line.to + insert.length),
+      scrollIntoView: true,
+    });
+    view.focus();
+  }
 </script>
 
 <div class="cm-host" bind:this={hostEl}></div>

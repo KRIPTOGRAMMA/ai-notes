@@ -84,6 +84,110 @@ export function extImageExt(mimeOrName: string): string {
   return (/\.([a-z0-9]+)$/i.exec(mimeOrName)?.[1] ?? "png").toLowerCase();
 }
 
+// --- Таблицы (v0.9.06) ---
+// Простой построчный парсер GFM pipe-таблиц — не завязан на Lezer-дерево,
+// т.к. виджету редактора нужен полный контроль над границами ячеек при
+// сериализации обратно в текст (Lezer даёт позиции для подсветки, но не для
+// надёжной round-trip пересборки при редактировании отдельной ячейки).
+export type TableAlign = "left" | "center" | "right" | null;
+export interface ParsedTable {
+  header: string[];
+  align: TableAlign[];
+  rows: string[][];
+}
+
+const DELIMITER_CELL = /^:?-+:?$/;
+
+function splitRow(line: string): string[] {
+  let s = line.trim();
+  if (s.startsWith("|")) s = s.slice(1);
+  if (s.endsWith("|")) s = s.slice(0, -1);
+  const cells: string[] = [];
+  let cur = "";
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === "\\" && s[i + 1] === "|") { cur += "|"; i++; continue; }
+    if (c === "|") { cells.push(cur.trim()); cur = ""; continue; }
+    cur += c;
+  }
+  cells.push(cur.trim());
+  return cells;
+}
+
+function parseAlign(cell: string): TableAlign {
+  const left = cell.startsWith(":");
+  const right = cell.endsWith(":");
+  if (left && right) return "center";
+  if (right) return "right";
+  if (left) return "left";
+  return null;
+}
+
+// Пытается разобрать таблицу, начинающуюся на строке `startLine` (1-based).
+// Возвращает null, если это не таблица (нет разделительной строки вида
+// | --- | :--: | сразу после заголовка) — тогда вызывающий код просто не
+// рендерит виджет, текст остаётся обычным абзацем.
+export function parseTableAt(doc: string, startLine: number): { table: ParsedTable; endLine: number } | null {
+  const lines = doc.split("\n");
+  const header = lines[startLine - 1];
+  const delim = lines[startLine];
+  if (header === undefined || delim === undefined) return null;
+  if (!header.includes("|")) return null;
+  const delimCells = splitRow(delim);
+  if (delimCells.length === 0 || !delimCells.every(c => DELIMITER_CELL.test(c))) return null;
+
+  const headerCells = splitRow(header);
+  const align = delimCells.map(parseAlign);
+  const rows: string[][] = [];
+  let i = startLine + 1;
+  while (i < lines.length && lines[i].includes("|") && lines[i].trim() !== "") {
+    rows.push(splitRow(lines[i]));
+    i++;
+  }
+  return { table: { header: headerCells, align, rows }, endLine: i };
+}
+
+// Сериализация обратно в markdown — выравнивает столбцы пробелами для
+// читаемости сырого текста (не обязательно для GFM, но так таблицу приятно
+// видеть и вне live-preview, напр. при экспорте в .md).
+export function serializeTable(table: ParsedTable): string {
+  const cols = table.header.length;
+  const widths = Array.from({ length: cols }, (_, c) => {
+    const cellLens = table.rows.map(r => (r[c] ?? "").length);
+    return Math.max(3, table.header[c]?.length ?? 0, ...cellLens);
+  });
+  const pad = (s: string, w: number, a: TableAlign) => {
+    const gap = Math.max(0, w - s.length);
+    if (a === "right") return " ".repeat(gap) + s;
+    if (a === "center") {
+      const left = Math.floor(gap / 2);
+      return " ".repeat(left) + s + " ".repeat(gap - left);
+    }
+    return s + " ".repeat(gap);
+  };
+  const row = (cells: string[]) =>
+    "| " + cells.map((c, i) => pad(c ?? "", widths[i], table.align[i] ?? null)).join(" | ") + " |";
+  // Разделительная строка: дефисы заполняют ширину столбца, двоеточия
+  // выравнивания остаются на своих краях (":--", "--:", ":--:") — так
+  // маркер остаётся однозначно читаемым при любой ширине столбца.
+  const delimCell = (w: number, a: TableAlign) => {
+    const left = a === "left" || a === "center" ? ":" : "";
+    const right = a === "right" || a === "center" ? ":" : "";
+    const dashes = Math.max(1, w - left.length - right.length);
+    return left + "-".repeat(dashes) + right;
+  };
+  const delim = "| " + widths.map((w, i) => delimCell(w, table.align[i] ?? null)).join(" | ") + " |";
+  return [row(table.header), delim, ...table.rows.map(row)].join("\n");
+}
+
+export function emptyTable(cols: number, rows: number): ParsedTable {
+  return {
+    header: Array.from({ length: cols }, (_, i) => `Колонка ${i + 1}`),
+    align: Array.from({ length: cols }, () => null),
+    rows: Array.from({ length: rows }, () => Array.from({ length: cols }, () => "")),
+  };
+}
+
 const TASK_LINE = /^(\s*[-*+]\s+)\[( |x|X)\]/;
 
 // Индексы строк editContent, содержащих markdown-чекбокс, по порядку. Порядок

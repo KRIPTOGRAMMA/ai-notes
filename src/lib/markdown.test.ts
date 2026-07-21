@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { renderMarkdown, taskLineIndices, toggleTaskListItem, extractWikiLinks, IMAGE_RE, imageMarkdown, extImageExt } from "./markdown";
+import { renderMarkdown, taskLineIndices, toggleTaskListItem, extractWikiLinks, IMAGE_RE, imageMarkdown, extImageExt, parseTableAt, serializeTable, emptyTable } from "./markdown";
 
 describe("renderMarkdown", () => {
   it("рендерит gfm-чекбоксы", () => {
@@ -130,6 +130,83 @@ describe("taskLineIndices", () => {
 
   it("пустой текст — пусто", () => {
     expect(taskLineIndices("")).toEqual([]);
+  });
+});
+
+describe("parseTableAt", () => {
+  it("разбирает простую таблицу без выравнивания", () => {
+    const doc = "текст\n| A | B |\n| --- | --- |\n| 1 | 2 |\n| 3 | 4 |\nхвост";
+    const res = parseTableAt(doc, 2);
+    expect(res).not.toBeNull();
+    expect(res!.table.header).toEqual(["A", "B"]);
+    expect(res!.table.align).toEqual([null, null]);
+    expect(res!.table.rows).toEqual([["1", "2"], ["3", "4"]]);
+    expect(res!.endLine).toBe(5); // 0-based индекс первой строки после таблицы
+  });
+
+  it("разбирает выравнивание :---/:---:/---:", () => {
+    const doc = "| L | C | R |\n| :--- | :---: | ---: |\n| a | b | c |";
+    const res = parseTableAt(doc, 1);
+    expect(res!.table.align).toEqual(["left", "center", "right"]);
+  });
+
+  it("таблица без ведущих/конечных | тоже парсится", () => {
+    const doc = "A | B\n--- | ---\n1 | 2";
+    const res = parseTableAt(doc, 1);
+    expect(res).not.toBeNull();
+    expect(res!.table.header).toEqual(["A", "B"]);
+    expect(res!.table.rows).toEqual([["1", "2"]]);
+  });
+
+  it("экранированный | внутри ячейки не разбивает её", () => {
+    const doc = "| A | B |\n| --- | --- |\n| x\\|y | 2 |";
+    const res = parseTableAt(doc, 1);
+    expect(res!.table.rows).toEqual([["x|y", "2"]]);
+  });
+
+  it("нет разделительной строки — не таблица", () => {
+    expect(parseTableAt("| A | B |\nобычный текст", 1)).toBeNull();
+  });
+
+  it("таблица без строк данных — только заголовок и разделитель", () => {
+    const doc = "| A | B |\n| --- | --- |\nследующий абзац";
+    const res = parseTableAt(doc, 1);
+    expect(res!.table.rows).toEqual([]);
+    expect(res!.endLine).toBe(2);
+  });
+});
+
+describe("serializeTable", () => {
+  it("собирает таблицу обратно с выравниванием столбцов пробелами", () => {
+    const md = serializeTable({
+      header: ["Имя", "Возраст"],
+      align: [null, "right"],
+      rows: [["Аня", "30"], ["Боб", "7"]],
+    });
+    const lines = md.split("\n");
+    expect(lines[0]).toBe("| Имя | Возраст |");
+    expect(lines[1]).toBe("| --- | ------: |");
+    expect(lines[2]).toBe("| Аня |      30 |");
+    expect(lines[3]).toBe("| Боб |       7 |");
+  });
+
+  it("roundtrip: parseTableAt(serializeTable(t)) восстанавливает те же данные", () => {
+    const table = { header: ["X", "Y"], align: ["center" as const, null], rows: [["1", "2"], ["", "4"]] };
+    const md = serializeTable(table);
+    const parsed = parseTableAt(md, 1);
+    expect(parsed!.table.header).toEqual(table.header);
+    expect(parsed!.table.align).toEqual(table.align);
+    expect(parsed!.table.rows).toEqual(table.rows);
+  });
+});
+
+describe("emptyTable", () => {
+  it("строит таблицу нужного размера с пустыми ячейками", () => {
+    const t = emptyTable(3, 2);
+    expect(t.header.length).toBe(3);
+    expect(t.rows.length).toBe(2);
+    expect(t.rows[0].length).toBe(3);
+    expect(t.rows[0]).toEqual(["", "", ""]);
   });
 });
 
