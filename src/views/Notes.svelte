@@ -22,6 +22,7 @@
   let saving = $state(false);
   let renameToast: string | null = $state(null);
   let renameToastTimeout: ReturnType<typeof setTimeout> | null = null;
+  let zenMode = $state(false);
 
   const selected = $derived(noteStore.notes.find(n => n.id === selectedId) ?? null);
   const otherTitles = $derived(noteStore.notes.filter(n => n.id !== selectedId).map(n => n.title));
@@ -222,6 +223,26 @@
     editLinkedTaskId = null;
   }
 
+  // Zen-режим (v0.9.03): полноэкранный редактор без панели списка/меты —
+  // хоткей Ctrl+Shift+Z (не входит в переназначаемые KEYBIND_ACTIONS — это
+  // локальное для раздела Заметок действие, не глобальная навигация) и Escape
+  // для выхода. Выбор другой заметки/переход из раздела молча закрывают режим
+  // через $effect ниже — иначе можно было бы «застрять» в zen с чужой заметкой.
+  function toggleZen() {
+    zenMode = !zenMode;
+  }
+  function onZenKeydown(e: KeyboardEvent) {
+    if (e.ctrlKey && e.shiftKey && e.code === "KeyZ" && selected) {
+      e.preventDefault();
+      toggleZen();
+    } else if (e.key === "Escape" && zenMode) {
+      zenMode = false;
+    }
+  }
+  $effect(() => {
+    if (!selectedId) zenMode = false;
+  });
+
   function formatDate(iso: string) {
     return new Date(iso).toLocaleDateString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
   }
@@ -311,6 +332,8 @@
   });
 </script>
 
+<svelte:window onkeydown={onZenKeydown} />
+
 <div class="notes card">
   <!-- Список заметок -->
   <div class="list-pane">
@@ -360,8 +383,12 @@
     {/if}
   </div>
 
-  <!-- Редактор -->
-  <div class="editor-pane">
+  <!-- Редактор. В zen-режиме та же разметка становится fullscreen-оверлеем
+       через CSS (class:zen на .editor-pane) — не отдельная копия редактора:
+       два экземпляра LiveMarkdownEditor на одном bind:value означали бы два
+       независимых CodeMirror-состояния/undo-истории на один и тот же текст
+       (тот самый класс бага, что чинили в v0.6.9/v0.7 для смены заметок). -->
+  <div class="editor-pane" class:zen={zenMode}>
     {#if !selected}
       <div class="empty" style="margin:auto;">Выберите заметку или создайте новую</div>
     {:else}
@@ -373,15 +400,22 @@
         {#if renameToast}
           <span class="rename-toast">{renameToast}</span>
         {/if}
-        {#if aiEnabled}
+        {#if !zenMode && aiEnabled}
           <button class="btn-icon" disabled={linkSuggesting} title="ИИ предложит заметки для связи"
             onclick={suggestLinks}>{#if linkSuggesting}…{:else}<Icon name="sparkles" />{/if}</button>
         {/if}
-        <button class="btn-icon" title="Версии заметки" onclick={openRevisions}><Icon name="clock" /></button>
-        <button class="btn-icon btn-danger" title="Удалить заметку" onclick={deleteSelected}>✕</button>
+        {#if !zenMode}
+          <button class="btn-icon" title="Версии заметки" onclick={openRevisions}><Icon name="clock" /></button>
+        {/if}
+        <button class="btn-icon" title={zenMode ? "Выйти из zen-режима (Esc)" : "Zen-режим (Ctrl+Shift+Z)"} onclick={toggleZen}>
+          <Icon name={zenMode ? "collapse" : "expand"} />
+        </button>
+        {#if !zenMode}
+          <button class="btn-icon btn-danger" title="Удалить заметку" onclick={deleteSelected}>✕</button>
+        {/if}
       </div>
 
-      {#if linkSuggestions && linkSuggestions.noteId === selectedId}
+      {#if !zenMode && linkSuggestions && linkSuggestions.noteId === selectedId}
         <div class="link-suggest">
           {#if linkSuggestions.error}
             <span class="alert" style="margin:0;">{linkSuggestions.error}</span>
@@ -399,42 +433,44 @@
         </div>
       {/if}
 
-      <!-- Мета: привязка к задаче + теги -->
-      <div class="editor-meta">
-        <label class="meta-label">
-          Задача:
-          <select bind:value={editLinkedTaskId} onchange={saveMeta}>
-            <option value={null}>— не привязана —</option>
-            {#each taskStore.activeTasks as t (t.id)}
-              <option value={t.id}>{t.title}</option>
-            {/each}
-          </select>
-        </label>
-        {#if projectStore.projects.length > 0}
+      <!-- Мета: привязка к задаче + теги — скрыта в zen-режиме -->
+      {#if !zenMode}
+        <div class="editor-meta">
           <label class="meta-label">
-            Проект:
-            <select bind:value={editProjectId} onchange={saveMeta}>
-              <option value={null}>— без проекта —</option>
-              {#each projectStore.active as p (p.id)}
-                <option value={p.id}>{p.name}</option>
+            Задача:
+            <select bind:value={editLinkedTaskId} onchange={saveMeta}>
+              <option value={null}>— не привязана —</option>
+              {#each taskStore.activeTasks as t (t.id)}
+                <option value={t.id}>{t.title}</option>
               {/each}
             </select>
           </label>
-        {/if}
-        {#if linkedTask}
-          <span class="chip"><Icon name="link" size={11} /> {linkedTask.title}</span>
-        {/if}
+          {#if projectStore.projects.length > 0}
+            <label class="meta-label">
+              Проект:
+              <select bind:value={editProjectId} onchange={saveMeta}>
+                <option value={null}>— без проекта —</option>
+                {#each projectStore.active as p (p.id)}
+                  <option value={p.id}>{p.name}</option>
+                {/each}
+              </select>
+            </label>
+          {/if}
+          {#if linkedTask}
+            <span class="chip"><Icon name="link" size={11} /> {linkedTask.title}</span>
+          {/if}
 
-        <div class="tags">
-          {#each editTags as tag (tag)}
-            <span class="chip chip-tag">
-              #{tag}
-              <button class="tag-remove" onclick={() => removeTag(tag)}>×</button>
-            </span>
-          {/each}
-          <input class="tag-input" bind:value={tagInput} onkeydown={onTagKeydown} placeholder="+ тег" />
+          <div class="tags">
+            {#each editTags as tag (tag)}
+              <span class="chip chip-tag">
+                #{tag}
+                <button class="tag-remove" onclick={() => removeTag(tag)}>×</button>
+              </span>
+            {/each}
+            <input class="tag-input" bind:value={tagInput} onkeydown={onTagKeydown} placeholder="+ тег" />
+          </div>
         </div>
-      </div>
+      {/if}
 
       <div class="editor-body">
         {#key selectedId}
@@ -451,7 +487,7 @@
         {/key}
       </div>
 
-      {#if backlinks.length > 0}
+      {#if !zenMode && backlinks.length > 0}
         <div class="backlinks">
           <span class="backlinks-label">Ссылаются сюда:</span>
           {#each backlinks as b (b.id)}
@@ -642,6 +678,14 @@
     display: flex;
     flex-direction: column;
     overflow: hidden;
+  }
+
+  .editor-pane.zen {
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    background: var(--bg-primary);
+    padding: 24px clamp(16px, 10vw, 160px);
   }
 
   .editor-head {
