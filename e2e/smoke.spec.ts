@@ -1021,6 +1021,47 @@ test("граф заметок: связанные заметки дают узл
   await expect(page.locator(".note-item.active", { hasText: "Идея A" })).toBeVisible();
 });
 
+test("закрепление заметок: пин поднимает заметку наверх списка, переживает перезагрузку", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+  // Сеем заметки напрямую в localStorage мока (не через seedDb-init-script):
+  // seedDb регистрирует свой initScript, который заново стирает localStorage
+  // на каждый page.reload() — теряя то, что сохранил мок за время теста
+  // (тот же грабли, что и в тесте «лимиты категорий приложений» выше).
+  await page.evaluate(() => {
+    const db = JSON.parse(localStorage.getItem("__mock_db")!);
+    db.notes = [
+      { id: "n1", title: "Первая заметка", content: "текст 1", tags: [], linked_task_id: null, project_id: null, pinned: false, created_at: new Date(Date.now() - 2000).toISOString(), updated_at: new Date(Date.now() - 2000).toISOString() },
+      { id: "n2", title: "Вторая заметка", content: "текст 2", tags: [], linked_task_id: null, project_id: null, pinned: false, created_at: new Date(Date.now() - 1000).toISOString(), updated_at: new Date(Date.now() - 1000).toISOString() },
+      { id: "n3", title: "Третья заметка", content: "текст 3", tags: [], linked_task_id: null, project_id: null, pinned: false, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+    ];
+    localStorage.setItem("__mock_db", JSON.stringify(db));
+  });
+  await page.reload();
+  await page.getByRole("button", { name: "Заметки" }).click();
+
+  const rows = page.locator(".note-row");
+  await expect(rows).toHaveCount(3);
+  const unpinnedFirstTitle = await rows.nth(0).locator(".note-title").innerText();
+
+  // Закрепляем самую старую — "Первая заметка" — она должна подняться наверх
+  const firstRow = page.locator(".note-row", { hasText: "Первая заметка" });
+  await firstRow.locator(".pin-btn").click({ force: true });
+  await expect(rows.nth(0)).toContainText("Первая заметка");
+  await expect(page.locator(".pin-btn.pinned")).toHaveCount(1);
+
+  // Переживает перезагрузку
+  await page.reload();
+  await page.getByRole("button", { name: "Заметки" }).click();
+  await expect(page.locator(".note-row").nth(0)).toContainText("Первая заметка");
+  await expect(page.locator(".pin-btn.pinned")).toHaveCount(1);
+
+  // Открепление возвращает к порядку без пина (тот же, что был до закрепления)
+  await page.locator(".note-row", { hasText: "Первая заметка" }).locator(".pin-btn").click({ force: true });
+  await expect(page.locator(".note-row").nth(0)).toContainText(unpinnedFirstTitle);
+  await expect(page.locator(".pin-btn.pinned")).toHaveCount(0);
+});
+
 test("экспорт/импорт заметок в .md: roundtrip через папку", async ({ page }) => {
   await seedDb(page, {
     tasks: [],

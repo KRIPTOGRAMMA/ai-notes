@@ -22,6 +22,7 @@
     target:   "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z M12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12Z M12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z",
     lock:     "M5 11h14a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1Z M8 11V7a4 4 0 0 1 8 0v4",
     alert:    "M12 3 2 20h20Z M12 9v5 M12 17h.01",
+    pin:      "M9 4h6 M10 4v5.5L6 14v2h5v6l1 2 1-2v-6h5v-2l-4-4.5V4",
   };
 
   let { name, size = 14 }: { name: string; size?: number } = $props();

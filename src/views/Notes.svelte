@@ -31,12 +31,21 @@
   let filterTag = $state("");
   let filterProjectId = $state("");
   const allTags = $derived([...new Set(noteStore.notes.flatMap(n => n.tags))].sort());
+  // Закреплённые — всегда сверху (стабильно, иначе порядок внутри группы
+  // "прыгал" бы при равном pinned: Array.prototype.sort гарантирует
+  // стабильность спецификацией ES2019+, порядок backend'а — updated_at DESC —
+  // сохраняется внутри каждой группы).
   const filteredNotes = $derived(noteStore.notes.filter(n => {
     if (noteFilter && !n.title.toLowerCase().includes(noteFilter.toLowerCase())) return false;
     if (filterTag && !n.tags.includes(filterTag)) return false;
     if (filterProjectId && n.project_id !== filterProjectId) return false;
     return true;
-  }));
+  }).sort((a, b) => Number(b.pinned) - Number(a.pinned)));
+
+  async function togglePin(note: Note, e: MouseEvent) {
+    e.stopPropagation(); // не открывать заметку кликом по кнопке пина
+    await noteStore.update(note.id, { pinned: !note.pinned });
+  }
 
   // Заметки, ссылающиеся на текущую через [[название]] (без учёта регистра).
   const backlinks = $derived.by<Note[]>(() => {
@@ -332,10 +341,18 @@
     {:else}
       <ul class="note-list">
         {#each filteredNotes as note (note.id)}
-          <li>
+          <li class="note-row" class:pinned={note.pinned}>
             <button class="note-item" class:active={selectedId === note.id} onclick={() => selectNote(note)}>
               <div class="note-title">{note.title}</div>
               <div class="note-date">{formatDate(note.updated_at)}</div>
+            </button>
+            <button
+              class="pin-btn"
+              class:pinned={note.pinned}
+              title={note.pinned ? "Открепить" : "Закрепить"}
+              onclick={(e) => togglePin(note, e)}
+            >
+              <Icon name="pin" size={13} />
             </button>
           </li>
         {/each}
@@ -551,9 +568,17 @@
     gap: 1px;
   }
 
+  .note-row {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    border-radius: var(--radius);
+  }
+
   .note-item {
     display: block;
-    width: 100%;
+    flex: 1;
+    min-width: 0;
     text-align: left;
     padding: 6px 8px;
     border: none;
@@ -581,6 +606,35 @@
     font-size: 11px;
     color: var(--text-secondary);
     margin-top: 1px;
+  }
+
+  .pin-btn {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: none;
+    border-radius: var(--radius);
+    background: transparent;
+    color: var(--text-secondary);
+    opacity: 0;
+  }
+
+  .note-row:hover .pin-btn,
+  .pin-btn.pinned {
+    opacity: 1;
+  }
+
+  .pin-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  .pin-btn.pinned {
+    color: var(--accent);
   }
 
   .editor-pane {

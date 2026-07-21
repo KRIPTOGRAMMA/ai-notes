@@ -124,6 +124,7 @@ export interface Note {
   tags: string[];
   linked_task_id: string | null;
   project_id: string | null;
+  pinned: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -158,6 +159,7 @@ export interface UpdateNotePayload {
   tags?: string[];
   linked_task_id?: string | null;
   project_id?: string | null;
+  pinned?: boolean;
 }
 
 export interface AppSettings {

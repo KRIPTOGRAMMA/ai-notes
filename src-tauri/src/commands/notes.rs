@@ -13,6 +13,7 @@ pub struct Note {
     pub tags: Vec<String>,
     pub linked_task_id: Option<String>,
     pub project_id: Option<String>,
+    pub pinned: bool,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -40,6 +41,7 @@ pub struct UpdateNote {
     // Аналогично: Some(Some(id)) — в проект, Some(None) — из проекта, None — не трогать.
     #[serde(default, deserialize_with = "deserialize_optional_field")]
     pub project_id: Option<Option<String>>,
+    pub pinned: Option<bool>,
 }
 
 // Различаем «поле отсутствует» и «поле = null» в JSON: нужно, чтобы отвязку
@@ -53,6 +55,7 @@ where
 
 fn row_to_note(row: sqlx::sqlite::SqliteRow) -> Note {
     let tags_json: String = row.get("tags");
+    let pinned: i64 = row.get("pinned");
     Note {
         id: row.get("id"),
         title: row.get("title"),
@@ -60,6 +63,7 @@ fn row_to_note(row: sqlx::sqlite::SqliteRow) -> Note {
         tags: serde_json::from_str(&tags_json).unwrap_or_default(),
         linked_task_id: row.get("linked_task_id"),
         project_id: row.get("project_id"),
+        pinned: pinned != 0,
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
     }
@@ -72,7 +76,7 @@ pub async fn get_notes(pool: State<'_, SqlitePool>) -> AppResult<Vec<Note>> {
 
 pub async fn get_notes_impl(pool: &SqlitePool) -> AppResult<Vec<Note>> {
     let rows = sqlx::query(
-        "SELECT id, title, content, tags, linked_task_id, project_id, created_at, updated_at FROM notes ORDER BY updated_at DESC"
+        "SELECT id, title, content, tags, linked_task_id, project_id, pinned, created_at, updated_at FROM notes ORDER BY updated_at DESC"
     )
     .fetch_all(pool)
     .await?;
@@ -112,6 +116,7 @@ pub async fn create_note_impl(pool: &SqlitePool, note: CreateNote) -> AppResult<
         tags: note.tags,
         linked_task_id: note.linked_task_id,
         project_id: note.project_id,
+        pinned: false,
         created_at: now.clone(),
         updated_at: now,
     })
@@ -157,13 +162,18 @@ pub async fn update_note_impl(pool: &SqlitePool, id: String, patch: UpdateNote) 
             .bind(project).bind(&now).bind(&id)
             .execute(pool).await?;
     }
+    if let Some(pinned) = patch.pinned {
+        sqlx::query("UPDATE notes SET pinned = ?, updated_at = ? WHERE id = ?")
+            .bind(pinned).bind(&now).bind(&id)
+            .execute(pool).await?;
+    }
 
     // fetch_optional, не fetch_one: заметка могла быть удалена параллельно
     // (автосейв debounced на 800мс — пользователь успевает нажать «Удалить»
     // раньше, чем сработает предыдущий таймер сохранения). Это не ошибка
     // сохранения — заметки уже нет, апдейт стал no-op, откатывать нечего.
     let row = sqlx::query(
-        "SELECT id, title, content, tags, linked_task_id, project_id, created_at, updated_at FROM notes WHERE id = ?"
+        "SELECT id, title, content, tags, linked_task_id, project_id, pinned, created_at, updated_at FROM notes WHERE id = ?"
     )
     .bind(&id)
     .fetch_optional(pool)
@@ -319,7 +329,7 @@ pub async fn restore_note_revision_impl(pool: &SqlitePool, revision_id: &str) ->
         .await?;
 
     let row = sqlx::query(
-        "SELECT id, title, content, tags, linked_task_id, project_id, created_at, updated_at FROM notes WHERE id = ?"
+        "SELECT id, title, content, tags, linked_task_id, project_id, pinned, created_at, updated_at FROM notes WHERE id = ?"
     )
     .bind(&note_id)
     .fetch_one(pool)
@@ -434,7 +444,7 @@ pub async fn search_notes_impl(pool: &SqlitePool, query: String) -> AppResult<Ve
     let fts_query = format!("\"{}\"*", escaped);
 
     let rows = sqlx::query(
-        "SELECT n.id, n.title, n.content, n.tags, n.linked_task_id, n.project_id, n.created_at, n.updated_at
+        "SELECT n.id, n.title, n.content, n.tags, n.linked_task_id, n.project_id, n.pinned, n.created_at, n.updated_at
          FROM notes n
          INNER JOIN notes_fts ON notes_fts.rowid = n.rowid
          WHERE notes_fts MATCH ?
@@ -468,7 +478,7 @@ pub async fn search_notes_snippet_impl(pool: &SqlitePool, query: String) -> AppR
     let fts_query = format!("\"{}\"*", escaped);
 
     let rows = sqlx::query(
-        "SELECT n.id, n.title, n.content, n.tags, n.linked_task_id, n.project_id, n.created_at, n.updated_at,
+        "SELECT n.id, n.title, n.content, n.tags, n.linked_task_id, n.project_id, n.pinned, n.created_at, n.updated_at,
                 snippet(notes_fts, 1, '<mark>', '</mark>', '…', 32) AS snippet
          FROM notes n
          INNER JOIN notes_fts ON notes_fts.rowid = n.rowid
@@ -607,12 +617,43 @@ mod tests {
             tags: None,
             linked_task_id: None,
             project_id: None,
+            pinned: None,
         }).await.unwrap();
         assert_eq!(updated.content, "новый текст");
         assert_eq!(updated.title, "заметка"); // не тронут
 
         delete_note_impl(&pool, note.id).await.unwrap();
         assert!(get_notes_impl(&pool).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn pinned_defaults_false_and_toggles_via_update() {
+        let pool = test_pool().await;
+
+        let note = create_note_impl(&pool, CreateNote {
+            title: "закрепи меня".into(),
+            content: "текст".into(),
+            tags: vec![],
+            linked_task_id: None,
+            project_id: None,
+        }).await.unwrap();
+        assert!(!note.pinned);
+
+        let pinned = update_note_impl(&pool, note.id.clone(), UpdateNote {
+            title: None, content: None, tags: None, linked_task_id: None, project_id: None,
+            pinned: Some(true),
+        }).await.unwrap();
+        assert!(pinned.pinned);
+
+        // Переживает перечитывание из БД (не только in-memory возврат update).
+        let all = get_notes_impl(&pool).await.unwrap();
+        assert!(all.iter().find(|n| n.id == note.id).unwrap().pinned);
+
+        let unpinned = update_note_impl(&pool, note.id.clone(), UpdateNote {
+            title: None, content: None, tags: None, linked_task_id: None, project_id: None,
+            pinned: Some(false),
+        }).await.unwrap();
+        assert!(!unpinned.pinned);
     }
 
     // Гонка автосейва с удалением: debounced-сохранение может долететь до
@@ -665,6 +706,7 @@ mod tests {
             tags: None,
             linked_task_id: None,
             project_id: None,
+            pinned: None,
         }).await.unwrap();
         assert_eq!(search_notes_impl(&pool, "плов".into()).await.unwrap().len(), 1);
         assert!(search_notes_impl(&pool, "капуст".into()).await.unwrap().is_empty());
@@ -807,6 +849,7 @@ mod tests {
             tags: Some(vec!["done".into()]),
             linked_task_id: Some(None),
             project_id: Some(None),
+            pinned: None,
         }).await.unwrap();
         assert_eq!(updated.tags, vec!["done"]);
         assert_eq!(updated.linked_task_id, None);
@@ -814,7 +857,7 @@ mod tests {
     }
 
     fn content_patch(content: &str) -> UpdateNote {
-        UpdateNote { title: None, content: Some(content.into()), tags: None, linked_task_id: None, project_id: None }
+        UpdateNote { title: None, content: Some(content.into()), tags: None, linked_task_id: None, project_id: None, pinned: None }
     }
 
     async fn revision_count(pool: &SqlitePool, note_id: &str) -> i64 {
