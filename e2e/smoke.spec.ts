@@ -804,6 +804,14 @@ test("дашборд: клик по дню открывает попап, кли
 
   await expect(page.locator(".cal-popup")).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Задачи" })).toBeVisible();
+
+  // Регресс: задача завершена (история) — должна открыться read-only
+  // TaskHistoryDetail, а не редактируемая TaskModal (без select "Повтор"/
+  // "Редактировать задачу" в заголовке — тех полей у выполненной задачи
+  // уже нет смысла трогать).
+  await expect(page.locator(".dialog-title", { hasText: "сделанное дело" })).toBeVisible();
+  await expect(page.getByLabel("Повтор")).toHaveCount(0);
+  await expect(page.getByText("Редактировать задачу")).toHaveCount(0);
 });
 
 test("сортировка: drag строки меняет порядок, порядок переживает перезагрузку", async ({ page }) => {

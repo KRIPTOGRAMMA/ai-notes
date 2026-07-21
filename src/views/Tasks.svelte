@@ -20,6 +20,7 @@
   let showTrash = $state(false);
   let showCreateModal = $state(false);
   let editingTask: Task | null = $state(null);
+  let historyDetailTask: Task | null = $state(null);
 
   // Проекты: фильтр списка ("all" | "none" | id) и модал управления
   let projectFilter = $state<string>("all");
@@ -142,12 +143,19 @@
     taskStore.load();
   }
 
-  // Открытие задачи по сигналу из глобального поиска (Ctrl+K).
+  // Открытие задачи по сигналу извне (глобальный поиск Ctrl+K, попап дня в
+  // Дашборде/Календаре). Завершённая задача (hidden) — это история: открываем
+  // read-only TaskHistoryDetail, а не редактируемую TaskModal, иначе клик по
+  // выполненной задаче из попапа дня открывал бы её как активную для правки
+  // (дедлайн/повтор и т.п. уже не имеют смысла для того, что давно сделано).
   $effect(() => {
     const id = taskStore.focusTaskId;
     if (!id) return;
     const task = taskStore.tasks.find(t => t.id === id);
-    if (task) editingTask = task;
+    if (task) {
+      if (task.hidden) historyDetailTask = task;
+      else editingTask = task;
+    }
     taskStore.clearFocus();
   });
 
@@ -310,8 +318,6 @@
       commitDraft(taskId);
     }
   }
-
-  let historyDetailTask: Task | null = $state(null);
 
   let expanded = $state<Record<string, boolean>>({});
 
