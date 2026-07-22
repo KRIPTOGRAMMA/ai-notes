@@ -549,6 +549,16 @@ pub async fn export_notes_md_impl(pool: &SqlitePool, dir: &std::path::Path) -> A
     Ok(count)
 }
 
+// Экспорт одной заметки в самодостаточный HTML-файл (v0.9.08). Рендер
+// markdown → HTML и встраивание картинок как data: URI делает фронт
+// (renderMarkdown + DOMPurify уже там), команда лишь пишет готовую строку
+// на диск — как export_notes_md, но без обращения к БД.
+#[tauri::command]
+pub fn export_note_html(path: String, html: String) -> AppResult<()> {
+    std::fs::write(&path, html)?;
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn import_notes_md(pool: State<'_, SqlitePool>, dir: String) -> AppResult<usize> {
     import_notes_md_impl(pool.inner(), std::path::Path::new(&dir)).await

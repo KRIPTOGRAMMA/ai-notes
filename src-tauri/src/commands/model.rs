@@ -9,6 +9,62 @@ pub const DEFAULT_MODEL_URL: &str =
     "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf";
 
 #[derive(Clone, Serialize)]
+pub struct ModelOption {
+    pub id: String,
+    pub name: String,
+    pub url: String,
+    pub size_bytes: u64,
+    pub description: String,
+    pub ram_gb: u8,
+    pub recommended: bool,
+}
+
+// Курируемый список (v0.9.07) — только реальные GGUF-квантизации с HuggingFace,
+// проверенные вручную (не выдуманные URL/размеры). size_bytes — размер файла
+// квантизации на HF на момент добавления списка (может незначительно
+// отличаться от актуального, если автор перезалил файл — не критично, это
+// ориентир для пользователя перед скачиванием, а не проверка целостности).
+// download_model()/model_status() не меняются: любая модель из списка (или
+// вручную вставленный URL, поле остаётся редактируемым) кладётся под тем же
+// именем model.gguf — sidecar.rs не завязан на конкретную модель.
+pub fn model_catalog() -> Vec<ModelOption> {
+    vec![
+        ModelOption {
+            id: "qwen2.5-0.5b".into(),
+            name: "Qwen2.5 0.5B Instruct".into(),
+            url: DEFAULT_MODEL_URL.into(),
+            size_bytes: 491_000_000,
+            description: "Самая быстрая и лёгкая — годится для слабых машин и старых ноутбуков, но качество ответов базовое.".into(),
+            ram_gb: 2,
+            recommended: false,
+        },
+        ModelOption {
+            id: "qwen2.5-1.5b".into(),
+            name: "Qwen2.5 1.5B Instruct".into(),
+            url: "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf".into(),
+            size_bytes: 1_120_000_000,
+            description: "Баланс скорости и качества — заметно лучше 0.5B в рассуждениях, всё ещё быстрая на CPU.".into(),
+            ram_gb: 3,
+            recommended: true,
+        },
+        ModelOption {
+            id: "phi-3.5-mini".into(),
+            name: "Phi-3.5 Mini Instruct".into(),
+            url: "https://huggingface.co/bartowski/Phi-3.5-mini-instruct-GGUF/resolve/main/Phi-3.5-mini-instruct-Q4_K_M.gguf".into(),
+            size_bytes: 2_390_000_000,
+            description: "Лучшее качество из трёх — точнее держит инструкции и контекст, но медленнее и требует больше памяти.".into(),
+            ram_gb: 5,
+            recommended: false,
+        },
+    ]
+}
+
+#[tauri::command]
+pub fn list_model_options() -> Vec<ModelOption> {
+    model_catalog()
+}
+
+#[derive(Clone, Serialize)]
 pub struct DownloadProgress {
     pub downloaded: u64,
     pub total: u64,
@@ -33,11 +89,6 @@ pub(crate) fn local_model_available(app: &AppHandle) -> bool {
         .app_data_dir()
         .map(|d| d.join("models").join("model.gguf").exists())
         .unwrap_or(false)
-}
-
-#[tauri::command]
-pub fn default_model_url() -> String {
-    DEFAULT_MODEL_URL.to_string()
 }
 
 #[tauri::command]
@@ -87,4 +138,38 @@ pub async fn download_model(app: AppHandle, url: String) -> Result<(), String> {
     std::fs::rename(&part_path, &final_path).map_err(|e| e.to_string())?;
     let _ = app.emit("model-download-progress", DownloadProgress { downloaded, total, pct: 100 });
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[test]
+    fn catalog_ids_are_unique_and_non_empty() {
+        let catalog = model_catalog();
+        assert!(!catalog.is_empty());
+        let ids: HashSet<&str> = catalog.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids.len(), catalog.len());
+    }
+
+    #[test]
+    fn catalog_has_exactly_one_recommended_entry() {
+        let recommended = model_catalog().into_iter().filter(|m| m.recommended).count();
+        assert_eq!(recommended, 1);
+    }
+
+    #[test]
+    fn catalog_contains_default_model_url_entry() {
+        let catalog = model_catalog();
+        assert!(catalog.iter().any(|m| m.url == DEFAULT_MODEL_URL));
+    }
+
+    #[test]
+    fn catalog_urls_are_https_and_unique() {
+        let catalog = model_catalog();
+        let urls: HashSet<&str> = catalog.iter().map(|m| m.url.as_str()).collect();
+        assert_eq!(urls.len(), catalog.len());
+        assert!(catalog.iter().all(|m| m.url.starts_with("https://")));
+    }
 }

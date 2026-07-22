@@ -33,6 +33,7 @@
     resolveExists = () => false,
     onWikiLinkClick,
     onSubmitShortcut,
+    onSelectionChange,
   }: {
     value: string;
     placeholder?: string;
@@ -40,6 +41,7 @@
     resolveExists?: (title: string) => boolean;
     onWikiLinkClick?: (title: string) => void;
     onSubmitShortcut?: () => void;
+    onSelectionChange?: (sel: { text: string; from: number; to: number; left: number; top: number } | null) => void;
   } = $props();
 
   let hostEl: HTMLDivElement | undefined = $state();
@@ -860,6 +862,9 @@
         if (update.docChanged) {
           value = update.state.doc.toString();
         }
+        if (update.docChanged || update.selectionSet) {
+          reportSelection(update.view);
+        }
       }),
     ];
 
@@ -884,6 +889,43 @@
 
   export function focus() {
     view?.focus();
+  }
+
+  // ИИ по выделению (v0.9.09): сообщаем родителю о непустом выделении, чтобы
+  // тот мог показать плавающее меню действий рядом с ним. Координаты — уже
+  // страничные (coordsAtPos отдаёт viewport-relative rect самого view, а не
+  // хоста), родителю не нужно ничего пересчитывать.
+  function reportSelection(v: EditorView) {
+    if (!onSelectionChange) return;
+    const range = v.state.selection.main;
+    if (range.empty) {
+      onSelectionChange(null);
+      return;
+    }
+    const text = v.state.sliceDoc(range.from, range.to);
+    const coords = v.coordsAtPos(range.head);
+    if (!coords) {
+      onSelectionChange(null);
+      return;
+    }
+    onSelectionChange({ text, from: range.from, to: range.to, left: coords.left, top: coords.top });
+  }
+
+  // Замена диапазона результатом ИИ-действия над выделением. from/to — это
+  // позиции на момент открытия меню; вызывающая сторона должна дождаться
+  // ответа модели прежде, чем звать этот метод, но документ мог измениться
+  // за это время — если диапазон уже не совпадает с текущим выделением
+  // (пользователь кликнул/напечатал), правка всё равно применяется по тем же
+  // числовым позициям (безопасно, т.к. это уже финальное подтверждённое
+  // действие пользователя, а не фоновая операция).
+  export function replaceRange(from: number, to: number, text: string) {
+    if (!view) return;
+    view.dispatch({
+      changes: { from, to, insert: text },
+      selection: EditorSelection.cursor(from + text.length),
+      scrollIntoView: true,
+    });
+    view.focus();
   }
 
   // Форматирование из внешней панели инструментов (v0.9.05): оборачивает

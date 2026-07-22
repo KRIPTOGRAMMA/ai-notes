@@ -419,6 +419,10 @@
       persist();
       return count;
     },
+    export_note_html: ({ path, html }) => {
+      db.exportedHtml = { path, html };
+      persist();
+    },
     save_note_image: ({ dataBase64, ext }) => {
       const filename = `${uuid()}.${ext}`;
       if (!db.images) db.images = [];
@@ -524,8 +528,34 @@
         error: titles.length === 0 ? "Больше нет заметок, с которыми можно связать эту" : null,
       }), 0);
     },
+    // ИИ по выделению (v0.9.09): детерминированный «ИИ» — просто помечает
+    // текст меткой действия, чтобы e2e-тест мог проверить, что в редактор
+    // подставился именно результат нужного запроса.
+    ai_edit_selection: ({ requestId, text, mode }) => {
+      setTimeout(() => window.__mockEmit("ai-selection-result", {
+        request_id: requestId,
+        result: `[${mode}] ${text}`,
+        error: null,
+      }), 0);
+    },
+    // ИИ: резюме заметки (v0.9.10) — детерминированный «ИИ» возвращает
+    // фиксированный список пунктов с длиной исходного текста внутри, чтобы
+    // тест мог проверить и сам факт вызова, и то, что окно показывает
+    // именно результат этого запроса.
+    ai_summarize_note: ({ requestId, text }) => {
+      setTimeout(() => window.__mockEmit("ai-note-summary", {
+        request_id: requestId,
+        result: `- Пункт резюме (длина текста: ${text.length})`,
+        error: null,
+      }), 0);
+    },
     model_status: () => ({ exists: false, size_bytes: 0 }),
-    default_model_url: () => "",
+    list_model_options: () => ([
+      { id: "qwen2.5-0.5b", name: "Qwen2.5 0.5B Instruct", url: "https://example.com/qwen2.5-0.5b.gguf", size_bytes: 491000000, description: "Самая быстрая и лёгкая — базовое качество.", ram_gb: 2, recommended: false },
+      { id: "qwen2.5-1.5b", name: "Qwen2.5 1.5B Instruct", url: "https://example.com/qwen2.5-1.5b.gguf", size_bytes: 1120000000, description: "Баланс скорости и качества.", ram_gb: 3, recommended: true },
+      { id: "phi-3.5-mini", name: "Phi-3.5 Mini Instruct", url: "https://example.com/phi-3.5-mini.gguf", size_bytes: 2390000000, description: "Лучшее качество, но медленнее.", ram_gb: 5, recommended: false },
+    ]),
+    download_model: () => {},
     export: () => {},
     import: () => {},
     do_auto_backup: () => "ai-notes-backup-2026-07-17-1600.zip",

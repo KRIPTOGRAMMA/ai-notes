@@ -32,6 +32,7 @@
     wikilink: "M7 8H6a4 4 0 0 0 0 8h1 M17 8h1a4 4 0 0 1 0 8h-1 M9 12h6",
     code:     "M9 6 3 12l6 6 M15 6l6 6-6 6",
     table:    "M3 4h18v16H3Z M3 10h18 M3 16h18 M9 4v16 M15 4v16",
+    export:   "M12 15V3 M7 8l5-5 5 5 M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4",
   };
 
   let { name, size = 14 }: { name: string; size?: number } = $props();

@@ -18,6 +18,84 @@ const SYSTEM_INSIGHT: &str =
 const SYSTEM_SUMMARY: &str =
     "Ты ассистент по продуктивности. Составь краткое резюме периода (3–5 предложений): что сделано, сколько активного времени, прогресс целей (если есть), что требует внимания. По-русски, только текст.";
 
+// ИИ по выделению в редакторе заметок (v0.9.09): выделил текст -> одно из
+// действий ниже -> модель возвращает только заменяющий текст, без пояснений
+// и без markdown-обёртки цитаты — иначе пришлось бы чистить ответ так же,
+// как parse_subtasks чистит списки.
+const SYSTEM_SELECTION_REWRITE: &str =
+    "Перепиши следующий фрагмент текста, сохранив смысл и язык оригинала, но улучшив стиль и ясность. Ответь только новым текстом, без пояснений и кавычек.";
+const SYSTEM_SELECTION_SHORTEN: &str =
+    "Сократи следующий фрагмент текста, сохранив ключевой смысл и язык оригинала. Ответь только новым текстом, без пояснений и кавычек.";
+const SYSTEM_SELECTION_EXPAND: &str =
+    "Разверни следующий фрагмент текста, добавив уместные детали, сохранив язык оригинала. Ответь только новым текстом, без пояснений и кавычек.";
+const SYSTEM_SELECTION_GRAMMAR: &str =
+    "Исправь грамматику, орфографию и пунктуацию в следующем фрагменте текста, не меняя смысл и стиль. Ответь только исправленным текстом, без пояснений и кавычек.";
+
+#[derive(Clone, Serialize)]
+pub struct SelectionEditPayload {
+    pub request_id: String,
+    pub result: Option<String>,
+    pub error: Option<String>,
+}
+
+fn selection_system_prompt(mode: &str) -> Result<&'static str, String> {
+    match mode {
+        "rewrite" => Ok(SYSTEM_SELECTION_REWRITE),
+        "shorten" => Ok(SYSTEM_SELECTION_SHORTEN),
+        "expand" => Ok(SYSTEM_SELECTION_EXPAND),
+        "grammar" => Ok(SYSTEM_SELECTION_GRAMMAR),
+        _ => Err(format!("Неизвестное действие: {mode}")),
+    }
+}
+
+#[tauri::command]
+pub async fn ai_edit_selection(
+    app: tauri::AppHandle,
+    request_id: String,
+    text: String,
+    mode: String,
+) -> Result<(), String> {
+    tokio::spawn(async move {
+        let r = async {
+            let system = selection_system_prompt(&mode)?;
+            ask_ai(&app, system, &text).await
+        }.await;
+        let payload = match r {
+            Ok(result) => SelectionEditPayload { request_id, result: Some(strip_wrapping(&result).to_string()), error: None },
+            Err(e) => SelectionEditPayload { request_id, result: None, error: Some(e) },
+        };
+        let _ = app.emit("ai-selection-result", payload);
+    });
+    Ok(())
+}
+
+// ИИ: резюме длинной заметки (v0.9.10) — кнопка сжимает содержимое заметки
+// в 3-5 пунктов. Отдельный промпт от SYSTEM_SUMMARY (тот — про сводку
+// активности/задач за период, а не про текст произвольной заметки).
+const SYSTEM_NOTE_SUMMARY: &str =
+    "Сожми следующую заметку в 3-5 кратких пунктов с ключевыми мыслями. Ответь только списком пунктов \
+через перенос строки, каждый начинается с \"- \", без вступления и пояснений, на языке заметки.";
+
+#[derive(Clone, Serialize)]
+pub struct NoteSummaryPayload {
+    pub request_id: String,
+    pub result: Option<String>,
+    pub error: Option<String>,
+}
+
+#[tauri::command]
+pub async fn ai_summarize_note(app: tauri::AppHandle, request_id: String, text: String) -> Result<(), String> {
+    tokio::spawn(async move {
+        let r = ask_ai(&app, SYSTEM_NOTE_SUMMARY, &text).await;
+        let payload = match r {
+            Ok(result) => NoteSummaryPayload { request_id, result: Some(result.trim().to_string()), error: None },
+            Err(e) => NoteSummaryPayload { request_id, result: None, error: Some(e) },
+        };
+        let _ = app.emit("ai-note-summary", payload);
+    });
+    Ok(())
+}
+
 #[derive(Clone, Serialize)]
 pub struct AiResult {
     pub task_id: String,
@@ -602,5 +680,26 @@ mod tests {
         let raw = serde_json::to_string(&items).unwrap();
         let result = parse_subtasks(&raw).unwrap();
         assert_eq!(result.split("|||").count(), MAX_SUBTASKS);
+    }
+
+    // --- ИИ по выделению (v0.9.09) ---
+
+    #[test]
+    fn selection_mode_maps_to_distinct_prompts() {
+        let rewrite = selection_system_prompt("rewrite").unwrap();
+        let shorten = selection_system_prompt("shorten").unwrap();
+        let expand = selection_system_prompt("expand").unwrap();
+        let grammar = selection_system_prompt("grammar").unwrap();
+        let all = [rewrite, shorten, expand, grammar];
+        for (i, a) in all.iter().enumerate() {
+            for (j, b) in all.iter().enumerate() {
+                if i != j { assert_ne!(a, b); }
+            }
+        }
+    }
+
+    #[test]
+    fn unknown_selection_mode_is_rejected() {
+        assert!(selection_system_prompt("delete-everything").is_err());
     }
 }

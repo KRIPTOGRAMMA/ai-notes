@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Task, Subtask, CreateTaskPayload, UpdateTaskPayload, Note, CreateNotePayload, UpdateNotePayload, AppSettings, Project, UpdateProjectPayload, CategoryInfo, NoteSnippet, TaskSnippet, GoalSnapshot, Routine, RoutineBlock, ActiveSession, NoteRevision, ChecklistTemplate, DayCompletion } from "../types";
+import type { Task, Subtask, CreateTaskPayload, UpdateTaskPayload, Note, CreateNotePayload, UpdateNotePayload, AppSettings, Project, UpdateProjectPayload, CategoryInfo, NoteSnippet, TaskSnippet, GoalSnapshot, Routine, RoutineBlock, ActiveSession, NoteRevision, ChecklistTemplate, DayCompletion, ModelOption } from "../types";
 
 export const api = {
   getTasks: () => invoke<Task[]>("get_tasks"),
@@ -42,6 +42,9 @@ export const api = {
   renameNoteLinks: (oldTitle: string, newTitle: string) =>
     invoke<number>("rename_note_links", { oldTitle, newTitle }),
   aiSuggestLinks: (noteId: string) => invoke<void>("ai_suggest_links", { noteId }),
+  aiEditSelection: (requestId: string, text: string, mode: string) =>
+    invoke<void>("ai_edit_selection", { requestId, text, mode }),
+  aiSummarizeNote: (requestId: string, text: string) => invoke<void>("ai_summarize_note", { requestId, text }),
   getNoteRevisions: (noteId: string) => invoke<NoteRevision[]>("get_note_revisions", { noteId }),
   getNoteRevisionContent: (revisionId: string) => invoke<string>("get_note_revision_content", { revisionId }),
   restoreNoteRevision: (revisionId: string) => invoke<Note>("restore_note_revision", { revisionId }),
@@ -49,6 +52,7 @@ export const api = {
   getImagesDir: () => invoke<string>("get_images_dir"),
   exportNotesMd: (dir: string) => invoke<number>("export_notes_md", { dir }),
   importNotesMd: (dir: string) => invoke<number>("import_notes_md", { dir }),
+  exportNoteHtml: (path: string, html: string) => invoke<void>("export_note_html", { path, html }),
   getChecklistTemplates: () => invoke<ChecklistTemplate[]>("get_checklist_templates"),
   createChecklistTemplate: (name: string, items: string[]) =>
     invoke<ChecklistTemplate>("create_checklist_template", { name, items }),
@@ -98,7 +102,7 @@ export const api = {
   getActiveSession: () => invoke<ActiveSession | null>("get_active_session"),
   getTaskSeconds: (taskId: string) => invoke<number>("get_task_seconds", { taskId }),
   getProjectSeconds: (projectId: string, from: string) => invoke<number>("get_project_seconds", { projectId, from }),
-  defaultModelUrl: () => invoke<string>("default_model_url"),
+  listModelOptions: () => invoke<ModelOption[]>("list_model_options"),
   modelStatus: () => invoke<{ exists: boolean; size_bytes: number }>("model_status"),
   downloadModel: (url: string) => invoke<void>("download_model", { url }),
 };

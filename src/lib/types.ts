@@ -240,3 +240,13 @@ export interface ActiveSession {
   started_at: string;
   elapsed_secs: number;
 }
+
+export interface ModelOption {
+  id: string;
+  name: string;
+  url: string;
+  size_bytes: number;
+  description: string;
+  ram_gb: number;
+  recommended: boolean;
+}

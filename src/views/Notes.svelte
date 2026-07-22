@@ -5,10 +5,12 @@
   import { taskStore } from "../lib/stores/tasks.svelte";
   import { projectStore } from "../lib/stores/projects.svelte";
   import { api } from "../lib/api/tauri";
-  import { extractWikiLinks } from "../lib/markdown";
+  import { extractWikiLinks, renderMarkdown } from "../lib/markdown";
+  import { convertFileSrc } from "@tauri-apps/api/core";
+  import { save as saveDialog } from "@tauri-apps/plugin-dialog";
   import Icon from "../lib/components/Icon.svelte";
   import type { Note, NoteRevision } from "../lib/types";
-  type EditorExports = { focus: () => void; formatBold: () => void; formatItalic: () => void; formatCode: () => void; formatHeading: () => void; formatChecklist: () => void; formatWikiLink: () => void; insertTable: () => void };
+  type EditorExports = { focus: () => void; formatBold: () => void; formatItalic: () => void; formatCode: () => void; formatHeading: () => void; formatChecklist: () => void; formatWikiLink: () => void; insertTable: () => void; replaceRange: (from: number, to: number, text: string) => void };
   let editorRef: EditorExports | undefined = $state();
 
   let selectedId: string | null = $state(null);
@@ -104,6 +106,9 @@
     editLinkedTaskId = note.linked_task_id;
     editProjectId = note.project_id;
     linkSuggestions = null;
+    selectionMenu = null;
+    selectionResult = null;
+    summaryResult = null;
   }
 
   // CodeMirror меняет editContent напрямую через bind:value (без oninput-хука),
@@ -277,12 +282,192 @@
       : null;
   }
 
+  // --- ИИ по выделению в редакторе (v0.9.09): выделил текст -> меню действий
+  // рядом -> модель предлагает замену -> подтверждение/отмена. Тот же
+  // suggest-then-confirm паттерн, что автолинковка выше, просто с выбором
+  // одного из 4 действий и предпросмотром результата вместо списка чипов.
+  type SelectionMenu = { text: string; from: number; to: number; left: number; top: number };
+  type SelectionAction = "rewrite" | "shorten" | "expand" | "grammar";
+  const SELECTION_ACTION_LABELS: Record<SelectionAction, string> = {
+    rewrite: "Переписать", shorten: "Сократить", expand: "Развернуть", grammar: "Грамматика",
+  };
+  let selectionMenu: SelectionMenu | null = $state(null);
+  let selectionBusy = $state(false);
+  let selectionResult: { requestId: string; text: string; error: string | null } | null = $state(null);
+  let selectionRequestId: string | null = null;
+
+  function onEditorSelectionChange(sel: SelectionMenu | null) {
+    // Пока идёт запрос или показан результат — не даём меню выделения
+    // перескочить на новый диапазон под курсором.
+    if (selectionBusy || selectionResult) return;
+    selectionMenu = sel;
+  }
+
+  async function runSelectionAction(action: SelectionAction) {
+    if (!selectionMenu || !aiEnabled) return;
+    const requestId = crypto.randomUUID();
+    selectionRequestId = requestId;
+    selectionBusy = true;
+    selectionResult = null;
+    try {
+      await api.aiEditSelection(requestId, selectionMenu.text, action);
+    } catch (e) {
+      selectionBusy = false;
+      selectionResult = { requestId, text: "", error: String(e) };
+    }
+  }
+
+  function acceptSelectionResult() {
+    if (!selectionMenu || !selectionResult || selectionResult.error) return;
+    editorRef?.replaceRange(selectionMenu.from, selectionMenu.to, selectionResult.text);
+    selectionMenu = null;
+    selectionResult = null;
+  }
+
+  function dismissSelectionResult() {
+    selectionResult = null;
+    selectionMenu = null;
+  }
+
+  // --- ИИ: резюме заметки (v0.9.10) — окошко с 3-5 пунктами, клик по тексту
+  // копирует его в буфер и закрывает окно. Read-only результат без
+  // подтверждения-в-документ (в отличие от автолинковки/ИИ по выделению) —
+  // резюме не подставляется в заметку, оно просто для быстрого копирования
+  // куда угодно (чат, другую заметку, задачу).
+  let summarizing = $state(false);
+  let summaryResult: { requestId: string; text: string; error: string | null } | null = $state(null);
+  let summaryRequestId: string | null = null;
+  let summaryCopied = $state(false);
+
+  async function summarizeNote() {
+    if (!selected) return;
+    const requestId = crypto.randomUUID();
+    summaryRequestId = requestId;
+    summarizing = true;
+    summaryResult = null;
+    summaryCopied = false;
+    try {
+      await api.aiSummarizeNote(requestId, editContent);
+    } catch (e) {
+      summarizing = false;
+      summaryResult = { requestId, text: "", error: String(e) };
+    }
+  }
+
+  async function copySummaryAndClose() {
+    if (!summaryResult || summaryResult.error) return;
+    try {
+      const { writeText } = await import("@tauri-apps/plugin-clipboard-manager");
+      await writeText(summaryResult.text);
+      summaryCopied = true;
+    } catch {
+      // буфер обмена недоступен — окно всё равно закрываем ниже, просто без копии
+    }
+    setTimeout(() => { summaryResult = null; summaryCopied = false; }, summaryCopied ? 400 : 0);
+  }
+
+  function closeSummary() {
+    summaryResult = null;
+    summaryCopied = false;
+  }
+
   // --- Версии заметки (v0.7.12) ---
   let revisionsOpen = $state(false);
   let revisions: NoteRevision[] = $state([]);
   let viewingRevisionId: string | null = $state(null);
   let viewingRevisionContent = $state("");
   let revisionsBusy = $state(false);
+
+  // --- Экспорт заметки в HTML (v0.9.08) ---
+  // Картинки хранятся файлами на диске (images_dir/<uuid>.<ext>), в редакторе
+  // они резолвятся через asset:// (convertFileSrc). Экспорт должен быть
+  // самодостаточным файлом — поэтому вместо asset:// зашиваем содержимое
+  // картинок как data: URI прямо в HTML.
+  let exporting = $state(false);
+
+  async function embedImages(html: string): Promise<string> {
+    const filenames = new Set<string>();
+    for (const m of html.matchAll(/<img[^>]+src="([^"]+)"/g)) {
+      filenames.add(m[1]);
+    }
+    if (filenames.size === 0) return html;
+
+    const imagesDir = await api.getImagesDir().catch(() => null);
+    if (!imagesDir) return html;
+
+    const replacements = new Map<string, string>();
+    await Promise.all(
+      [...filenames].map(async (filename) => {
+        try {
+          const assetUrl = convertFileSrc(`${imagesDir}/${filename}`);
+          const res = await fetch(assetUrl);
+          const blob = await res.blob();
+          const dataUrl = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+          replacements.set(filename, dataUrl);
+        } catch {
+          // картинка недоступна — оставляем исходный src как есть
+        }
+      })
+    );
+
+    let out = html;
+    for (const [filename, dataUrl] of replacements) {
+      out = out.split(`src="${filename}"`).join(`src="${dataUrl}"`);
+    }
+    return out;
+  }
+
+  function exportHtmlDocument(title: string, bodyHtml: string): string {
+    const escapedTitle = title.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    return `<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>${escapedTitle}</title>
+<style>
+  body { max-width: 780px; margin: 2rem auto; padding: 0 1.5rem; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.6; color: #1a1a1a; }
+  h1, h2, h3 { line-height: 1.3; }
+  img { max-width: 100%; }
+  pre { background: #f4f4f5; padding: 0.75rem 1rem; border-radius: 6px; overflow-x: auto; }
+  code { background: #f4f4f5; padding: 0.15em 0.4em; border-radius: 4px; }
+  pre code { background: none; padding: 0; }
+  blockquote { border-left: 3px solid #d4d4d8; margin-left: 0; padding-left: 1rem; color: #52525b; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid #d4d4d8; padding: 0.4rem 0.6rem; text-align: left; }
+  a.wikilink { color: #6366f1; text-decoration: none; }
+  @media print { body { margin: 0; } }
+</style>
+</head>
+<body>
+<h1>${escapedTitle}</h1>
+${bodyHtml}
+</body>
+</html>
+`;
+  }
+
+  async function exportNoteAsHtml() {
+    if (!selected) return;
+    exporting = true;
+    try {
+      const rendered = renderMarkdown(editContent);
+      const withImages = await embedImages(rendered);
+      const html = exportHtmlDocument(editTitle || selected.title, withImages);
+      const path = await saveDialog({
+        defaultPath: `${(editTitle || selected.title || "Без названия").replace(/[/\\:*?"<>|]/g, "_")}.html`,
+        filters: [{ name: "HTML", extensions: ["html"] }],
+      });
+      if (!path) return;
+      await api.exportNoteHtml(path, html);
+    } finally {
+      exporting = false;
+    }
+  }
 
   async function openRevisions() {
     if (!selectedId) return;
@@ -327,6 +512,16 @@
       unlisteners.push(await listen<{ note_id: string; titles: string[]; error: string | null }>("ai-links", (e) => {
         linkSuggesting = false;
         linkSuggestions = { noteId: e.payload.note_id, titles: e.payload.titles, error: e.payload.error };
+      }));
+      unlisteners.push(await listen<{ request_id: string; result: string | null; error: string | null }>("ai-selection-result", (e) => {
+        if (e.payload.request_id !== selectionRequestId) return; // ответ на уже закрытый/сменённый запрос
+        selectionBusy = false;
+        selectionResult = { requestId: e.payload.request_id, text: e.payload.result ?? "", error: e.payload.error };
+      }));
+      unlisteners.push(await listen<{ request_id: string; result: string | null; error: string | null }>("ai-note-summary", (e) => {
+        if (e.payload.request_id !== summaryRequestId) return;
+        summarizing = false;
+        summaryResult = { requestId: e.payload.request_id, text: e.payload.result ?? "", error: e.payload.error };
       }));
     })();
     return () => unlisteners.forEach(u => u());
@@ -407,6 +602,12 @@
         {/if}
         {#if !zenMode}
           <button class="btn-icon" title="Версии заметки" onclick={openRevisions}><Icon name="clock" /></button>
+          {#if aiEnabled}
+            <button class="btn-icon" disabled={summarizing} title="ИИ: резюме заметки" onclick={summarizeNote}>
+              {#if summarizing}…{:else}<Icon name="sparkles" />{/if}
+            </button>
+          {/if}
+          <button class="btn-icon" disabled={exporting} title="Экспорт в HTML" onclick={exportNoteAsHtml}><Icon name="export" /></button>
         {/if}
         <button class="btn-icon" title={zenMode ? "Выйти из zen-режима (Esc)" : "Zen-режим (Ctrl+Shift+Z)"} onclick={toggleZen}>
           <Icon name={zenMode ? "collapse" : "expand"} />
@@ -502,9 +703,36 @@
               resolveExists={(t) => findByTitle(t) !== null}
               onWikiLinkClick={openWikiLink}
               onSubmitShortcut={() => {}}
+              onSelectionChange={aiEnabled && !zenMode ? onEditorSelectionChange : undefined}
             />
           {/await}
         {/key}
+
+        {#if selectionMenu && aiEnabled && !zenMode}
+          <!-- position: fixed — coordsAtPos отдаёт viewport-relative координаты,
+               .editor-body не единственный positioned-предок в дереве (zen-режим
+               делает fixed-оверлей на .editor-pane), так что fixed надёжнее, чем
+               пересчёт в систему координат ближайшего relative-родителя. -->
+          <div class="selection-menu" style="left:{selectionMenu.left}px; top:{selectionMenu.top}px;">
+            {#if selectionBusy}
+              <span class="muted" style="padding:4px 8px;">Думаю…</span>
+            {:else if selectionResult}
+              {#if selectionResult.error}
+                <span class="alert" style="margin:0; padding:4px 8px;">{selectionResult.error}</span>
+                <button class="btn-icon" title="Закрыть" onclick={dismissSelectionResult}>✕</button>
+              {:else}
+                <div class="selection-preview">{selectionResult.text}</div>
+                <button class="btn-icon" title="Заменить выделение" onclick={acceptSelectionResult}>✓</button>
+                <button class="btn-icon" title="Отмена" onclick={dismissSelectionResult}>✕</button>
+              {/if}
+            {:else}
+              {#each Object.entries(SELECTION_ACTION_LABELS) as [action, label] (action)}
+                <button class="chip" onclick={() => runSelectionAction(action as SelectionAction)}>{label}</button>
+              {/each}
+              <button class="btn-icon" title="Закрыть" onclick={() => selectionMenu = null}>✕</button>
+            {/if}
+          </div>
+        {/if}
       </div>
 
       {#if !zenMode && backlinks.length > 0}
@@ -556,6 +784,28 @@
       <div class="actions">
         <button class="btn-ghost" onclick={closeRevisions}>Закрыть</button>
       </div>
+    </div>
+  </div>
+{/if}
+
+{#if summarizing || summaryResult}
+  <div class="backdrop" role="presentation" onclick={closeSummary} onkeydown={(e) => e.key === "Escape" && closeSummary()}>
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <div class="dialog card summary-dialog" role="dialog" onclick={(e) => e.stopPropagation()}>
+      <h3 class="dialog-title">Резюме заметки</h3>
+      {#if summarizing}
+        <p class="muted">Сжимаю заметку…</p>
+      {:else if summaryResult?.error}
+        <p class="alert">{summaryResult.error}</p>
+        <div class="actions">
+          <button class="btn-ghost" onclick={closeSummary}>Закрыть</button>
+        </div>
+      {:else if summaryResult}
+        <button class="summary-text" title="Скопировать и закрыть" onclick={copySummaryAndClose}>
+          {summaryResult.text}
+        </button>
+        <p class="muted" style="font-size:11px;">{summaryCopied ? "Скопировано ✓" : "Клик по тексту — скопировать и закрыть"}</p>
+      {/if}
     </div>
   </div>
 {/if}
@@ -744,6 +994,30 @@
   }
   .link-chip:hover { background: color-mix(in srgb, var(--accent) 20%, transparent); }
 
+  .selection-menu {
+    position: fixed;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+    max-width: 320px;
+    padding: 6px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-card);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+    transform: translateY(8px);
+  }
+
+  .selection-preview {
+    max-height: 160px;
+    overflow-y: auto;
+    padding: 4px 6px;
+    font-size: 13px;
+    white-space: pre-wrap;
+  }
+
   .rename-toast {
     font-size: 11px;
     padding: 2px 8px;
@@ -865,6 +1139,26 @@
   .revisions-dialog {
     max-width: 640px;
   }
+
+  .summary-dialog {
+    max-width: 480px;
+  }
+
+  .summary-text {
+    display: block;
+    width: 100%;
+    text-align: left;
+    cursor: pointer;
+    white-space: pre-wrap;
+    padding: 10px 12px;
+    border: none;
+    border-radius: var(--radius);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font: inherit;
+    line-height: 1.6;
+  }
+  .summary-text:hover { background: var(--bg-hover); }
 
   .dialog-title {
     margin: 0;
