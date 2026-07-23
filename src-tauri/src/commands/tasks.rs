@@ -123,6 +123,43 @@ pub async fn restore_task_impl(pool: &SqlitePool, id: String) -> Result<(), Stri
   Ok(())
 }
 
+// Не чаще раза в 24ч — та же логика "пора ли", что auto_backup_due
+// (commands/backup.rs), тот же ключ настройки last_* хранит момент прошлого
+// прогона. Выключено, если history_cleanup_months = 0.
+pub async fn history_cleanup_due(pool: &SqlitePool) -> bool {
+    let months = crate::commands::settings::get_u64_setting(pool, "history_cleanup_months", 0).await;
+    if months == 0 {
+        return false;
+    }
+    match crate::commands::settings::get_setting(pool, "last_history_cleanup").await {
+        Some(ts) => {
+            let Ok(parsed) = chrono::DateTime::parse_from_rfc3339(&ts) else { return true; };
+            let elapsed = Utc::now() - parsed.with_timezone(&Utc);
+            elapsed >= chrono::Duration::hours(24)
+        }
+        None => true,
+    }
+}
+
+// Авто-очистка истории (v0.9.19): выполненные задачи старше cutoff уходят в
+// Корзину тем же мягким механизмом, что и ручное удаление — completed_at не
+// трогается, поэтому стрики/тепловая карта на дашборде (читают tasks.completed_at
+// напрямую, без отдельного лога) не искажаются задним числом. Возвращает
+// количество перенесённых задач (для журнала/тестов).
+pub async fn cleanup_old_history_impl(pool: &SqlitePool, cutoff: DateTime<Utc>) -> Result<u64, String> {
+    let result = sqlx::query(
+        "UPDATE tasks SET deleted_at = ?
+         WHERE hidden = 1 AND deleted_at IS NULL AND completed_at IS NOT NULL AND completed_at < ?"
+    )
+    .bind(Utc::now().to_rfc3339())
+    .bind(cutoff.to_rfc3339())
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    Ok(result.rows_affected())
+}
+
 #[tauri::command]
 pub async fn purge_deleted_task(pool: State<'_, SqlitePool>, id: String) -> Result<(), String> {
   purge_deleted_task_impl(pool.inner(), id).await
@@ -797,5 +834,76 @@ mod tests {
         let notes = get_notes_impl(&pool).await.unwrap();
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].linked_task_id, Some(t.id));
+    }
+
+    async fn set_completed_at(pool: &SqlitePool, id: &str, completed_at: DateTime<Utc>) {
+        sqlx::query("UPDATE tasks SET completed_at = ? WHERE id = ?")
+            .bind(completed_at.to_rfc3339())
+            .bind(id)
+            .execute(pool).await.unwrap();
+    }
+
+    // v0.9.19: авто-очистка истории — старые выполненные уходят в Корзину
+    // мягким удалением (deleted_at), completed_at не трогается.
+    #[tokio::test]
+    async fn cleanup_moves_only_old_completed_hidden_tasks_to_trash() {
+        let pool = test_pool().await;
+        let now = Utc::now();
+        let cutoff = now - chrono::Duration::days(90);
+
+        let old = complete_task_impl(&pool, create_task_impl(&pool, new_task("старая")).await.unwrap().id).await.unwrap();
+        set_completed_at(&pool, &old.id, now - chrono::Duration::days(120)).await;
+
+        let recent = complete_task_impl(&pool, create_task_impl(&pool, new_task("недавняя")).await.unwrap().id).await.unwrap();
+        set_completed_at(&pool, &recent.id, now - chrono::Duration::days(10)).await;
+
+        let active = create_task_impl(&pool, new_task("активная")).await.unwrap();
+
+        let moved = cleanup_old_history_impl(&pool, cutoff).await.unwrap();
+        assert_eq!(moved, 1);
+
+        let trashed = get_deleted_tasks_impl(&pool).await.unwrap();
+        assert_eq!(trashed.len(), 1);
+        assert_eq!(trashed[0].id, old.id);
+        // completed_at не тронут — дашборд-статистика не искажается
+        assert!(trashed[0].completed_at.is_some());
+
+        let visible_ids: Vec<String> = get_tasks_impl(&pool).await.unwrap().into_iter().map(|t| t.id).collect();
+        assert!(visible_ids.contains(&recent.id));
+        assert!(visible_ids.contains(&active.id));
+        assert!(!visible_ids.contains(&old.id));
+    }
+
+    #[tokio::test]
+    async fn cleanup_is_idempotent_and_ignores_active_tasks() {
+        let pool = test_pool().await;
+        let now = Utc::now();
+        let old = complete_task_impl(&pool, create_task_impl(&pool, new_task("старая")).await.unwrap().id).await.unwrap();
+        set_completed_at(&pool, &old.id, now - chrono::Duration::days(200)).await;
+
+        let cutoff = now - chrono::Duration::days(90);
+        assert_eq!(cleanup_old_history_impl(&pool, cutoff).await.unwrap(), 1);
+        // Повторный прогон — уже в Корзине, второй раз не считается
+        assert_eq!(cleanup_old_history_impl(&pool, cutoff).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn history_cleanup_due_respects_setting_and_24h_gate() {
+        use crate::commands::settings::set_setting;
+        let pool = test_pool().await;
+
+        // Выключено по умолчанию (history_cleanup_months = 0)
+        assert!(!history_cleanup_due(&pool).await);
+
+        set_setting(&pool, "history_cleanup_months", "6").await.unwrap();
+        assert!(history_cleanup_due(&pool).await, "включено и ни разу не запускалось — пора");
+
+        let recent = (Utc::now() - chrono::Duration::hours(1)).to_rfc3339();
+        set_setting(&pool, "last_history_cleanup", &recent).await.unwrap();
+        assert!(!history_cleanup_due(&pool).await, "недавно запускалось — рано");
+
+        let long_ago = (Utc::now() - chrono::Duration::hours(25)).to_rfc3339();
+        set_setting(&pool, "last_history_cleanup", &long_ago).await.unwrap();
+        assert!(history_cleanup_due(&pool).await, "прошло больше 24ч — пора снова");
     }
 }

@@ -199,6 +199,7 @@ export interface AppSettings {
   show_subtasks_expanded: boolean; // подзадачи в списке видны без клика (v0.8.3)
   keybinds: string; // JSON {action_id: combo} (v0.8.9); отсутствие ключа = дефолт действия
   focus_mode_auto: boolean; // авто-пауза уведомлений на время помодоро-работы/тайм-блока (v0.9.12)
+  history_cleanup_months: number; // выполненные старше N мес. → авто-Корзина; 0 — выкл (v0.9.19)
 }
 
 export interface AppCategoryRule {

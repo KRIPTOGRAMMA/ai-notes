@@ -2030,3 +2030,21 @@ test("напоминание у заметки: клик по уведомлен
   await expect(page.locator(".title-input")).toHaveValue("Напомненная заметка");
   await expect(page.locator(".notif-panel")).toHaveCount(0);
 });
+
+test("авто-очистка истории: настройка сохраняется и переживает перезагрузку", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Настройки" }).click();
+  await page.locator(".settings-tab", { hasText: "Данные" }).click();
+  const input = page.getByLabel("Авто-очистка истории (мес., 0 — выкл)");
+  await expect(input).toHaveValue("0");
+
+  await input.fill("6");
+  await page.getByRole("button", { name: "Сохранить", exact: true }).click();
+
+  await page.reload();
+  await page.getByRole("button", { name: "Настройки" }).click();
+  await page.locator(".settings-tab", { hasText: "Данные" }).click();
+  await expect(page.getByLabel("Авто-очистка истории (мес., 0 — выкл)")).toHaveValue("6");
+});

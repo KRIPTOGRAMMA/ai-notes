@@ -85,6 +85,8 @@ pub struct AppSettings {
     pub keybinds: String,             // v0.8.9: JSON {action_id: combo}; отсутствие ключа = дефолт действия
     #[serde(default = "default_true")]
     pub focus_mode_auto: bool,        // v0.9.12: авто-пауза уведомлений на время помодоро-работы/тайм-блока
+    #[serde(default)]
+    pub history_cleanup_months: u64,  // v0.9.19: выполненные старше N мес. → авто-Корзина; 0 — выкл
 }
 
 fn default_seven() -> u64 { 7 }
@@ -131,6 +133,7 @@ impl Default for AppSettings {
             show_subtasks_expanded: true,
             keybinds: String::new(),
             focus_mode_auto: true,
+            history_cleanup_months: 0,
         }
     }
 }
@@ -243,6 +246,7 @@ pub async fn load_settings_raw(pool: &SqlitePool) -> AppResult<AppSettings> {
     if let Some(v) = get_setting(pool, "show_subtasks_expanded").await { s.show_subtasks_expanded = v != "false"; }
     if let Some(v) = get_setting(pool, "keybinds").await { s.keybinds = v; }
     s.focus_mode_auto = get_bool_setting(pool, "focus_mode_auto", true).await;
+    s.history_cleanup_months = get_u64_setting(pool, "history_cleanup_months", 0).await;
     // Ключи: сначала keyring, затем legacy-значение из БД
     let openai_from_keyring = keyring_get("openai_key");
     let anthropic_from_keyring = keyring_get("anthropic_key");
@@ -327,6 +331,8 @@ pub async fn save_settings(
     set_setting(pool.inner(), "show_subtasks_expanded", if settings.show_subtasks_expanded { "true" } else { "false" }).await?;
     set_setting(pool.inner(), "keybinds", &settings.keybinds).await?;
     set_setting(pool.inner(), "focus_mode_auto", if settings.focus_mode_auto { "true" } else { "false" }).await?;
+    // 0 = выключено; иначе минимум 1 месяц (не даём случайно выставить 0 через долю)
+    set_setting(pool.inner(), "history_cleanup_months", &(if settings.history_cleanup_months == 0 { 0 } else { settings.history_cleanup_months.max(1) }).to_string()).await?;
 
     for (name, value) in [("openai_key", &settings.openai_key), ("anthropic_key", &settings.anthropic_key)] {
         match keyring_set(name, value) {

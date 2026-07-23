@@ -45,6 +45,7 @@
     show_subtasks_expanded: true,
     keybinds: "",
     focus_mode_auto: true,
+    history_cleanup_months: 0,
   };
 
   let db;

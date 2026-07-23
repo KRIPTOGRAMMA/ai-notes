@@ -85,6 +85,7 @@
     show_subtasks_expanded: true,
     keybinds: "",
     focus_mode_auto: true,
+    history_cleanup_months: 0,
   });
 
   let saving = $state(false);
@@ -704,6 +705,15 @@
         <span class="muted" style="font-size:12px;">{notesMdMsg}</span>
       {/if}
     </div>
+    <label class="field" style="margin-top:12px;max-width:280px;">
+      <span class="label">Авто-очистка истории (мес., 0 — выкл)</span>
+      <input type="number" min="0" bind:value={settings.history_cleanup_months} />
+    </label>
+    <p class="hint">
+      Выполненные задачи старше указанного срока автоматически переносятся
+      в Корзину (не удаляются насовсем — статистика дашборда не страдает,
+      т.к. дата выполнения не стирается). Проверяется раз в сутки.
+    </p>
   </section>
 
   <section class="card panel" class:hidden-by-search={sectionMatches[8] === false} class:hidden-by-tab={SECTION_TAB[8] !== activeTab} bind:this={sectionEls[8]}>

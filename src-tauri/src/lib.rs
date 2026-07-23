@@ -584,6 +584,23 @@ pub fn run() {
                     }
                 });
             }
+
+            // Авто-очистка истории (v0.9.19): раз в 60с проверяем суточный gate,
+            // сам перенос в Корзину — не чаще раза в 24ч (history_cleanup_due).
+            {
+                let pool_cleanup = pool.clone();
+                tokio::spawn(async move {
+                    loop {
+                        if commands::tasks::history_cleanup_due(&pool_cleanup).await {
+                            let months = commands::settings::get_u64_setting(&pool_cleanup, "history_cleanup_months", 0).await;
+                            let cutoff = chrono::Utc::now() - chrono::Duration::days(months as i64 * 30);
+                            let _ = commands::tasks::cleanup_old_history_impl(&pool_cleanup, cutoff).await;
+                            let _ = commands::settings::set_setting(&pool_cleanup, "last_history_cleanup", &chrono::Utc::now().to_rfc3339()).await;
+                        }
+                        tokio::time::sleep(Duration::from_secs(60)).await;
+                    }
+                });
+            }
             app.run(|_, _| {});
         });
 }
