@@ -4,6 +4,7 @@
   import { taskStore } from "../lib/stores/tasks.svelte";
   import { projectStore } from "../lib/stores/projects.svelte";
   import { categoryStore } from "../lib/stores/categories.svelte";
+  import { statusStore } from "../lib/stores/statuses.svelte";
   import { smartListStore } from "../lib/stores/smartLists.svelte";
   import { api } from "../lib/api/tauri";
   import { parseComposer, parseTaskText, matchCategoryQuery, SUBTASK_PREFIX } from "../lib/composer";
@@ -22,6 +23,11 @@
   let showCreateModal = $state(false);
   let editingTask: Task | null = $state(null);
   let historyDetailTask: Task | null = $state(null);
+
+  // Список/Доска (v0.9.20) — переключатель в page-head, было отдельной
+  // страницей Kanban.svelte, слито сюда, чтобы фильтры проекта/умного
+  // списка/мультивыбор были общими для обоих режимов просмотра.
+  let viewMode = $state<"list" | "board">("list");
 
   // Проекты: фильтр списка ("all" | "none" | id) и модал управления
   let projectFilter = $state<string>("all");
@@ -66,6 +72,7 @@
   onMount(() => {
     projectStore.load();
     categoryStore.load();
+    statusStore.load();
     smartListStore.load();
     // Капабилити-детект: при выключенном ИИ кнопка «Что сейчас?» просто скрыта
     api.getSettings().then(s => {
@@ -122,6 +129,21 @@
 
   const filteredActive = $derived(
     taskStore.activeTasks
+      .filter(t =>
+        projectFilter === "all" ? true :
+        projectFilter === "none" ? !t.project_id :
+        t.project_id === projectFilter
+      )
+      .filter(t => activeSmartListTest ? activeSmartListTest(t) : true)
+  );
+
+  // Доска (v0.9.20): те же фильтры (проект/умный список), что и список, но
+  // на базе taskStore.tasks, не activeTasks — выполненные задачи (hidden=true,
+  // тот же флаг, что уводит их в Историю в режиме списка) должны остаться
+  // видимыми в своей колонке на доске, а не пропадать со всей доски.
+  const boardTasks = $derived(
+    taskStore.tasks
+      .filter(t => t.status !== "Archived")
       .filter(t =>
         projectFilter === "all" ? true :
         projectFilter === "none" ? !t.project_id :
@@ -233,6 +255,83 @@
     taskStore.load();
   }
 
+  // --- Доска (v0.9.20): колонка на каждый статус из statusStore, а не
+  // жёстко Todo/InProgress/Done — пользователь может добавлять свои. ---
+  function boardTasksFor(statusId: string): Task[] {
+    return boardTasks
+      .filter(t => t.status === statusId)
+      .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+  }
+
+  // Drag-and-drop: карточка → колонка (не карточка → карточка, как ручная
+  // сортировка списка выше) — один dropzone на колонку, без ручного порядка
+  // внутри неё (сортируем по updated_at).
+  let boardDragTaskId: string | null = $state(null);
+  let boardDropTargetStatus: string | null = $state(null);
+
+  function cardDragStart(e: DragEvent, task: Task) {
+    boardDragTaskId = task.id;
+    e.dataTransfer?.setData("text/plain", task.id);
+    if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+  }
+
+  function columnDragOver(e: DragEvent, statusId: string) {
+    if (!boardDragTaskId) return;
+    e.preventDefault();
+    boardDropTargetStatus = statusId;
+  }
+
+  async function columnDrop(e: DragEvent, statusId: string) {
+    e.preventDefault();
+    const taskId = boardDragTaskId ?? e.dataTransfer?.getData("text/plain");
+    boardDragTaskId = null;
+    boardDropTargetStatus = null;
+    if (!taskId) return;
+    const task = taskStore.tasks.find(t => t.id === taskId);
+    if (!task || task.status === statusId) return;
+    await moveToStatus(task, statusId);
+  }
+
+  // InProgress/Done — особые случаи с side-эффектами (тайм-трекинг,
+  // завершение), см. api.completeTask/startTaskTracking; остальные статусы
+  // (включая пользовательские) — обычный update_task.
+  async function moveToStatus(task: Task, statusId: string) {
+    if (task.status === "InProgress" && statusId !== "InProgress" && trackingId === task.id) {
+      await api.stopTaskTracking();
+      trackingId = null;
+    }
+    if (statusId === "Done") {
+      await api.completeTask(task.id);
+    } else if (statusId === "InProgress") {
+      await api.startTaskTracking(task.id);
+      trackingId = task.id;
+    } else {
+      await api.updateTask(task.id, { status: statusId });
+    }
+    await taskStore.load();
+  }
+
+  let boardCreateStatus = $state("Todo");
+
+  function openBoardCreate(statusId: string) {
+    boardCreateStatus = statusId;
+    showCreateModal = true;
+  }
+
+  // "+ Колонка" прямо на доске — быстрое добавление своего статуса без
+  // перехода в Настройки (переименование/удаление остаются только там,
+  // см. Settings.svelte «Статусы задач»).
+  let showStatusQuickAdd = $state(false);
+  let newBoardStatusName = $state("");
+
+  async function addBoardStatus() {
+    const name = newBoardStatusName.trim();
+    if (!name) return;
+    await statusStore.create(name, "#888888");
+    newBoardStatusName = "";
+    showStatusQuickAdd = false;
+  }
+
   // Открытие задачи по сигналу извне (глобальный поиск Ctrl+K, попап дня в
   // Дашборде/Календаре). Завершённая задача (hidden) — это история: открываем
   // read-only TaskHistoryDetail, а не редактируемую TaskModal, иначе клик по
@@ -250,7 +349,17 @@
   });
 
   async function handleCreate(data: CreateTaskPayload | UpdateTaskPayload) {
-    return await taskStore.create(data as CreateTaskPayload);
+    const payload = data as CreateTaskPayload;
+    const created = await taskStore.create(payload);
+    // Создание сразу в InProgress (например, через "+ колонка" на доске) —
+    // статус уже проставлен модалкой (initialStatus), но реальный
+    // трекинг-таймер запускается отдельным вызовом, как и везде в приложении.
+    if (created && payload.status === "InProgress") {
+      await api.startTaskTracking(created.id);
+      trackingId = created.id;
+      await taskStore.load();
+    }
+    return created;
   }
 
   // --- Инлайн-композер: первая строка — название, Enter — перенос,
@@ -795,6 +904,7 @@
 <!-- Modals -->
 {#if showCreateModal}
   <TaskModal
+    initialStatus={boardCreateStatus}
     onSave={handleCreate}
     onClose={() => showCreateModal = false}
   />
@@ -966,12 +1076,16 @@
   </div>
 {/if}
 
-<div class="page">
+<div class="page" class:board-mode={viewMode === "board"}>
   <div class="page-head">
     <h1 class="page-title">Задачи</h1>
     <span class="muted count">
       {taskStore.activeTasks.length} актив. · {taskStore.historyTasks.length} в истории
     </span>
+    <div class="seg">
+      <button class:active={viewMode === "list"} onclick={() => viewMode = "list"}>Список</button>
+      <button class:active={viewMode === "board"} onclick={() => viewMode = "board"}>Доска</button>
+    </div>
     <span style="flex:1;"></span>
     <input
       bind:value={searchQuery}
@@ -997,7 +1111,7 @@
     <button onclick={() => { showProjects = true; projectStore.load(); }}>Проекты</button>
     <button class:active-toggle={showHistory} onclick={() => showHistory = !showHistory}>История</button>
     <button class:active-toggle={showTrash} onclick={() => { showTrash = !showTrash; if (showTrash) taskStore.loadDeleted(); }}>Корзина</button>
-    <button class="btn-primary" onclick={() => showCreateModal = true}>+ Новая</button>
+    <button class="btn-primary" onclick={() => { boardCreateStatus = "Todo"; showCreateModal = true; }}>+ Новая</button>
   </div>
 
   {#if selectedIds.size > 0}
@@ -1044,6 +1158,72 @@
     </div>
   {/if}
 
+  {#if viewMode === "board"}
+    <div class="board">
+      {#each statusStore.statuses.filter(s => s.id !== "Archived") as col (col.id)}
+        <div
+          class="column"
+          role="list"
+          class:drop-target={boardDropTargetStatus === col.id}
+          ondragover={(e) => columnDragOver(e, col.id)}
+          ondrop={(e) => columnDrop(e, col.id)}
+          ondragleave={() => { if (boardDropTargetStatus === col.id) boardDropTargetStatus = null; }}
+        >
+          <div class="column-head">
+            <span class="column-title" style="--cat: {col.color}">{col.name}</span>
+            <span class="muted column-count">{boardTasksFor(col.id).length}</span>
+            <button class="btn-icon" title="Новая задача" onclick={() => openBoardCreate(col.id)}>+</button>
+          </div>
+
+          <div class="column-body">
+            {#each boardTasksFor(col.id) as task (task.id)}
+              <button
+                class="board-card"
+                class:dragging={boardDragTaskId === task.id}
+                draggable="true"
+                ondragstart={(e) => cardDragStart(e, task)}
+                ondragend={() => { boardDragTaskId = null; boardDropTargetStatus = null; }}
+                onclick={() => editingTask = task}
+              >
+                <div class="board-card-title">
+                  <span class="prio-dot" style="--prio: var(--prio-{task.priority.toLowerCase()});" title="Приоритет: {PRIORITY_LABELS[task.priority]}"></span>
+                  {task.title}
+                  {#if trackingId === task.id}
+                    <span class="tracking-dot" title="Идёт трекинг"><Icon name="play" size={10} /></span>
+                  {/if}
+                </div>
+                <div class="board-card-meta">
+                  <span class="chip chip-cat" style="--cat: {categoryStore.color(task.category)}">{categoryStore.name(task.category)}</span>
+                  {#if task.deadline}
+                    {@const dl = deadlineInfo(task.deadline)}
+                    <span class="chip" class:chip-danger={dl.overdue}><Icon name="flag" size={10} /> {dl.label}</span>
+                  {/if}
+                  {#each task.tags as tag}
+                    <span class="chip chip-tag">#{tag}</span>
+                  {/each}
+                </div>
+              </button>
+            {:else}
+              <p class="empty-col muted">Пусто</p>
+            {/each}
+          </div>
+        </div>
+      {/each}
+      <div class="add-column">
+        <button class="btn-sm" onclick={() => showStatusQuickAdd = true}>+ Колонка</button>
+        {#if showStatusQuickAdd}
+          <!-- svelte-ignore a11y_autofocus -->
+          <input
+            bind:value={newBoardStatusName}
+            placeholder="Название статуса"
+            autofocus
+            onkeydown={(e) => { if (e.key === "Enter") addBoardStatus(); if (e.key === "Escape") { showStatusQuickAdd = false; newBoardStatusName = ""; } }}
+            onblur={() => { if (!newBoardStatusName.trim()) showStatusQuickAdd = false; }}
+          />
+        {/if}
+      </div>
+    </div>
+  {:else}
   {#if todayBlocks.length > 0 && !searchQuery.trim()}
     <div class="day-plan card">
       <span class="day-plan-label">Сегодня:</span>
@@ -1196,7 +1376,7 @@
                 {#if task.subtasks.length > 0}
                   <span class="chip">{doneCount(task)}/{task.subtasks.length}</span>
                 {/if}
-                <span class="chip">{task.status === "Done" ? "Выполнена" : task.status}</span>
+                <span class="chip">{statusStore.name(task.status)}</span>
               </div>
               <div class="task-actions">
                 <button class="btn-icon btn-danger" title="Удалить" onclick={() => taskStore.remove(task.id)}>✕</button>
@@ -1237,12 +1417,19 @@
       {/if}
     {/if}
   {/if}
+  {/if}
 </div>
 
 <style>
   .page {
     max-width: 860px;
     margin: 0 auto;
+  }
+
+  /* Доска (v0.9.20) шире списка — несколько колонок в ряд не помещаются
+     в узкий контейнер списка задач. */
+  .page.board-mode {
+    max-width: 1400px;
   }
 
   .page-head {
@@ -1503,6 +1690,117 @@
     font-size: 11px;
     color: var(--text-secondary);
     margin: 8px 0 0 0;
+  }
+
+  /* --- Доска (v0.9.20) --- */
+  .board {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    overflow-x: auto;
+    padding-bottom: 8px;
+  }
+
+  .column {
+    flex: 0 0 260px;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-secondary);
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    max-height: calc(100vh - 220px);
+  }
+
+  .column.drop-target {
+    box-shadow: inset 0 0 0 2px var(--accent);
+  }
+
+  .column-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .column-title {
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--cat, var(--text-primary));
+  }
+
+  .column-count {
+    font-size: 12px;
+  }
+
+  .column-head .btn-icon {
+    margin-left: auto;
+  }
+
+  .column-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .empty-col {
+    font-size: 12px;
+    text-align: center;
+    margin: 12px 0;
+  }
+
+  .board-card {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 8px 10px;
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+  }
+
+  .board-card:hover {
+    background: var(--bg-hover);
+  }
+
+  .board-card.dragging {
+    opacity: 0.5;
+  }
+
+  .board-card-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    margin-bottom: 6px;
+  }
+
+  .tracking-dot {
+    margin-left: auto;
+    color: var(--accent);
+    display: inline-flex;
+  }
+
+  .board-card-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .add-column {
+    flex: 0 0 180px;
+  }
+
+  .add-column input {
+    width: 100%;
+    margin-top: 4px;
   }
 
   .ai-error {

@@ -10,13 +10,15 @@ pub enum Priority {
   Critical,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum TaskStatus {
-  Todo,
-  InProgress,
-  Done,
-  Archived,
-}
+// Статус задачи — с v0.9.20 это id строки в таблице statuses (тот же
+// приём, что category получила в v0.6.3), а не enum. Todo/InProgress/
+// Done/Archived остаются зарезервированными id (см. RESERVED_STATUSES в
+// commands::statuses) — с ними завязана бизнес-логика (Done →
+// hidden+completed_at, InProgress → тайм-трекинг), но название/цвет можно
+// кастомизировать, а пользователь может добавлять свои промежуточные
+// статусы для канбан-доски. Валидация — на записи
+// (commands::statuses::valid_or_fallback), чтение — как есть.
+pub type TaskStatus = String;
 
 // Категория задачи — с v0.6.3 это id строки в таблице categories
 // (пользовательские категории), а не enum. Валидация — на записи
@@ -265,12 +267,7 @@ impl TaskRow {
             id: self.id,
             title: self.title,
             description: self.description,
-            status: match self.status.as_str() {
-                "InProgress" => TaskStatus::InProgress,
-                "Done"       => TaskStatus::Done,
-                "Archived"   => TaskStatus::Archived,
-                _            => TaskStatus::Todo,
-            },
+            status: self.status,
             priority: match self.priority.as_str() {
                 "Low"      => Priority::Low,
                 "High"     => Priority::High,
@@ -435,7 +432,7 @@ mod tests {
         })
         .into_task();
 
-        assert_eq!(task.status, TaskStatus::InProgress);
+        assert_eq!(task.status, "InProgress");
         assert_eq!(task.priority, Priority::Critical);
         assert_eq!(task.category, "Health");
         assert_eq!(task.tags, vec!["a", "b"]);
@@ -454,7 +451,9 @@ mod tests {
         })
         .into_task();
 
-        assert_eq!(task.status, TaskStatus::Todo);
+        // Статус (как и категория с v0.6.3) с v0.9.20 читается как есть —
+        // валидация происходит на записи (valid_or_fallback), не на чтении.
+        assert_eq!(task.status, "???");
         assert_eq!(task.priority, Priority::Medium);
         // Категория с v0.6.3 читается как есть (валидация — на записи, по таблице)
         assert_eq!(task.category, "???");

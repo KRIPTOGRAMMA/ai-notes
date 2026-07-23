@@ -2,7 +2,12 @@
 // Rust-сторона не использует #[serde(rename_all)], поэтому имена полей
 // в JSON совпадают с именами полей структуры один в один.
 
-export type TaskStatus = "Todo" | "InProgress" | "Done" | "Archived";
+// С v0.9.20 статус — id строки в таблице statuses (тот же приём, что
+// категория получила в v0.6.3), не фиксированный набор. Todo/InProgress/
+// Done/Archived остаются зарезервированными id (см. StatusInfo.is_reserved) —
+// с ними завязана бизнес-логика (Done → hidden+completed_at, InProgress →
+// тайм-трекинг), но появляются и свои промежуточные статусы для канбана.
+export type TaskStatus = string;
 export type Priority = "Low" | "Medium" | "High" | "Critical";
 // С v0.6.3 категория — id строки в таблице categories (пользовательские),
 // а не фиксированный набор. Имя/цвет — через CategoryInfo.
@@ -14,6 +19,14 @@ export interface CategoryInfo {
   name: string;
   color: string;
   position: number;
+}
+
+export interface StatusInfo {
+  id: string;
+  name: string;
+  color: string;
+  position: number;
+  is_reserved: boolean;
 }
 
 export type Recurrence =

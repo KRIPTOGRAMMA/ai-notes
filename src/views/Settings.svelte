@@ -3,6 +3,7 @@
   import { save as saveDialog, open as openDialog } from "@tauri-apps/plugin-dialog";
   import { api } from "../lib/api/tauri";
   import { categoryStore } from "../lib/stores/categories.svelte";
+  import { statusStore } from "../lib/stores/statuses.svelte";
   import type { AppSettings, AppCategoryRule, AppLimit } from "../lib/types";
   import { applyTheme } from "../lib/theme";
   import ModelDownloader from "../lib/components/ModelDownloader.svelte";
@@ -108,8 +109,10 @@
   type TabId = (typeof TABS)[number]["id"];
   // Внешний вид(0), Режим работы(2) → Общее; ИИ-провайдер(1) → ИИ;
   // Мониторинг(3), Категории задач(4) → Задачи; Уведомления(5) → Уведомления;
-  // Авто-бэкап(6), Данные(7) → Данные; Хоткеи(8) → Хоткеи.
-  const SECTION_TAB: TabId[] = ["general", "ai", "general", "tasks", "tasks", "notifications", "data", "data", "hotkeys"];
+  // Авто-бэкап(6), Данные(7) → Данные; Хоткеи(8) → Хоткеи; Статусы(9) →
+  // Задачи (добавлена последней по индексу, чтобы не перенумеровывать
+  // существующие секции, но логически сгруппирована с Категориями).
+  const SECTION_TAB: TabId[] = ["general", "ai", "general", "tasks", "tasks", "notifications", "data", "data", "hotkeys", "tasks"];
   let activeTab = $state<TabId>("general");
 
   // --- Поиск по настройкам (v0.8.5): простой substring-match по всему
@@ -178,6 +181,7 @@
     trackingMode = await api.getTrackingMode().catch(() => null);
     windowTracking = await api.getWindowTracking().catch(() => null);
     categoryStore.load();
+    statusStore.load();
   });
 
   // --- Хоткеи (v0.8.9): оверрайды хранятся в settings.keybinds (JSON),
@@ -224,6 +228,19 @@
     if (!name) return;
     await categoryStore.create(name, newCatColor);
     newCatName = "";
+  }
+
+  // --- Статусы задач (v0.9.20, канбан) — тот же паттерн, что категории:
+  // CRUD сохраняется сразу, без кнопки «Сохранить». Todo/InProgress/Done/
+  // Archived зарезервированы (is_reserved) — не переименовываются/не удаляются.
+  let newStatusName = $state("");
+  let newStatusColor = $state("#2a78d6");
+
+  async function addStatus() {
+    const name = newStatusName.trim();
+    if (!name) return;
+    await statusStore.create(name, newStatusColor);
+    newStatusName = "";
   }
 
   async function save() {
@@ -752,6 +769,52 @@
         {/if}
       {/each}
     </div>
+  </section>
+
+  <section class="card panel" class:hidden-by-search={sectionMatches[9] === false} class:hidden-by-tab={SECTION_TAB[9] !== activeTab} bind:this={sectionEls[9]}>
+    <h3 class="section-title">Статусы задач</h3>
+    {#each statusStore.statuses as s (s.id)}
+      <div class="rule-row">
+        <input
+          type="color"
+          class="cat-color"
+          value={s.color}
+          title="Цвет статуса"
+          onchange={(e) => statusStore.update(s.id, { color: e.currentTarget.value })}
+        />
+        <input
+          value={s.name}
+          disabled={s.is_reserved}
+          title={s.is_reserved ? "Встроенный статус — название нельзя менять" : ""}
+          onchange={(e) => {
+            const name = e.currentTarget.value.trim();
+            if (name && name !== s.name) statusStore.update(s.id, { name });
+            else e.currentTarget.value = s.name;
+          }}
+        />
+        {#if !s.is_reserved}
+          <button class="btn-icon btn-danger" title="Удалить (задачи перейдут в «Todo»)"
+            onclick={() => statusStore.remove(s.id)}>✕</button>
+        {:else}
+          <span class="hint" style="margin:0;">встроенный</span>
+        {/if}
+      </div>
+    {/each}
+    <div class="rule-row">
+      <input type="color" class="cat-color" bind:value={newStatusColor} title="Цвет нового статуса" />
+      <input bind:value={newStatusName} placeholder="Новый статус (для канбана)"
+        onkeydown={(e) => { if (e.key === "Enter") addStatus(); }} />
+      <button class="btn-sm" onclick={addStatus} disabled={!newStatusName.trim()}>Добавить</button>
+    </div>
+    {#if statusStore.error}
+      <p class="hint" style="color:var(--danger, #d33);">{statusStore.error}</p>
+    {/if}
+    <p class="hint">
+      Изменения сохраняются сразу. Todo/В работе/Готово/Архив — встроенные
+      (с ними связаны трекинг времени и завершение задач), их можно только
+      перекрасить. Свои статусы удобны как промежуточные колонки канбан-доски;
+      при удалении такого статуса задачи переходят в «Todo».
+    </p>
   </section>
 
   <button class="btn-primary" onclick={save} disabled={saving}>

@@ -17,3 +17,4 @@ pub mod images;
 pub mod checklists;
 pub mod smart_lists;
 pub mod notifications;
+pub mod statuses;

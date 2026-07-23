@@ -73,6 +73,15 @@
       { id: "Other", name: "Другое", color: "#4a3aa7", position: 4 },
     ];
   }
+  // Статусы задач: зеркало посева миграции 0029 (v0.9.20)
+  if (!db.statuses) {
+    db.statuses = [
+      { id: "Todo", name: "Todo", color: "#94a3b8", position: 0, is_reserved: true },
+      { id: "InProgress", name: "В работе", color: "#2a78d6", position: 1, is_reserved: true },
+      { id: "Done", name: "Готово", color: "#1baf7a", position: 2, is_reserved: true },
+      { id: "Archived", name: "Архив", color: "#6b7280", position: 3, is_reserved: true },
+    ];
+  }
   // сид может задать только часть настроек
   db.settings = { ...defaultSettings, ...db.settings };
 
@@ -306,6 +315,40 @@
       if (id === "Other") throw "Категорию «Другое» нельзя удалить — это фолбэк";
       for (const t of db.tasks) if (t.category === id) t.category = "Other";
       db.categories = db.categories.filter((c) => c.id !== id);
+      persist();
+    },
+
+    // --- статусы задач (v0.9.20, канбан) ---
+    get_statuses: () => [...db.statuses].sort((a, b) => a.position - b.position).map((s) => ({ ...s })),
+    create_status: ({ name, color }) => {
+      const trimmed = (name ?? "").trim();
+      if (!trimmed) throw "Название статуса не может быть пустым";
+      const status = {
+        id: uuid(),
+        name: trimmed,
+        color: color || "#888888",
+        position: Math.max(-1, ...db.statuses.map((s) => s.position)) + 1,
+        is_reserved: false,
+      };
+      db.statuses.push(status);
+      persist();
+      return { ...status };
+    },
+    update_status: ({ id, patch }) => {
+      const s = db.statuses.find((s) => s.id === id);
+      if (!s) throw `Статус не найден: ${id}`;
+      if (s.is_reserved && patch.name !== undefined && patch.name !== null) {
+        throw "Встроенный статус нельзя переименовать";
+      }
+      if (patch.name !== undefined && patch.name !== null) s.name = patch.name;
+      if (patch.color !== undefined && patch.color !== null) s.color = patch.color;
+      persist();
+    },
+    delete_status: ({ id }) => {
+      const s = db.statuses.find((s) => s.id === id);
+      if (s?.is_reserved) throw "Встроенный статус нельзя удалить";
+      for (const t of db.tasks) if (t.status === id) t.status = "Todo";
+      db.statuses = db.statuses.filter((s) => s.id !== id);
       persist();
     },
 

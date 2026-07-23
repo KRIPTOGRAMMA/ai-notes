@@ -4,27 +4,30 @@
   import { api } from "../api/tauri";
   import { projectStore } from "../stores/projects.svelte";
   import { categoryStore } from "../stores/categories.svelte";
+  import { statusStore } from "../stores/statuses.svelte";
   import { taskStore } from "../stores/tasks.svelte";
 
   type Props = {
     task?: Task | null;
     initialDeadline?: string | null; // префилл дедлайна при создании (формат datetime-local)
+    initialStatus?: TaskStatus; // префилл статуса при создании (Канбан: колонка задаёт статус)
     // Возвращает созданную задачу (create-режим) — модалка дописывает к ней
     // подзадачи из инлайн-чеклиста; в edit-режиме возврат не используется.
     onSave: (data: CreateTaskPayload | UpdateTaskPayload) => Promise<Task | null | void>;
     onClose: () => void;
   };
 
-  let { task = null, initialDeadline = null, onSave, onClose }: Props = $props();
+  let { task = null, initialDeadline = null, initialStatus = "Todo", onSave, onClose }: Props = $props();
 
   const isEdit = !!task;
 
-  // Модалку открывают и разделы, не грузившие категории (Календарь)
+  // Модалку открывают и разделы, не грузившие категории/статусы (Календарь)
   if (categoryStore.categories.length === 0) categoryStore.load();
+  if (statusStore.statuses.length === 0) statusStore.load();
 
   let title = $state(task?.title ?? "");
   let description = $state(task?.description ?? "");
-  let status = $state<TaskStatus>(task?.status ?? "Todo");
+  let status = $state<TaskStatus>(task?.status ?? initialStatus);
   let priority = $state<Priority>(task?.priority ?? "Medium");
   // "Other" — фолбэк-категория, существует всегда (в отличие от Work — её можно удалить)
   let category = $state<Category>(task?.category ?? "Other");
@@ -376,10 +379,9 @@
       <label class="field">
         <span class="label">Статус</span>
         <select bind:value={status}>
-          <option value="Todo">К выполнению</option>
-          <option value="InProgress">В процессе</option>
-          <option value="Done">Выполнено</option>
-          <option value="Archived">Архив</option>
+          {#each statusStore.statuses as s (s.id)}
+            <option value={s.id}>{s.name}</option>
+          {/each}
         </select>
       </label>
     {/if}

@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Task, Subtask, CreateTaskPayload, UpdateTaskPayload, Note, CreateNotePayload, UpdateNotePayload, AppSettings, Project, UpdateProjectPayload, CategoryInfo, NoteSnippet, TaskSnippet, GoalSnapshot, Routine, RoutineBlock, ActiveSession, NoteRevision, ChecklistTemplate, DayCompletion, ModelOption, SmartList, SmartListFilter, NotificationEntry } from "../types";
+import type { Task, Subtask, CreateTaskPayload, UpdateTaskPayload, Note, CreateNotePayload, UpdateNotePayload, AppSettings, Project, UpdateProjectPayload, CategoryInfo, StatusInfo, NoteSnippet, TaskSnippet, GoalSnapshot, Routine, RoutineBlock, ActiveSession, NoteRevision, ChecklistTemplate, DayCompletion, ModelOption, SmartList, SmartListFilter, NotificationEntry } from "../types";
 
 export const api = {
   getTasks: () => invoke<Task[]>("get_tasks"),
@@ -24,6 +24,11 @@ export const api = {
   updateCategory: (id: string, patch: { name?: string; color?: string }) =>
     invoke<void>("update_category", { id, patch }),
   deleteCategory: (id: string) => invoke<void>("delete_category", { id }),
+  getStatuses: () => invoke<StatusInfo[]>("get_statuses"),
+  createStatus: (name: string, color: string) => invoke<StatusInfo>("create_status", { name, color }),
+  updateStatus: (id: string, patch: { name?: string; color?: string }) =>
+    invoke<void>("update_status", { id, patch }),
+  deleteStatus: (id: string) => invoke<void>("delete_status", { id }),
   recordInput: () => invoke<void>("record_input"),
   openQuickCapture: (mode: "task" | "note") => invoke<void>("open_quick_capture", { mode }),
   getQuickMode: () => invoke<"task" | "note">("get_quick_mode"),

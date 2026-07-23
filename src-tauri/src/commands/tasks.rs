@@ -2,7 +2,7 @@ use tauri::State;
 use sqlx::{SqlitePool, Row};
 use serde::Serialize;
 use chrono::{DateTime, Utc};
-use crate::core::task::{CreateTask, Task, TaskRow, UpdateTask, TaskStatus};
+use crate::core::task::{CreateTask, Task, TaskRow, UpdateTask};
 
 #[tauri::command]
 pub async fn create_task(
@@ -18,8 +18,9 @@ pub async fn create_task_impl(pool: &SqlitePool, task: CreateTask) -> Result<Tas
   }
 
   let mut new_task = task.into_task();
-  // Неизвестная категория тихо становится фолбэком (прежняя семантика enum)
+  // Неизвестная категория/статус тихо становятся фолбэком (прежняя семантика enum)
   new_task.category = crate::commands::categories::valid_or_fallback(pool, &new_task.category).await;
+  new_task.status = crate::commands::statuses::valid_or_fallback(pool, &new_task.status).await;
   // Новая задача — в конец списка
   new_task.sort_order = sqlx::query_scalar::<_, i64>("SELECT COALESCE(MAX(sort_order), 0) + 1 FROM tasks")
     .fetch_one(pool)
@@ -33,7 +34,7 @@ pub async fn create_task_impl(pool: &SqlitePool, task: CreateTask) -> Result<Tas
   .bind(&new_task.id)
   .bind(&new_task.title)
   .bind(&new_task.description)
-  .bind(format!("{:?}", new_task.status))
+  .bind(&new_task.status)
   .bind(format!("{:?}", new_task.priority))
   .bind(&new_task.category)
   .bind(new_task.deadline.map(|d| d.to_rfc3339()))
@@ -215,7 +216,9 @@ pub async fn update_task_impl(pool: &SqlitePool, id: String, patch: UpdateTask) 
         task.title = title;
     }
     if let Some(desc) = patch.description   { task.description = Some(desc); }
-    if let Some(status) = patch.status      { task.status = status; }
+    if let Some(status) = patch.status {
+        task.status = crate::commands::statuses::valid_or_fallback(pool, &status).await;
+    }
     if let Some(priority) = patch.priority  { task.priority = priority; }
     if let Some(category) = patch.category {
         task.category = crate::commands::categories::valid_or_fallback(pool, &category).await;
@@ -274,7 +277,7 @@ pub async fn update_task_impl(pool: &SqlitePool, id: String, patch: UpdateTask) 
     )
     .bind(&task.title)
     .bind(&task.description)
-    .bind(format!("{:?}", task.status))
+    .bind(&task.status)
     .bind(format!("{:?}", task.priority))
     .bind(&task.category)
     .bind(task.deadline.map(|d| d.to_rfc3339()))
@@ -320,7 +323,7 @@ pub async fn complete_task_impl(pool: &SqlitePool, id: String) -> Result<Task, S
 
   match task.recurrence.next_occurrence(now) {
     None => {
-      task.status = TaskStatus::Done;
+      task.status = "Done".to_string();
       task.hidden = true;
       task.completed_at = Some(now);
     }
@@ -347,7 +350,7 @@ pub async fn complete_task_impl(pool: &SqlitePool, id: String) -> Result<Task, S
      notified_block = CASE WHEN ? THEN 0 ELSE notified_block END
      WHERE id=?"
   )
-  .bind(format!("{:?}", task.status))
+  .bind(&task.status)
   .bind(task.hidden)
   .bind(task.deadline.map(|d| d.to_rfc3339()))
   .bind(task.completed_at.map(|d| d.to_rfc3339()))
@@ -523,7 +526,7 @@ mod tests {
         CreateTask {
             title: title.into(),
             description: Some("desc".into()),
-            status: TaskStatus::Todo,
+            status: "Todo".into(),
             priority: Priority::Medium,
             category: "Work".into(),
             deadline: Some(Utc::now() + chrono::Duration::days(3)),
@@ -544,7 +547,7 @@ mod tests {
         assert_eq!(got.id, created.id);
         assert_eq!(got.title, "тестовая задача");
         assert_eq!(got.tags, vec!["a", "b"]);
-        assert_eq!(got.status, TaskStatus::Todo);
+        assert_eq!(got.status, "Todo");
         assert!(got.deadline.is_some());
     }
 
@@ -589,7 +592,7 @@ mod tests {
         let t = create_task_impl(&pool, new_task("разовая")).await.unwrap();
 
         let done = complete_task_impl(&pool, t.id).await.unwrap();
-        assert_eq!(done.status, TaskStatus::Done);
+        assert_eq!(done.status, "Done");
         assert!(done.hidden);
         assert!(done.completed_at.is_some());
     }
@@ -609,7 +612,7 @@ mod tests {
         let done = complete_task_impl(&pool, t.id.clone()).await.unwrap();
 
         // Не закрыта, а переехала на +2 дня
-        assert_eq!(done.status, TaskStatus::Todo);
+        assert_eq!(done.status, "Todo");
         assert!(!done.hidden);
         assert!(done.completed_at.is_none());
         let dl = done.deadline.unwrap();
@@ -665,7 +668,7 @@ mod tests {
         let before = Utc::now();
         let done = complete_task_impl(&pool, t.id.clone()).await.unwrap();
 
-        assert_eq!(done.status, TaskStatus::Todo); // не закрыта — сдвинута
+        assert_eq!(done.status, "Todo"); // не закрыта — сдвинута
         assert!(!done.hidden);
         let dl = done.deadline.unwrap();
         // Следующее совпадение той же маски — ровно через 7 дней, не "сегодня же"
