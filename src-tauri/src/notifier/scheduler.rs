@@ -1,4 +1,4 @@
-use chrono::{Local, TimeZone, Utc};
+use chrono::{DateTime, Local, TimeZone, Utc};
 use std::sync::{Arc, Mutex};
 use sqlx::{SqlitePool, Row};
 use tauri_plugin_notification::NotificationExt;
@@ -85,6 +85,7 @@ pub struct BlockDue {
     pub id: String,
     pub title: String,
     pub end_local: String, // "HH:MM" конца блока в локальном времени — для текста пуша
+    pub end_utc: DateTime<Utc>,
 }
 
 // Блоки, начавшиеся в окне (now - grace, now], о которых ещё не уведомляли.
@@ -110,11 +111,13 @@ pub async fn blocks_due(pool: &SqlitePool, now: chrono::DateTime<Utc>, grace_min
         let start = start.with_timezone(&Utc);
         if start <= now && start > now - chrono::Duration::minutes(grace_mins) {
             let mins: i64 = row.get("mins");
-            let end = (start + chrono::Duration::minutes(mins)).with_timezone(&chrono::Local);
+            let end_utc = start + chrono::Duration::minutes(mins);
+            let end = end_utc.with_timezone(&chrono::Local);
             due.push(BlockDue {
                 id: row.get("id"),
                 title: row.get("title"),
                 end_local: end.format("%H:%M").to_string(),
+                end_utc,
             });
         }
     }
@@ -143,9 +146,13 @@ const BLOCK_GRACE_MINS: i64 = 10;
 
 async fn check_blocks(app: &tauri::AppHandle, pool: &SqlitePool, muted: bool) {
     let now = Utc::now();
+    let focus_auto = crate::commands::settings::get_bool_setting(pool, "focus_mode_auto", true).await;
     for block in blocks_due(pool, now, BLOCK_GRACE_MINS).await {
         if !muted {
             send_notification(app, &block.title, &format!("Начался блок (до {})", block.end_local));
+        }
+        if focus_auto {
+            crate::notifier::mute::extend_quiet_until(pool, block.end_utc).await;
         }
         mark_block_notified(pool, &block.id).await;
     }
@@ -535,6 +542,20 @@ mod tests {
         let due = blocks_due(&pool, now, 10).await;
         assert_eq!(due.len(), 1);
         assert_eq!(due[0].title, "начался");
+    }
+
+    // v0.9.12: end_utc — момент, на который фокус-режим продлит quiet_until
+    // при старте блока (check_blocks). Должен совпадать с scheduled_at + mins.
+    #[tokio::test]
+    async fn blocks_due_computes_end_utc_from_scheduled_mins() {
+        let pool = test_pool().await;
+        let now = Utc::now();
+        let start = now - chrono::Duration::minutes(2);
+        insert_block(&pool, "начался", &start.to_rfc3339(), false).await;
+
+        let due = blocks_due(&pool, now, 10).await;
+        assert_eq!(due.len(), 1);
+        assert_eq!(due[0].end_utc, start + chrono::Duration::minutes(30));
     }
 
     #[tokio::test]

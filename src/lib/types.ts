@@ -196,6 +196,7 @@ export interface AppSettings {
   morning_digest_time: string; // "HH:MM", пусто = выкл
   show_subtasks_expanded: boolean; // подзадачи в списке видны без клика (v0.8.3)
   keybinds: string; // JSON {action_id: combo} (v0.8.9); отсутствие ключа = дефолт действия
+  focus_mode_auto: boolean; // авто-пауза уведомлений на время помодоро-работы/тайм-блока (v0.9.12)
 }
 
 export interface AppCategoryRule {

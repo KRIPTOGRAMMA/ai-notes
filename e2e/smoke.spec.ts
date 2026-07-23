@@ -1718,3 +1718,21 @@ test("трекинг: ▶ на задаче запускает, ■ остана
   await page.locator("button[title='Остановить трекинг']").click();
   await expect(page.locator("button[title='Начать трекинг']")).toBeVisible();
 });
+
+test("фокус-режим: тумблер в настройках сохраняется и переживает перезагрузку", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Настройки" }).click();
+  await page.locator(".settings-tab", { hasText: "Уведомления" }).click();
+  const toggle = page.getByLabel("Фокус-режим: авто-пауза уведомлений на время помодоро-работы и активных тайм-блоков");
+  await expect(toggle).toBeChecked();
+
+  await toggle.uncheck();
+  await page.getByRole("button", { name: "Сохранить", exact: true }).click();
+
+  await page.reload();
+  await page.getByRole("button", { name: "Настройки" }).click();
+  await page.locator(".settings-tab", { hasText: "Уведомления" }).click();
+  await expect(page.getByLabel("Фокус-режим: авто-пауза уведомлений на время помодоро-работы и активных тайм-блоков")).not.toBeChecked();
+});

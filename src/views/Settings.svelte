@@ -84,6 +84,7 @@
     morning_digest_time: "",
     show_subtasks_expanded: true,
     keybinds: "",
+    focus_mode_auto: true,
   });
 
   let saving = $state(false);
@@ -644,6 +645,10 @@
     <label class="check" style="margin-top:10px;">
       <input type="checkbox" bind:checked={settings.context_notifications} />
       Контекстные уведомления (накопились просрочки, возврат к задаче «в работе»)
+    </label>
+    <label class="check" style="margin-top:6px;">
+      <input type="checkbox" bind:checked={settings.focus_mode_auto} />
+      Фокус-режим: авто-пауза уведомлений на время помодоро-работы и активных тайм-блоков
     </label>
     <label class="field" style="margin-top:8px;">
       <span class="label">Утренняя сводка (HH:MM, пусто = выкл)</span>

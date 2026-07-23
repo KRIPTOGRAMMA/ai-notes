@@ -83,6 +83,8 @@ pub struct AppSettings {
     pub show_subtasks_expanded: bool, // v0.8.3: подзадачи в списке видны без клика
     #[serde(default)]
     pub keybinds: String,             // v0.8.9: JSON {action_id: combo}; отсутствие ключа = дефолт действия
+    #[serde(default = "default_true")]
+    pub focus_mode_auto: bool,        // v0.9.12: авто-пауза уведомлений на время помодоро-работы/тайм-блока
 }
 
 fn default_seven() -> u64 { 7 }
@@ -128,6 +130,7 @@ impl Default for AppSettings {
             morning_digest_time: String::new(),
             show_subtasks_expanded: true,
             keybinds: String::new(),
+            focus_mode_auto: true,
         }
     }
 }
@@ -166,6 +169,11 @@ pub(crate) async fn get_setting(pool: &SqlitePool, key: &str) -> Option<String> 
 // запроса. Отсутствие ключа или мусор в значении → default.
 pub async fn get_u64_setting(pool: &SqlitePool, key: &str, default: u64) -> u64 {
     get_setting(pool, key).await.and_then(|v| v.parse().ok()).unwrap_or(default)
+}
+
+// Единая точка чтения булевой настройки (тем же паттерном, что get_u64_setting).
+pub async fn get_bool_setting(pool: &SqlitePool, key: &str, default: bool) -> bool {
+    get_setting(pool, key).await.map(|v| v != "false").unwrap_or(default)
 }
 
 pub(crate) async fn set_setting(pool: &SqlitePool, key: &str, value: &str) -> AppResult<()> {
@@ -234,6 +242,7 @@ pub async fn load_settings_raw(pool: &SqlitePool) -> AppResult<AppSettings> {
     if let Some(v) = get_setting(pool, "morning_digest_time").await { s.morning_digest_time = v; }
     if let Some(v) = get_setting(pool, "show_subtasks_expanded").await { s.show_subtasks_expanded = v != "false"; }
     if let Some(v) = get_setting(pool, "keybinds").await { s.keybinds = v; }
+    s.focus_mode_auto = get_bool_setting(pool, "focus_mode_auto", true).await;
     // Ключи: сначала keyring, затем legacy-значение из БД
     let openai_from_keyring = keyring_get("openai_key");
     let anthropic_from_keyring = keyring_get("anthropic_key");
@@ -317,6 +326,7 @@ pub async fn save_settings(
     set_setting(pool.inner(), "morning_digest_time", &settings.morning_digest_time).await?;
     set_setting(pool.inner(), "show_subtasks_expanded", if settings.show_subtasks_expanded { "true" } else { "false" }).await?;
     set_setting(pool.inner(), "keybinds", &settings.keybinds).await?;
+    set_setting(pool.inner(), "focus_mode_auto", if settings.focus_mode_auto { "true" } else { "false" }).await?;
 
     for (name, value) in [("openai_key", &settings.openai_key), ("anthropic_key", &settings.anthropic_key)] {
         match keyring_set(name, value) {

@@ -44,6 +44,7 @@
     morning_digest_time: "",
     show_subtasks_expanded: true,
     keybinds: "",
+    focus_mode_auto: true,
   };
 
   let db;

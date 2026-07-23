@@ -22,6 +22,57 @@ pub async fn muted_now(pool: &SqlitePool, mode: &WorkMode) -> bool {
     notifications_muted(mode, quiet_until(pool).await, Utc::now())
 }
 
+// Фокус-режим (v0.9.12): авто-пауза на время помодоро-работы / активного
+// тайм-блока. Никогда не укорачивает уже действующую паузу — только продлевает
+// (пользователь мог вручную поставить "бессрочно" или более далёкий таймер).
+pub async fn extend_quiet_until(pool: &SqlitePool, until: DateTime<Utc>) {
+    let current = quiet_until(pool).await;
+    if current.map(|t| t >= until).unwrap_or(false) {
+        return;
+    }
+    crate::commands::settings::persist_quiet_until(pool, &until.to_rfc3339()).await.ok();
+}
+
+#[cfg(test)]
+mod extend_tests {
+    use super::*;
+    use chrono::Duration;
+
+    async fn test_pool() -> SqlitePool {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::migrate!("./src/db/migrations").run(&pool).await.unwrap();
+        pool
+    }
+
+    #[tokio::test]
+    async fn extends_when_no_existing_pause() {
+        let pool = test_pool().await;
+        let until = Utc::now() + Duration::minutes(25);
+        extend_quiet_until(&pool, until).await;
+        assert_eq!(quiet_until(&pool).await, Some(until));
+    }
+
+    #[tokio::test]
+    async fn does_not_shorten_a_longer_existing_pause() {
+        let pool = test_pool().await;
+        let far = Utc::now() + Duration::hours(2);
+        crate::commands::settings::persist_quiet_until(&pool, &far.to_rfc3339()).await.unwrap();
+        let near = Utc::now() + Duration::minutes(10);
+        extend_quiet_until(&pool, near).await;
+        assert_eq!(quiet_until(&pool).await, Some(far));
+    }
+
+    #[tokio::test]
+    async fn extends_a_shorter_existing_pause() {
+        let pool = test_pool().await;
+        let near = Utc::now() + Duration::minutes(5);
+        crate::commands::settings::persist_quiet_until(&pool, &near.to_rfc3339()).await.unwrap();
+        let far = Utc::now() + Duration::minutes(25);
+        extend_quiet_until(&pool, far).await;
+        assert_eq!(quiet_until(&pool).await, Some(far));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 use sqlx::SqlitePool;
 use tokio::time::{sleep, Duration};
-use crate::commands::settings::{WorkMode, get_u64_setting, set_setting};
+use crate::commands::settings::{WorkMode, get_u64_setting, get_bool_setting, set_setting};
 use crate::notifier::scheduler::send_notification;
 
 // Пользовательская команда управления циклом (пауза/возобновление/пропуск фазы/
@@ -81,6 +81,9 @@ pub fn start_pomodoro(
                             remaining = work_secs;
                             let until = chrono::Utc::now() + chrono::Duration::seconds(remaining as i64);
                             persist_state(&pool, "work", until).await;
+                            if get_bool_setting(&pool, "focus_mode_auto", true).await {
+                                crate::notifier::mute::extend_quiet_until(&pool, until).await;
+                            }
                         }
                         PomodoroCmd::Stop => {
                             if !in_study && !manual { continue; }
@@ -104,6 +107,9 @@ pub fn start_pomodoro(
                             remaining = if working { work_secs } else { break_secs };
                             let until = chrono::Utc::now() + chrono::Duration::seconds(remaining as i64);
                             persist_state(&pool, if working { "work" } else { "break" }, until).await;
+                            if working && get_bool_setting(&pool, "focus_mode_auto", true).await {
+                                crate::notifier::mute::extend_quiet_until(&pool, until).await;
+                            }
                         }
                     }
                     continue;
@@ -130,6 +136,9 @@ pub fn start_pomodoro(
                 remaining = work_secs;
                 let until = chrono::Utc::now() + chrono::Duration::seconds(remaining as i64);
                 persist_state(&pool, "work", until).await;
+                if get_bool_setting(&pool, "focus_mode_auto", true).await {
+                    crate::notifier::mute::extend_quiet_until(&pool, until).await;
+                }
                 // Пауза уведомлений: таймер идёт, но молча. Проверяем только в момент
                 // отправки — не дёргаем БД каждый секундный тик.
                 if !crate::notifier::mute::muted_now(&pool, &mode).await {
@@ -161,6 +170,9 @@ pub fn start_pomodoro(
                 }
                 let until = chrono::Utc::now() + chrono::Duration::seconds(remaining as i64);
                 persist_state(&pool, if working { "work" } else { "break" }, until).await;
+                if working && get_bool_setting(&pool, "focus_mode_auto", true).await {
+                    crate::notifier::mute::extend_quiet_until(&pool, until).await;
+                }
             }
         }
     });
