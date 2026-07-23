@@ -20,6 +20,8 @@
   let editTags: string[] = $state([]);
   let editLinkedTaskId: string | null = $state(null);
   let editProjectId: string | null = $state(null);
+  // Напоминание (v0.9.18): datetime-local хранит локальное время, "" = без напоминания.
+  let editReminderAt = $state("");
   let tagInput = $state("");
   let saveTimeout: ReturnType<typeof setTimeout> | null = null;
   let saving = $state(false);
@@ -170,6 +172,14 @@
     saving = false;
   }
 
+  // datetime-local работает в локальном времени — тот же приём, что TaskModal.svelte,
+  // иначе каждое открытие+сохранение сдвигало бы напоминание на смещение пояса.
+  function toLocalInput(iso: string): string {
+    const d = new Date(iso);
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
+
   async function selectNote(note: Note) {
     await flushPendingSave();
     suppressNextContentSave = true;
@@ -179,6 +189,7 @@
     editTags = [...note.tags];
     editLinkedTaskId = note.linked_task_id;
     editProjectId = note.project_id;
+    editReminderAt = note.reminder_at ? toLocalInput(note.reminder_at) : "";
     linkSuggestions = null;
     selectionMenu = null;
     selectionResult = null;
@@ -265,6 +276,7 @@
       tags: editTags,
       linked_task_id: editLinkedTaskId,
       project_id: editProjectId,
+      reminder_at: editReminderAt ? new Date(editReminderAt).toISOString() : null,
     });
   }
 
@@ -833,6 +845,13 @@ ${bodyHtml}
           {#if linkedTask}
             <span class="chip"><Icon name="link" size={11} /> {linkedTask.title}</span>
           {/if}
+          <label class="meta-label">
+            Напоминание:
+            <input type="datetime-local" bind:value={editReminderAt} onchange={saveMeta} />
+            {#if editReminderAt}
+              <button class="btn-icon" title="Убрать напоминание" onclick={() => { editReminderAt = ""; saveMeta(); }}>✕</button>
+            {/if}
+          </label>
 
           <div class="tags">
             {#each editTags as tag (tag)}

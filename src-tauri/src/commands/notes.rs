@@ -16,6 +16,7 @@ pub struct Note {
     pub pinned: bool,
     pub created_at: String,
     pub updated_at: String,
+    pub reminder_at: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -42,6 +43,9 @@ pub struct UpdateNote {
     #[serde(default, deserialize_with = "deserialize_optional_field")]
     pub project_id: Option<Option<String>>,
     pub pinned: Option<bool>,
+    // Some(Some(iso)) — установить напоминание, Some(None) — снять, None — не трогать.
+    #[serde(default, deserialize_with = "deserialize_optional_field")]
+    pub reminder_at: Option<Option<String>>,
 }
 
 // Различаем «поле отсутствует» и «поле = null» в JSON: нужно, чтобы отвязку
@@ -66,8 +70,11 @@ fn row_to_note(row: sqlx::sqlite::SqliteRow) -> Note {
         pinned: pinned != 0,
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
+        reminder_at: row.get("reminder_at"),
     }
 }
+
+const NOTE_COLUMNS: &str = "id, title, content, tags, linked_task_id, project_id, pinned, created_at, updated_at, reminder_at";
 
 #[tauri::command]
 pub async fn get_notes(pool: State<'_, SqlitePool>) -> AppResult<Vec<Note>> {
@@ -75,11 +82,9 @@ pub async fn get_notes(pool: State<'_, SqlitePool>) -> AppResult<Vec<Note>> {
 }
 
 pub async fn get_notes_impl(pool: &SqlitePool) -> AppResult<Vec<Note>> {
-    let rows = sqlx::query(
-        "SELECT id, title, content, tags, linked_task_id, project_id, pinned, created_at, updated_at FROM notes ORDER BY updated_at DESC"
-    )
-    .fetch_all(pool)
-    .await?;
+    let rows = sqlx::query(&format!("SELECT {NOTE_COLUMNS} FROM notes ORDER BY updated_at DESC"))
+        .fetch_all(pool)
+        .await?;
 
     Ok(rows.into_iter().map(row_to_note).collect())
 }
@@ -119,6 +124,7 @@ pub async fn create_note_impl(pool: &SqlitePool, note: CreateNote) -> AppResult<
         pinned: false,
         created_at: now.clone(),
         updated_at: now,
+        reminder_at: None,
     })
 }
 
@@ -167,18 +173,24 @@ pub async fn update_note_impl(pool: &SqlitePool, id: String, patch: UpdateNote) 
             .bind(pinned).bind(&now).bind(&id)
             .execute(pool).await?;
     }
+    if let Some(ref reminder) = patch.reminder_at {
+        // Напоминание реально изменилось (в т.ч. снято) — сбросить notified_reminder,
+        // тот же паттерн, что notified_block/notified_24h у задач (tasks.rs),
+        // иначе новое/перенесённое напоминание никогда не придёт.
+        sqlx::query("UPDATE notes SET reminder_at = ?, notified_reminder = 0, updated_at = ? WHERE id = ?")
+            .bind(reminder).bind(&now).bind(&id)
+            .execute(pool).await?;
+    }
 
     // fetch_optional, не fetch_one: заметка могла быть удалена параллельно
     // (автосейв debounced на 800мс — пользователь успевает нажать «Удалить»
     // раньше, чем сработает предыдущий таймер сохранения). Это не ошибка
     // сохранения — заметки уже нет, апдейт стал no-op, откатывать нечего.
-    let row = sqlx::query(
-        "SELECT id, title, content, tags, linked_task_id, project_id, pinned, created_at, updated_at FROM notes WHERE id = ?"
-    )
-    .bind(&id)
-    .fetch_optional(pool)
-    .await?
-    .ok_or_else(|| AppError::Other("__NOTE_DELETED__".into()))?;
+    let row = sqlx::query(&format!("SELECT {NOTE_COLUMNS} FROM notes WHERE id = ?"))
+        .bind(&id)
+        .fetch_optional(pool)
+        .await?
+        .ok_or_else(|| AppError::Other("__NOTE_DELETED__".into()))?;
 
     Ok(row_to_note(row))
 }
@@ -328,12 +340,10 @@ pub async fn restore_note_revision_impl(pool: &SqlitePool, revision_id: &str) ->
         .execute(pool)
         .await?;
 
-    let row = sqlx::query(
-        "SELECT id, title, content, tags, linked_task_id, project_id, pinned, created_at, updated_at FROM notes WHERE id = ?"
-    )
-    .bind(&note_id)
-    .fetch_one(pool)
-    .await?;
+    let row = sqlx::query(&format!("SELECT {NOTE_COLUMNS} FROM notes WHERE id = ?"))
+        .bind(&note_id)
+        .fetch_one(pool)
+        .await?;
 
     Ok(row_to_note(row))
 }
@@ -444,7 +454,7 @@ pub async fn search_notes_impl(pool: &SqlitePool, query: String) -> AppResult<Ve
     let fts_query = format!("\"{}\"*", escaped);
 
     let rows = sqlx::query(
-        "SELECT n.id, n.title, n.content, n.tags, n.linked_task_id, n.project_id, n.pinned, n.created_at, n.updated_at
+        "SELECT n.id, n.title, n.content, n.tags, n.linked_task_id, n.project_id, n.pinned, n.created_at, n.updated_at, n.reminder_at
          FROM notes n
          INNER JOIN notes_fts ON notes_fts.rowid = n.rowid
          WHERE notes_fts MATCH ?
@@ -478,7 +488,7 @@ pub async fn search_notes_snippet_impl(pool: &SqlitePool, query: String) -> AppR
     let fts_query = format!("\"{}\"*", escaped);
 
     let rows = sqlx::query(
-        "SELECT n.id, n.title, n.content, n.tags, n.linked_task_id, n.project_id, n.pinned, n.created_at, n.updated_at,
+        "SELECT n.id, n.title, n.content, n.tags, n.linked_task_id, n.project_id, n.pinned, n.created_at, n.updated_at, n.reminder_at,
                 snippet(notes_fts, 1, '<mark>', '</mark>', '…', 32) AS snippet
          FROM notes n
          INNER JOIN notes_fts ON notes_fts.rowid = n.rowid
@@ -628,6 +638,7 @@ mod tests {
             linked_task_id: None,
             project_id: None,
             pinned: None,
+            reminder_at: None,
         }).await.unwrap();
         assert_eq!(updated.content, "новый текст");
         assert_eq!(updated.title, "заметка"); // не тронут
@@ -651,7 +662,7 @@ mod tests {
 
         let pinned = update_note_impl(&pool, note.id.clone(), UpdateNote {
             title: None, content: None, tags: None, linked_task_id: None, project_id: None,
-            pinned: Some(true),
+            pinned: Some(true), reminder_at: None,
         }).await.unwrap();
         assert!(pinned.pinned);
 
@@ -661,9 +672,45 @@ mod tests {
 
         let unpinned = update_note_impl(&pool, note.id.clone(), UpdateNote {
             title: None, content: None, tags: None, linked_task_id: None, project_id: None,
-            pinned: Some(false),
+            pinned: Some(false), reminder_at: None,
         }).await.unwrap();
         assert!(!unpinned.pinned);
+    }
+
+    // v0.9.18: напоминание можно поставить/перенести/снять; изменение
+    // reminder_at сбрасывает notified_reminder — тот же принцип, что
+    // notified_block/notified_24h у задач при переносе дедлайна/блока.
+    #[tokio::test]
+    async fn reminder_set_move_and_clear_resets_notified_flag() {
+        let pool = test_pool().await;
+        let note = create_note_impl(&pool, CreateNote {
+            title: "напомни мне".into(), content: "".into(),
+            tags: vec![], linked_task_id: None, project_id: None,
+        }).await.unwrap();
+        assert_eq!(note.reminder_at, None);
+
+        let with_reminder = update_note_impl(&pool, note.id.clone(), UpdateNote {
+            title: None, content: None, tags: None, linked_task_id: None, project_id: None,
+            pinned: None, reminder_at: Some(Some("2026-08-01T10:00:00+00:00".into())),
+        }).await.unwrap();
+        assert_eq!(with_reminder.reminder_at.as_deref(), Some("2026-08-01T10:00:00+00:00"));
+
+        // Симулируем «уже уведомили», затем переносим дату — флаг должен сброситься
+        sqlx::query("UPDATE notes SET notified_reminder = 1 WHERE id = ?")
+            .bind(&note.id).execute(&pool).await.unwrap();
+        update_note_impl(&pool, note.id.clone(), UpdateNote {
+            title: None, content: None, tags: None, linked_task_id: None, project_id: None,
+            pinned: None, reminder_at: Some(Some("2026-08-02T10:00:00+00:00".into())),
+        }).await.unwrap();
+        let notified: i64 = sqlx::query_scalar("SELECT notified_reminder FROM notes WHERE id = ?")
+            .bind(&note.id).fetch_one(&pool).await.unwrap();
+        assert_eq!(notified, 0, "перенос напоминания должен сбросить notified_reminder");
+
+        let cleared = update_note_impl(&pool, note.id.clone(), UpdateNote {
+            title: None, content: None, tags: None, linked_task_id: None, project_id: None,
+            pinned: None, reminder_at: Some(None),
+        }).await.unwrap();
+        assert_eq!(cleared.reminder_at, None);
     }
 
     // Гонка автосейва с удалением: debounced-сохранение может долететь до
@@ -717,6 +764,7 @@ mod tests {
             linked_task_id: None,
             project_id: None,
             pinned: None,
+            reminder_at: None,
         }).await.unwrap();
         assert_eq!(search_notes_impl(&pool, "плов".into()).await.unwrap().len(), 1);
         assert!(search_notes_impl(&pool, "капуст".into()).await.unwrap().is_empty());
@@ -860,6 +908,7 @@ mod tests {
             linked_task_id: Some(None),
             project_id: Some(None),
             pinned: None,
+            reminder_at: None,
         }).await.unwrap();
         assert_eq!(updated.tags, vec!["done"]);
         assert_eq!(updated.linked_task_id, None);
@@ -867,7 +916,7 @@ mod tests {
     }
 
     fn content_patch(content: &str) -> UpdateNote {
-        UpdateNote { title: None, content: Some(content.into()), tags: None, linked_task_id: None, project_id: None, pinned: None }
+        UpdateNote { title: None, content: Some(content.into()), tags: None, linked_task_id: None, project_id: None, pinned: None, reminder_at: None }
     }
 
     async fn revision_count(pool: &SqlitePool, note_id: &str) -> i64 {

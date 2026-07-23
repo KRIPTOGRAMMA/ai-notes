@@ -6,7 +6,7 @@
   import { categoryStore } from "../lib/stores/categories.svelte";
   import { smartListStore } from "../lib/stores/smartLists.svelte";
   import { api } from "../lib/api/tauri";
-  import { parseComposer, SUBTASK_PREFIX } from "../lib/composer";
+  import { parseComposer, parseTaskText, matchCategoryQuery, SUBTASK_PREFIX } from "../lib/composer";
   import TaskModal from "../lib/components/TaskModal.svelte";
   import TaskHistoryDetail from "../lib/components/TaskHistoryDetail.svelte";
   import Icon from "../lib/components/Icon.svelte";
@@ -260,6 +260,14 @@
   let composerBusy = $state(false);
   const composerRows = $derived(Math.min(6, composerText.split("\n").length));
 
+  // Естественный язык в названии (v0.9.17): !приоритет / @категория / #тег /
+  // относительные даты-время разбираются из первой строки живьём, по мере ввода.
+  const composerDraft = $derived(parseComposer(composerText));
+  const composerMeta = $derived(parseTaskText(composerDraft.title));
+  const composerCategoryId = $derived(
+    composerMeta.categoryQuery ? matchCategoryQuery(categoryStore.categories, composerMeta.categoryQuery) : null
+  );
+
   function composerInsertSubtaskLine() {
     const el = composerEl;
     if (!el) return;
@@ -286,18 +294,20 @@
   async function submitComposer() {
     const draft = parseComposer(composerText);
     if (!draft.title || composerBusy) return;
+    const meta = parseTaskText(draft.title);
     composerBusy = true;
     try {
       // Активный фильтр проекта — умный дефолт для новой задачи
       const projectId = projectFilter !== "all" && projectFilter !== "none" ? projectFilter : null;
+      const categoryId = meta.categoryQuery ? matchCategoryQuery(categoryStore.categories, meta.categoryQuery) : null;
       const task = await api.createTask({
-        title: draft.title,
+        title: meta.title || draft.title,
         description: draft.description || null,
         status: "Todo",
-        priority: "Medium",
-        category: "Other", // фолбэк-категория: всегда существует (Work можно удалить)
-        deadline: null,
-        tags: [],
+        priority: meta.priority ?? "Medium",
+        category: categoryId ?? "Other", // фолбэк-категория: всегда существует (Work можно удалить)
+        deadline: meta.deadline ? meta.deadline.toISOString() : null,
+        tags: meta.tags,
         recurrence: "None",
         project_id: projectId,
       });
@@ -1077,14 +1087,36 @@
         bind:value={composerText}
         onkeydown={composerKeydown}
         rows={composerRows}
-        placeholder="Быстрая задача…  (Shift+Enter — подзадача, Ctrl+Enter — создать)"
+        placeholder="Быстрая задача… (!приоритет @категория #тег, завтра 15:00 — Shift+Enter подзадача, Ctrl+Enter создать)"
       ></textarea>
-      {#if parseComposer(composerText).title}
+      {#if composerDraft.title}
         <button class="btn-primary btn-sm composer-send" disabled={composerBusy} onclick={submitComposer}>
           {composerBusy ? "…" : "Создать"}
         </button>
       {/if}
     </div>
+    {#if composerDraft.title && (composerMeta.priority || composerMeta.categoryQuery || composerMeta.tags.length > 0 || composerMeta.deadline)}
+      <div class="composer-preview">
+        {#if composerMeta.priority}
+          <span class="chip" style="--prio: var(--prio-{composerMeta.priority.toLowerCase()});">
+            <span class="prio-dot"></span> {PRIORITY_LABELS[composerMeta.priority]}
+          </span>
+        {/if}
+        {#if composerMeta.categoryQuery}
+          {#if composerCategoryId}
+            <span class="chip chip-cat" style="--cat: {categoryStore.color(composerCategoryId)}">{categoryStore.name(composerCategoryId)}</span>
+          {:else}
+            <span class="chip chip-danger" title="Категория «{composerMeta.categoryQuery}» не найдена — будет «Другое»">@{composerMeta.categoryQuery} ?</span>
+          {/if}
+        {/if}
+        {#each composerMeta.tags as tag}
+          <span class="chip chip-tag">#{tag}</span>
+        {/each}
+        {#if composerMeta.deadline}
+          <span class="chip"><Icon name="flag" size={11} /> {composerMeta.deadline.toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
+        {/if}
+      </div>
+    {/if}
   {/if}
 
   {#if searchQuery.trim()}
@@ -1367,6 +1399,16 @@
   .composer-input:focus { outline: none; }
 
   .composer-send { flex-shrink: 0; }
+
+  .composer-preview {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    padding: 0 12px 10px;
+    margin-top: -8px;
+    margin-bottom: 12px;
+  }
 
   .what-now {
     display: flex;

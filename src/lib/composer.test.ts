@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseComposer } from "./composer";
+import { parseComposer, parseTaskText, matchCategoryQuery } from "./composer";
 
 describe("parseComposer", () => {
   it("одна строка — только название", () => {
@@ -42,5 +42,111 @@ describe("parseComposer", () => {
   it("пустой и null-вход не падают", () => {
     expect(parseComposer("")).toEqual({ title: "", description: "", subtasks: [] });
     expect(parseComposer(null as unknown as string).title).toBe("");
+  });
+});
+
+describe("parseTaskText", () => {
+  const now = new Date("2026-07-23T10:00:00"); // четверг
+
+  it("чистое название без маркеров — priority/category/tags/deadline пустые", () => {
+    const d = parseTaskText("купить хлеб", now);
+    expect(d).toEqual({ title: "купить хлеб", priority: null, categoryQuery: null, tags: [], deadline: null });
+  });
+
+  it("!приоритет вырезается из названия и распознаётся", () => {
+    expect(parseTaskText("сделать отчёт !высокий", now).title).toBe("сделать отчёт");
+    expect(parseTaskText("сделать отчёт !высокий", now).priority).toBe("High");
+    expect(parseTaskText("!критический баг", now).priority).toBe("Critical");
+    expect(parseTaskText("!низкий таск", now).priority).toBe("Low");
+    expect(parseTaskText("!средний таск", now).priority).toBe("Medium");
+  });
+
+  it("@категория вырезается и возвращается как сырой запрос", () => {
+    const d = parseTaskText("созвон @работа", now);
+    expect(d.title).toBe("созвон");
+    expect(d.categoryQuery).toBe("работа");
+  });
+
+  it("#тег вырезается и добавляется в tags, можно несколько", () => {
+    const d = parseTaskText("задача #важное #срочно-по-факту", now);
+    expect(d.title).toBe("задача");
+    expect(d.tags).toEqual(["важное", "срочно-по-факту"]);
+  });
+
+  it("завтра + время — дедлайн на завтра в указанное время", () => {
+    const d = parseTaskText("завтра 15:00 созвон", now);
+    expect(d.title).toBe("созвон");
+    expect(d.deadline).toEqual(new Date("2026-07-24T15:00:00"));
+  });
+
+  it("послезавтра без времени — дедлайн на начало дня", () => {
+    const d = parseTaskText("послезавтра важный созвон", now);
+    expect(d.deadline).toEqual(new Date("2026-07-25T00:00:00"));
+  });
+
+  it("сегодня + время", () => {
+    const d = parseTaskText("сегодня 18:30 сдать отчёт", now);
+    expect(d.deadline).toEqual(new Date("2026-07-23T18:30:00"));
+  });
+
+  it("только время без даты — дедлайн сегодня в это время", () => {
+    const d = parseTaskText("созвон 14:00", now);
+    expect(d.deadline).toEqual(new Date("2026-07-23T14:00:00"));
+  });
+
+  it("день недели — ближайшее будущее вхождение", () => {
+    // now = четверг 2026-07-23; "пятница" → завтра (2026-07-24)
+    const d = parseTaskText("встреча пятница 10:00", now);
+    expect(d.deadline).toEqual(new Date("2026-07-24T10:00:00"));
+  });
+
+  it("без даты/времени — deadline null", () => {
+    expect(parseTaskText("просто задача", now).deadline).toBeNull();
+  });
+
+  it("все маркеры вместе, порядок токенов не важен, заголовок собирается из оставшихся слов", () => {
+    const d = parseTaskText("завтра 15:00 созвон !высокий @работа #важное", now);
+    expect(d.title).toBe("созвон");
+    expect(d.priority).toBe("High");
+    expect(d.categoryQuery).toBe("работа");
+    expect(d.tags).toEqual(["важное"]);
+    expect(d.deadline).toEqual(new Date("2026-07-24T15:00:00"));
+  });
+
+  it("невалидное время (25:99) не распознаётся как маркер, остаётся в названии", () => {
+    const d = parseTaskText("тест 25:99 слово", now);
+    expect(d.title).toBe("тест 25:99 слово");
+    expect(d.deadline).toBeNull();
+  });
+
+  it("неизвестное слово после ! или @ не считается маркером-приоритетом, но @ и # всегда режутся", () => {
+    // ! с нераспознанным словом — оставляем токен как есть в названии (не смогли понять)
+    const d = parseTaskText("сделать !абракадабра", now);
+    expect(d.priority).toBeNull();
+    expect(d.title).toBe("сделать !абракадабра");
+  });
+});
+
+describe("matchCategoryQuery", () => {
+  const categories = [
+    { id: "Work", name: "Работа" },
+    { id: "abc-123", name: "Спорт" },
+  ];
+
+  it("сопоставляет по имени без учёта регистра", () => {
+    expect(matchCategoryQuery(categories, "работа")).toBe("Work");
+    expect(matchCategoryQuery(categories, "РАБОТА")).toBe("Work");
+  });
+
+  it("сопоставляет по id", () => {
+    expect(matchCategoryQuery(categories, "abc-123")).toBe("abc-123");
+  });
+
+  it("подрезает обрамляющую пунктуацию", () => {
+    expect(matchCategoryQuery(categories, "«спорт»")).toBe("abc-123");
+  });
+
+  it("нет совпадения — null", () => {
+    expect(matchCategoryQuery(categories, "отдых")).toBeNull();
   });
 });

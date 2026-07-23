@@ -16,6 +16,7 @@ pub fn start_scheduler(app: tauri::AppHandle, pool: SqlitePool, work_mode: Arc<M
             check_goals(&app, &pool, muted).await;
             check_morning_digest(&app, &pool, muted).await;
             check_app_limits(&app, &pool, muted).await;
+            check_note_reminders(&app, &pool, muted).await;
             tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
         }
     });
@@ -157,6 +158,49 @@ async fn check_blocks(app: &tauri::AppHandle, pool: &SqlitePool, muted: bool) {
         mark_block_notified(pool, &block.id).await;
     }
     sweep_stale_blocks(pool, now, BLOCK_GRACE_MINS).await;
+}
+
+#[derive(Debug, PartialEq)]
+pub struct ReminderDue {
+    pub note_id: String,
+    pub title: String,
+}
+
+// Напоминания заметок (v0.9.18), подошедшие к сроку и ещё не уведомлённые.
+// Как и у блоков — окно (нет верхней "старой" границы: пропущенное напоминание
+// после долгого сна всё равно стоит показать один раз, не молчать вечно).
+pub async fn note_reminders_due(pool: &SqlitePool, now: chrono::DateTime<Utc>) -> Vec<ReminderDue> {
+    let rows = match sqlx::query(
+        "SELECT id, title FROM notes WHERE notified_reminder = 0 AND reminder_at IS NOT NULL AND reminder_at <= ?"
+    )
+    .bind(now.to_rfc3339())
+    .fetch_all(pool)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(_) => return vec![],
+    };
+    rows.into_iter()
+        .map(|row| ReminderDue { note_id: row.get("id"), title: row.get("title") })
+        .collect()
+}
+
+pub async fn mark_reminder_notified(pool: &SqlitePool, note_id: &str) {
+    let _ = sqlx::query("UPDATE notes SET notified_reminder = 1 WHERE id = ?")
+        .bind(note_id).execute(pool).await;
+}
+
+async fn check_note_reminders(app: &tauri::AppHandle, pool: &SqlitePool, muted: bool) {
+    let now = Utc::now();
+    for reminder in note_reminders_due(pool, now).await {
+        if !muted {
+            send_notification_for(
+                app, pool, "note_reminder", &reminder.title, "Напоминание о заметке",
+                Some("note"), Some(&reminder.note_id),
+            ).await;
+        }
+        mark_reminder_notified(pool, &reminder.note_id).await;
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -423,22 +467,41 @@ async fn morning_digest_due(pool: &SqlitePool, now: chrono::DateTime<Utc>) -> bo
 }
 
 // kind — стабильный тег источника пуша (deadline/block/digest/goal/app_limit/
-// pomodoro/overdue/missed_days/nudge/activity_return), пишется в notification_log
-// для Центра уведомлений (v0.9.16) — плагин уведомлений сам историю не хранит.
+// pomodoro/overdue/missed_days/nudge/activity_return/note_reminder), пишется в
+// notification_log для Центра уведомлений (v0.9.16) — плагин уведомлений сам
+// историю не хранит. Большинство вызовов не ведут никуда конкретно при клике
+// в ленте — для них entity_type/entity_id остаются NULL (см. send_notification_for).
 pub async fn send_notification(app: &tauri::AppHandle, pool: &SqlitePool, kind: &str, title: &str, body: &str) {
+    send_notification_for(app, pool, kind, title, body, None, None).await;
+}
+
+// Тот же пуш, но со ссылкой на сущность (v0.9.18: напоминание заметки → клик
+// в Центре уведомлений открывает эту заметку). entity_type — "note"/"task" и
+// т.п., entity_id — id записи.
+pub async fn send_notification_for(
+    app: &tauri::AppHandle,
+    pool: &SqlitePool,
+    kind: &str,
+    title: &str,
+    body: &str,
+    entity_type: Option<&str>,
+    entity_id: Option<&str>,
+) {
     let _ = app.notification()
         .builder()
         .title(title)
         .body(body)
         .show();
     let _ = sqlx::query(
-        "INSERT INTO notification_log (id, kind, title, body, created_at) VALUES (?, ?, ?, ?, ?)"
+        "INSERT INTO notification_log (id, kind, title, body, created_at, entity_type, entity_id) VALUES (?, ?, ?, ?, ?, ?, ?)"
     )
     .bind(uuid::Uuid::new_v4().to_string())
     .bind(kind)
     .bind(title)
     .bind(body)
     .bind(Utc::now().to_rfc3339())
+    .bind(entity_type)
+    .bind(entity_id)
     .execute(pool)
     .await;
 }
@@ -587,6 +650,50 @@ mod tests {
             "SELECT COUNT(*) FROM tasks WHERE notified_block = 0")
             .fetch_one(&pool).await.unwrap();
         assert_eq!(unnotified, 0);
+    }
+
+    async fn insert_note(pool: &SqlitePool, title: &str, reminder_at: Option<&str>, notified: bool) -> String {
+        let id = uuid::Uuid::new_v4().to_string();
+        let now = Utc::now().to_rfc3339();
+        sqlx::query(
+            "INSERT INTO notes (id, title, content, tags, created_at, updated_at, reminder_at, notified_reminder)
+             VALUES (?, ?, '', '[]', ?, ?, ?, ?)")
+            .bind(&id).bind(title)
+            .bind(&now).bind(&now)
+            .bind(reminder_at).bind(notified)
+            .execute(pool).await.unwrap();
+        id
+    }
+
+    // v0.9.18: напоминания заметок — тот же due/mark паттерн, что у блоков,
+    // но без верхней "слишком старое" границы (пропущенное после сна всё
+    // равно стоит показать один раз, не молчать вечно).
+    #[tokio::test]
+    async fn note_reminders_due_respects_time_and_flag() {
+        let pool = test_pool().await;
+        let now = Utc::now();
+        let ts = |mins_ago: i64| (now - chrono::Duration::minutes(mins_ago)).to_rfc3339();
+
+        insert_note(&pool, "пора", Some(&ts(5)), false).await;
+        insert_note(&pool, "давно пора", Some(&ts(500)), false).await;
+        insert_note(&pool, "уже уведомлена", Some(&ts(5)), true).await;
+        insert_note(&pool, "ещё рано", Some(&ts(-30)), false).await;
+        insert_note(&pool, "без напоминания", None, false).await;
+
+        let due = note_reminders_due(&pool, now).await;
+        let titles: std::collections::HashSet<&str> = due.iter().map(|d| d.title.as_str()).collect();
+        assert_eq!(titles, ["пора", "давно пора"].into_iter().collect());
+    }
+
+    #[tokio::test]
+    async fn mark_reminder_notified_removes_from_due() {
+        let pool = test_pool().await;
+        let now = Utc::now();
+        let id = insert_note(&pool, "заметка", Some(&(now - chrono::Duration::minutes(1)).to_rfc3339()), false).await;
+
+        assert_eq!(note_reminders_due(&pool, now).await.len(), 1);
+        mark_reminder_notified(&pool, &id).await;
+        assert!(note_reminders_due(&pool, now).await.is_empty());
     }
 
     #[tokio::test]

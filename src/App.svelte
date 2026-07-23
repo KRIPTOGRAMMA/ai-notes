@@ -219,7 +219,10 @@
   </aside>
 
   {#if showNotifications}
-    <NotificationPanel onClose={() => { showNotifications = false; pollUnreadNotifications(); }} />
+    <NotificationPanel
+      onClose={() => { showNotifications = false; pollUnreadNotifications(); }}
+      onOpenNote={(id) => { activeView = "notes"; noteStore.requestFocus(id); showNotifications = false; pollUnreadNotifications(); }}
+    />
   {/if}
 
   <main class="content">

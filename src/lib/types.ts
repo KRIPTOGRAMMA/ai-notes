@@ -127,6 +127,7 @@ export interface Note {
   pinned: boolean;
   created_at: string;
   updated_at: string;
+  reminder_at: string | null;
 }
 
 export interface NoteSnippet {
@@ -160,6 +161,7 @@ export interface UpdateNotePayload {
   linked_task_id?: string | null;
   project_id?: string | null;
   pinned?: boolean;
+  reminder_at?: string | null;
 }
 
 export interface AppSettings {
@@ -236,6 +238,8 @@ export interface NotificationEntry {
   body: string;
   created_at: string;
   read_at: string | null;
+  entity_type: string | null;
+  entity_id: string | null;
 }
 
 export interface DayCompletion {

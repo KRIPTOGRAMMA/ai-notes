@@ -13,6 +13,10 @@ pub struct NotificationEntry {
     pub body: String,
     pub created_at: String,
     pub read_at: Option<String>,
+    // v0.9.18: если задано — клик по записи в Центре уведомлений открывает
+    // эту сущность (сейчас только "note", задел под другие типы на будущее).
+    pub entity_type: Option<String>,
+    pub entity_id: Option<String>,
 }
 
 fn row_to_entry(row: sqlx::sqlite::SqliteRow) -> NotificationEntry {
@@ -23,6 +27,8 @@ fn row_to_entry(row: sqlx::sqlite::SqliteRow) -> NotificationEntry {
         body: row.get("body"),
         created_at: row.get("created_at"),
         read_at: row.get("read_at"),
+        entity_type: row.get("entity_type"),
+        entity_id: row.get("entity_id"),
     }
 }
 
@@ -35,7 +41,7 @@ pub async fn get_notification_log(pool: State<'_, SqlitePool>) -> AppResult<Vec<
 
 pub async fn get_notification_log_impl(pool: &SqlitePool) -> AppResult<Vec<NotificationEntry>> {
     let rows = sqlx::query(
-        "SELECT id, kind, title, body, created_at, read_at FROM notification_log
+        "SELECT id, kind, title, body, created_at, read_at, entity_type, entity_id FROM notification_log
          ORDER BY created_at DESC LIMIT ?"
     )
     .bind(FEED_LIMIT)
@@ -107,6 +113,33 @@ mod tests {
         assert_eq!(feed.len(), 2);
         assert_eq!(feed[0].title, "новое");
         assert_eq!(feed[1].title, "старое");
+    }
+
+    // v0.9.18: записи без entity-ссылки (большинство существующих kind) —
+    // entity_type/entity_id должны читаться как None, не падать/паниковать.
+    #[tokio::test]
+    async fn entries_without_entity_ref_read_as_none() {
+        let pool = test_pool().await;
+        insert(&pool, "deadline", "a", chrono::Utc::now()).await;
+        let feed = get_notification_log_impl(&pool).await.unwrap();
+        assert_eq!(feed[0].entity_type, None);
+        assert_eq!(feed[0].entity_id, None);
+    }
+
+    #[tokio::test]
+    async fn entry_with_entity_ref_roundtrips() {
+        let pool = test_pool().await;
+        let id = uuid::Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO notification_log (id, kind, title, body, created_at, entity_type, entity_id)
+             VALUES (?, 'note_reminder', 'заметка', 'body', ?, 'note', 'note-42')"
+        )
+        .bind(&id).bind(chrono::Utc::now().to_rfc3339())
+        .execute(&pool).await.unwrap();
+
+        let feed = get_notification_log_impl(&pool).await.unwrap();
+        assert_eq!(feed[0].entity_type.as_deref(), Some("note"));
+        assert_eq!(feed[0].entity_id.as_deref(), Some("note-42"));
     }
 
     #[tokio::test]

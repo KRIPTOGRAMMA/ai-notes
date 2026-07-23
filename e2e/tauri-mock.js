@@ -317,6 +317,7 @@
         linked_task_id: null,
         project_id: null,
         pinned: false,
+        reminder_at: null,
         ...note,
         created_at: now(),
         updated_at: now(),

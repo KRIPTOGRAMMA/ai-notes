@@ -1939,3 +1939,94 @@ test("центр уведомлений: бейдж непрочитанных, 
   await page.getByRole("button", { name: "Очистить" }).click();
   await expect(page.getByText("Уведомлений пока не было")).toBeVisible();
 });
+
+test("естественный язык в композере: !приоритет @категория #тег и дата разбираются в превью и при создании", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+
+  const composer = page.locator(".composer-input");
+  await composer.fill("завтра 15:00 созвон !высокий @работа #важное");
+
+  // Живой предпросмотр показывает разобранные метаданные
+  const preview = page.locator(".composer-preview");
+  await expect(preview.getByText("Высокий")).toBeVisible();
+  await expect(preview.locator(".chip-cat", { hasText: "Работа" })).toBeVisible();
+  await expect(preview.locator(".chip-tag", { hasText: "#важное" })).toBeVisible();
+  await expect(preview).toContainText("Jul");
+
+  await page.getByRole("button", { name: "Создать", exact: true }).click();
+
+  // Задача создана с чистым названием и разобранными полями (не сырым текстом)
+  await expect(page.getByText("созвон", { exact: true })).toBeVisible();
+  await expect(page.getByText("завтра 15:00 созвон")).not.toBeVisible();
+  const row = page.locator(".task-row", { hasText: "созвон" });
+  await expect(row.locator(".chip-cat")).toHaveText("Работа");
+  await expect(row.locator(".chip-tag")).toHaveText("#важное");
+});
+
+test("естественный язык в композере: неизвестная категория подсвечивается как ошибка в превью", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+
+  await page.locator(".composer-input").fill("задача @несуществующая");
+  await expect(page.locator(".composer-preview .chip-danger")).toContainText("несуществующая");
+});
+
+test("напоминание у заметки: поле сохраняется и переживает перезагрузку", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+  await page.evaluate(() => {
+    const db = JSON.parse(localStorage.getItem("__mock_db")!);
+    const now = new Date().toISOString();
+    db.notes.push({
+      id: "rn1", title: "Заметка с напоминанием", content: "текст", tags: [],
+      linked_task_id: null, project_id: null, pinned: false, reminder_at: null,
+      created_at: now, updated_at: now,
+    });
+    localStorage.setItem("__mock_db", JSON.stringify(db));
+  });
+  await page.reload();
+  await page.getByRole("button", { name: "Заметки", exact: true }).click();
+  await page.locator(".note-item", { hasText: "Заметка с напоминанием" }).click();
+
+  await page.locator('input[type="datetime-local"]').fill("2026-08-01T10:00");
+  await page.locator('input[type="datetime-local"]').blur();
+  await page.waitForTimeout(200);
+
+  await page.reload();
+  await page.getByRole("button", { name: "Заметки", exact: true }).click();
+  await page.locator(".note-item", { hasText: "Заметка с напоминанием" }).click();
+  await expect(page.locator('input[type="datetime-local"]')).toHaveValue("2026-08-01T10:00");
+
+  // Снятие напоминания через ✕
+  await page.locator('label:has-text("Напоминание") button[title="Убрать напоминание"]').click();
+  await page.waitForTimeout(200);
+  await expect(page.locator('input[type="datetime-local"]')).toHaveValue("");
+});
+
+test("напоминание у заметки: клик по уведомлению открывает связанную заметку", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+  await page.evaluate(() => {
+    const db = JSON.parse(localStorage.getItem("__mock_db")!);
+    const now = new Date().toISOString();
+    db.notes.push({
+      id: "rn2", title: "Напомненная заметка", content: "текст", tags: [],
+      linked_task_id: null, project_id: null, pinned: false, reminder_at: null,
+      created_at: now, updated_at: now,
+    });
+    db.notificationLog = [
+      { id: "notifX", kind: "note_reminder", title: "Напомненная заметка", body: "Напоминание о заметке", created_at: now, read_at: null, entity_type: "note", entity_id: "rn2" },
+    ];
+    localStorage.setItem("__mock_db", JSON.stringify(db));
+  });
+  await page.reload();
+
+  // Начинаем на Задачах — клик по уведомлению должен реально переключить раздел
+  await page.getByRole("button", { name: "Задачи", exact: true }).click();
+  await page.locator(".bell-item").click();
+  await page.locator(".notif-body-btn", { hasText: "Напомненная заметка" }).click();
+
+  await expect(page.locator(".title-input")).toHaveValue("Напомненная заметка");
+  await expect(page.locator(".notif-panel")).toHaveCount(0);
+});

@@ -4,7 +4,7 @@
   import Icon from "./Icon.svelte";
   import type { NotificationEntry } from "../types";
 
-  let { onClose }: { onClose: () => void } = $props();
+  let { onClose, onOpenNote }: { onClose: () => void; onOpenNote?: (id: string) => void } = $props();
 
   let entries: NotificationEntry[] = $state([]);
   let loading = $state(true);
@@ -20,7 +20,14 @@
     missed_days: "alert",
     nudge: "coffee",
     activity_return: "bell",
+    note_reminder: "bell",
   };
+
+  function openEntry(e: NotificationEntry) {
+    if (e.entity_type === "note" && e.entity_id && onOpenNote) {
+      onOpenNote(e.entity_id);
+    }
+  }
 
   function formatWhen(iso: string): string {
     const d = new Date(iso);
@@ -69,12 +76,20 @@
     {:else}
       <ul class="notif-list">
         {#each entries as e (e.id)}
-          <li class="notif-row">
+          {@const clickable = e.entity_type === "note" && !!e.entity_id}
+          <li class="notif-row" class:clickable>
             <span class="notif-icon"><Icon name={KIND_ICONS[e.kind] ?? "bell"} size={13} /></span>
-            <div class="notif-body">
-              <div class="notif-row-title">{e.title}</div>
-              <div class="notif-row-text">{e.body}</div>
-            </div>
+            {#if clickable}
+              <button class="notif-body notif-body-btn" onclick={() => openEntry(e)} title="Открыть заметку">
+                <div class="notif-row-title">{e.title}</div>
+                <div class="notif-row-text">{e.body}</div>
+              </button>
+            {:else}
+              <div class="notif-body">
+                <div class="notif-row-title">{e.title}</div>
+                <div class="notif-row-text">{e.body}</div>
+              </div>
+            {/if}
             <span class="notif-when muted">{formatWhen(e.created_at)}</span>
           </li>
         {/each}
@@ -150,6 +165,16 @@
   .notif-body {
     flex: 1;
     min-width: 0;
+  }
+
+  .notif-body-btn {
+    border: none;
+    background: transparent;
+    padding: 0;
+    text-align: left;
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
   }
 
   .notif-row-title {
