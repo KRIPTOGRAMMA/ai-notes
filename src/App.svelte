@@ -19,11 +19,15 @@
   import SearchOverlay from "./lib/components/SearchOverlay.svelte";
   import PomodoroWidget from "./lib/components/PomodoroWidget.svelte";
   import TrackingWidget from "./lib/components/TrackingWidget.svelte";
+  import NotificationPanel from "./lib/components/NotificationPanel.svelte";
+  import Icon from "./lib/components/Icon.svelte";
   import "./app.css";
 
   type View = "today" | "tasks" | "notes" | "graph" | "dashboard" | "calendar" | "settings";
   let activeView: View = $state("tasks");
   let showSearch = $state(false);
+  let showNotifications = $state(false);
+  let unreadNotifications = $state(0);
 
   // Онбординг: пока настройки не загружены — ничего не показываем,
   // чтобы главный экран не мелькал перед онбордингом
@@ -62,7 +66,13 @@
       loadedSettings = null;
       showOnboarding = false;
     }
+    void pollUnreadNotifications();
+    setInterval(pollUnreadNotifications, 30_000);
   });
+
+  async function pollUnreadNotifications() {
+    unreadNotifications = await api.getUnreadNotificationCount().catch(() => 0);
+  }
 
   const NAV: { view: View; label: string; icon: string; actionId: string }[] = [
     { view: "today",     label: "Сегодня",   actionId: "view_today",     icon: "M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10Z M12 1v2 M12 21v2 M4.22 4.22l1.42 1.42 M18.36 18.36l1.42 1.42 M1 12h2 M21 12h2 M4.22 19.78l1.42-1.42 M18.36 5.64l1.42-1.42" },
@@ -198,7 +208,19 @@
       <span>Поиск</span>
       <kbd>Ctrl K</kbd>
     </button>
+
+    <button class="nav-item bell-item" onclick={() => showNotifications = true} title="Уведомления">
+      <Icon name="bell" size={16} />
+      <span>Уведомления</span>
+      {#if unreadNotifications > 0}
+        <span class="unread-badge">{unreadNotifications > 99 ? "99+" : unreadNotifications}</span>
+      {/if}
+    </button>
   </aside>
+
+  {#if showNotifications}
+    <NotificationPanel onClose={() => { showNotifications = false; pollUnreadNotifications(); }} />
+  {/if}
 
   <main class="content">
     {#if taskStore.error}
@@ -298,6 +320,21 @@
     border: 1px solid var(--border);
     border-radius: 4px;
     padding: 0 4px;
+  }
+
+  .unread-badge {
+    margin-left: auto;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 999px;
+    background: var(--danger);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
 
   .content {

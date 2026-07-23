@@ -68,9 +68,11 @@ pub fn start_nudger(app: tauri::AppHandle, pool: SqlitePool, work_mode: Arc<Mute
             if active_secs >= (after_mins * 60) as i64 {
                 send_notification(
                     &app,
+                    &pool,
+                    "nudge",
                     "Пора сделать перерыв",
                     &format!("Ты работаешь без перерыва уже {} мин. Встань, разомнись :)", active_secs / 60),
-                );
+                ).await;
                 last_nudge = Some(Instant::now());
             }
         }

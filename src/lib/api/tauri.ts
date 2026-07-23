@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Task, Subtask, CreateTaskPayload, UpdateTaskPayload, Note, CreateNotePayload, UpdateNotePayload, AppSettings, Project, UpdateProjectPayload, CategoryInfo, NoteSnippet, TaskSnippet, GoalSnapshot, Routine, RoutineBlock, ActiveSession, NoteRevision, ChecklistTemplate, DayCompletion, ModelOption, SmartList, SmartListFilter } from "../types";
+import type { Task, Subtask, CreateTaskPayload, UpdateTaskPayload, Note, CreateNotePayload, UpdateNotePayload, AppSettings, Project, UpdateProjectPayload, CategoryInfo, NoteSnippet, TaskSnippet, GoalSnapshot, Routine, RoutineBlock, ActiveSession, NoteRevision, ChecklistTemplate, DayCompletion, ModelOption, SmartList, SmartListFilter, NotificationEntry } from "../types";
 
 export const api = {
   getTasks: () => invoke<Task[]>("get_tasks"),
@@ -62,6 +62,10 @@ export const api = {
   createSmartList: (name: string, filter: SmartListFilter) =>
     invoke<SmartList>("create_smart_list", { name, filter }),
   deleteSmartList: (id: string) => invoke<void>("delete_smart_list", { id }),
+  getNotificationLog: () => invoke<NotificationEntry[]>("get_notification_log"),
+  getUnreadNotificationCount: () => invoke<number>("get_unread_notification_count"),
+  markNotificationsRead: () => invoke<void>("mark_notifications_read"),
+  clearNotificationLog: () => invoke<void>("clear_notification_log"),
   getActivityByDay: () => invoke<{ date: string; minutes: number }[]>("get_activity_by_day"),
   getTaskCompletionsByDay: () => invoke<{ date: string; completed: number }[]>("get_task_completions_by_day"),
   getCategoryDistribution: () => invoke<{ category: string; count: number }[]>("get_category_distribution"),

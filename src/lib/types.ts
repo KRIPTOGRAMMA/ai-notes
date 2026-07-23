@@ -229,6 +229,15 @@ export interface SmartList {
   position: number;
 }
 
+export interface NotificationEntry {
+  id: string;
+  kind: string;
+  title: string;
+  body: string;
+  created_at: string;
+  read_at: string | null;
+}
+
 export interface DayCompletion {
   id: string;
   title: string;

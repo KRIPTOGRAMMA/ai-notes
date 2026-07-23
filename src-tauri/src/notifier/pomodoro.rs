@@ -142,7 +142,7 @@ pub fn start_pomodoro(
                 // Пауза уведомлений: таймер идёт, но молча. Проверяем только в момент
                 // отправки — не дёргаем БД каждый секундный тик.
                 if !crate::notifier::mute::muted_now(&pool, &mode).await {
-                    send_notification(&app, "Study", &format!("Помодоро запущено: {} минут работы", work_secs / 60));
+                    send_notification(&app, &pool, "pomodoro", "Study", &format!("Помодоро запущено: {} минут работы", work_secs / 60)).await;
                 }
                 continue;
             } else if !in_study && manual {
@@ -162,11 +162,11 @@ pub fn start_pomodoro(
                     log_completed_work(&pool).await;
                     working = false;
                     remaining = break_secs;
-                    if !muted { send_notification(&app, "Study", &format!("Перерыв {} минут — отдохни", break_secs / 60)); }
+                    if !muted { send_notification(&app, &pool, "pomodoro", "Study", &format!("Перерыв {} минут — отдохни", break_secs / 60)).await; }
                 } else {
                     working = true;
                     remaining = work_secs;
-                    if !muted { send_notification(&app, "Study", &format!("Перерыв окончен: {} минут работы", work_secs / 60)); }
+                    if !muted { send_notification(&app, &pool, "pomodoro", "Study", &format!("Перерыв окончен: {} минут работы", work_secs / 60)).await; }
                 }
                 let until = chrono::Utc::now() + chrono::Duration::seconds(remaining as i64);
                 persist_state(&pool, if working { "work" } else { "break" }, until).await;

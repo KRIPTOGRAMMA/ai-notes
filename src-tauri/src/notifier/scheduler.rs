@@ -61,19 +61,19 @@ async fn check_deadlines(app: &tauri::AppHandle, pool: &SqlitePool, muted: bool)
         let deadline = deadline.with_timezone(&Utc);
 
         if !notified_24h && deadline <= early_at && deadline > late_at {
-            if !muted { send_notification(app, &title, early_msg); }
+            if !muted { send_notification(app, pool, "deadline", &title, early_msg).await; }
             let _ = sqlx::query("UPDATE tasks SET notified_24h = 1 WHERE id = ?")
                 .bind(&id).execute(pool).await;
         }
 
         if !notified_1h && deadline <= late_at && deadline > now {
-            if !muted { send_notification(app, &title, late_msg); }
+            if !muted { send_notification(app, pool, "deadline", &title, late_msg).await; }
             let _ = sqlx::query("UPDATE tasks SET notified_1h = 1 WHERE id = ?")
                 .bind(&id).execute(pool).await;
         }
 
         if !notified_deadline && deadline <= now {
-            if !muted { send_notification(app, &title, "Дедлайн наступил!"); }
+            if !muted { send_notification(app, pool, "deadline", &title, "Дедлайн наступил!").await; }
             let _ = sqlx::query("UPDATE tasks SET notified_deadline = 1 WHERE id = ?")
                 .bind(&id).execute(pool).await;
         }
@@ -149,7 +149,7 @@ async fn check_blocks(app: &tauri::AppHandle, pool: &SqlitePool, muted: bool) {
     let focus_auto = crate::commands::settings::get_bool_setting(pool, "focus_mode_auto", true).await;
     for block in blocks_due(pool, now, BLOCK_GRACE_MINS).await {
         if !muted {
-            send_notification(app, &block.title, &format!("Начался блок (до {})", block.end_local));
+            send_notification(app, pool, "block", &block.title, &format!("Начался блок (до {})", block.end_local)).await;
         }
         if focus_auto {
             crate::notifier::mute::extend_quiet_until(pool, block.end_utc).await;
@@ -275,7 +275,7 @@ async fn check_morning_digest(app: &tauri::AppHandle, pool: &SqlitePool, muted: 
         body = "На сегодня ничего не запланировано.".into();
     }
     if !muted {
-        send_notification(app, "Утренняя сводка", body.trim());
+        send_notification(app, pool, "digest", "Утренняя сводка", body.trim()).await;
     }
     crate::commands::settings::set_setting(pool, "morning_digest_last", &local_today.format("%Y-%m-%d").to_string()).await.ok();
 }
@@ -284,7 +284,7 @@ async fn check_goals(app: &tauri::AppHandle, pool: &SqlitePool, muted: bool) {
     let now = Utc::now();
     for goal in goals_due(pool, now).await {
         if !muted {
-            send_notification(app, &goal.name, &goal.body);
+            send_notification(app, pool, "goal", &goal.name, &goal.body).await;
         }
         // Помечаем и в mute, чтобы после снятия глушилки не прилетала пачка
         mark_goal_notified(pool, &goal.id, &goal.period_key).await;
@@ -385,7 +385,7 @@ async fn check_app_limits(app: &tauri::AppHandle, pool: &SqlitePool, muted: bool
 
     for d in &due {
         if !muted {
-            send_notification(app, &d.category, &format!("{}: {} мин из {} сегодня", d.category, d.minutes, d.limit));
+            send_notification(app, pool, "app_limit", &d.category, &format!("{}: {} мин из {} сегодня", d.category, d.minutes, d.limit)).await;
         }
         // Помечаем и в mute — иначе после снятия глушилки прилетит пачка.
         notified.insert(d.category.clone(), today.clone());
@@ -422,12 +422,25 @@ async fn morning_digest_due(pool: &SqlitePool, now: chrono::DateTime<Utc>) -> bo
     true
 }
 
-pub fn send_notification(app: &tauri::AppHandle, title: &str, body: &str) {
+// kind — стабильный тег источника пуша (deadline/block/digest/goal/app_limit/
+// pomodoro/overdue/missed_days/nudge/activity_return), пишется в notification_log
+// для Центра уведомлений (v0.9.16) — плагин уведомлений сам историю не хранит.
+pub async fn send_notification(app: &tauri::AppHandle, pool: &SqlitePool, kind: &str, title: &str, body: &str) {
     let _ = app.notification()
         .builder()
         .title(title)
         .body(body)
         .show();
+    let _ = sqlx::query(
+        "INSERT INTO notification_log (id, kind, title, body, created_at) VALUES (?, ?, ?, ?, ?)"
+    )
+    .bind(uuid::Uuid::new_v4().to_string())
+    .bind(kind)
+    .bind(title)
+    .bind(body)
+    .bind(Utc::now().to_rfc3339())
+    .execute(pool)
+    .await;
 }
 
 #[cfg(test)]

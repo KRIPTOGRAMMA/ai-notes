@@ -311,7 +311,11 @@ pub fn run() {
                         commands::checklists::delete_checklist_template,
                         commands::smart_lists::get_smart_lists,
                         commands::smart_lists::create_smart_list,
-                        commands::smart_lists::delete_smart_list
+                        commands::smart_lists::delete_smart_list,
+                        commands::notifications::get_notification_log,
+                        commands::notifications::get_unread_notification_count,
+                        commands::notifications::mark_notifications_read,
+                        commands::notifications::clear_notification_log
                     ]
                 )
                 .setup(|app| {

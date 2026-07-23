@@ -693,6 +693,21 @@
       persist();
     },
 
+    // --- центр уведомлений ---
+    get_notification_log: () =>
+      [...(db.notificationLog ?? [])].sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 100).map((n) => ({ ...n })),
+    get_unread_notification_count: () =>
+      (db.notificationLog ?? []).filter((n) => !n.read_at).length,
+    mark_notifications_read: () => {
+      const t = now();
+      db.notificationLog = (db.notificationLog ?? []).map((n) => (n.read_at ? n : { ...n, read_at: t }));
+      persist();
+    },
+    clear_notification_log: () => {
+      db.notificationLog = [];
+      persist();
+    },
+
     // --- плагины ---
     "plugin:event|listen": ({ event, handler }) => {
       if (!eventHandlers.has(event)) eventHandlers.set(event, new Set());
