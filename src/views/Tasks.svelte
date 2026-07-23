@@ -4,12 +4,13 @@
   import { taskStore } from "../lib/stores/tasks.svelte";
   import { projectStore } from "../lib/stores/projects.svelte";
   import { categoryStore } from "../lib/stores/categories.svelte";
+  import { smartListStore } from "../lib/stores/smartLists.svelte";
   import { api } from "../lib/api/tauri";
   import { parseComposer, SUBTASK_PREFIX } from "../lib/composer";
   import TaskModal from "../lib/components/TaskModal.svelte";
   import TaskHistoryDetail from "../lib/components/TaskHistoryDetail.svelte";
   import Icon from "../lib/components/Icon.svelte";
-  import type { Task, Subtask, Category, CreateTaskPayload, UpdateTaskPayload, Project, GoalSnapshot, ActiveSession } from "../lib/types";
+  import type { Task, Subtask, Category, CreateTaskPayload, UpdateTaskPayload, Project, GoalSnapshot, ActiveSession, SmartListFilter } from "../lib/types";
 
   type AiResult = { task_id: string; type: string; result?: string; error?: string };
 
@@ -27,9 +28,45 @@
   let showProjects = $state(false);
   let newProjectName = $state("");
 
+  // Умные списки: модалка создания своего списка
+  let showSmartListModal = $state(false);
+  let newSmartListName = $state("");
+  let newSmartListCategory = $state("");
+  let newSmartListPriority = $state("");
+  let newSmartListTag = $state("");
+  let newSmartListHasDeadline = $state<"" | "yes" | "no">("");
+
+  function resetSmartListForm() {
+    newSmartListName = "";
+    newSmartListCategory = "";
+    newSmartListPriority = "";
+    newSmartListTag = "";
+    newSmartListHasDeadline = "";
+  }
+
+  async function createSmartList() {
+    const filter: SmartListFilter = {
+      category: newSmartListCategory || null,
+      priority: newSmartListPriority || null,
+      tag: newSmartListTag.trim() || null,
+      has_deadline: newSmartListHasDeadline === "" ? null : newSmartListHasDeadline === "yes",
+    };
+    await smartListStore.create(newSmartListName, filter);
+    if (!smartListStore.error) {
+      showSmartListModal = false;
+      resetSmartListForm();
+    }
+  }
+
+  async function removeSmartList(id: string) {
+    if (activeSmartListId === id) activeSmartListId = null;
+    await smartListStore.remove(id);
+  }
+
   onMount(() => {
     projectStore.load();
     categoryStore.load();
+    smartListStore.load();
     // Капабилити-детект: при выключенном ИИ кнопка «Что сейчас?» просто скрыта
     api.getSettings().then(s => {
       aiEnabled = s.ai_provider !== "none";
@@ -41,12 +78,56 @@
   // v0.8.3: задачи с подзадачами развёрнуты по умолчанию (настройка «Внешний вид»)
   let autoExpandSubs = $state(true);
 
+  // Умные списки (v0.9.14): встроенные («Просроченные»/«На этой неделе») зависят
+  // от текущей даты, поэтому целиком на фронте, в БД не хранятся; свои —
+  // из smartListStore, предикат по category/priority/tag/наличию дедлайна.
+  type BuiltinSmartList = { id: string; name: string; test: (t: Task) => boolean };
+  const BUILTIN_SMART_LISTS: BuiltinSmartList[] = [
+    {
+      id: "__overdue",
+      name: "Просроченные",
+      test: (t) => !!t.deadline && new Date(t.deadline).getTime() < Date.now(),
+    },
+    {
+      id: "__this_week",
+      name: "На этой неделе",
+      test: (t) => {
+        if (!t.deadline) return false;
+        const d = new Date(t.deadline).getTime();
+        const now = Date.now();
+        return d >= now && d <= now + 7 * 864e5;
+      },
+    },
+  ];
+
+  let activeSmartListId: string | null = $state(null);
+
+  function matchesSmartFilter(t: Task, f: SmartListFilter): boolean {
+    if (f.category && t.category !== f.category) return false;
+    if (f.priority && t.priority !== f.priority) return false;
+    if (f.tag && !t.tags.includes(f.tag)) return false;
+    if (f.has_deadline === true && !t.deadline) return false;
+    if (f.has_deadline === false && t.deadline) return false;
+    return true;
+  }
+
+  const activeSmartListTest = $derived.by((): ((t: Task) => boolean) | null => {
+    if (!activeSmartListId) return null;
+    const builtin = BUILTIN_SMART_LISTS.find(l => l.id === activeSmartListId);
+    if (builtin) return builtin.test;
+    const custom = smartListStore.lists.find(l => l.id === activeSmartListId);
+    if (custom) return (t: Task) => matchesSmartFilter(t, custom.filter);
+    return null;
+  });
+
   const filteredActive = $derived(
-    taskStore.activeTasks.filter(t =>
-      projectFilter === "all" ? true :
-      projectFilter === "none" ? !t.project_id :
-      t.project_id === projectFilter
-    )
+    taskStore.activeTasks
+      .filter(t =>
+        projectFilter === "all" ? true :
+        projectFilter === "none" ? !t.project_id :
+        t.project_id === projectFilter
+      )
+      .filter(t => activeSmartListTest ? activeSmartListTest(t) : true)
   );
 
   // Группировка «все проекты»: секция на проект (в порядке списка проектов) + «Без проекта».
@@ -708,6 +789,67 @@
   </div>
 {/if}
 
+{#if showSmartListModal}
+  <div role="dialog" aria-modal="true" class="overlay backdrop"
+    onclick={(e) => { if (e.target === e.currentTarget) { showSmartListModal = false; resetSmartListForm(); } }}>
+    <div class="modal dialog">
+      <h2 class="dialog-title">Новый умный список</h2>
+
+      {#if smartListStore.error}
+        <div class="alert" style="margin:0;">{smartListStore.error}</div>
+      {/if}
+
+      <label class="field">
+        <span class="label">Название</span>
+        <input bind:value={newSmartListName} placeholder="Например: Важное" />
+      </label>
+
+      <div class="pair" style="margin-top:8px;">
+        <label class="field">
+          <span class="label">Категория</span>
+          <select bind:value={newSmartListCategory}>
+            <option value="">Любая</option>
+            {#each categoryStore.categories as c (c.id)}
+              <option value={c.id}>{c.name}</option>
+            {/each}
+          </select>
+        </label>
+        <label class="field">
+          <span class="label">Приоритет</span>
+          <select bind:value={newSmartListPriority}>
+            <option value="">Любой</option>
+            {#each Object.entries(PRIORITY_LABELS) as [value, label] (value)}
+              <option {value}>{label}</option>
+            {/each}
+          </select>
+        </label>
+      </div>
+
+      <div class="pair" style="margin-top:8px;">
+        <label class="field">
+          <span class="label">Тег</span>
+          <input bind:value={newSmartListTag} placeholder="без #" />
+        </label>
+        <label class="field">
+          <span class="label">Дедлайн</span>
+          <select bind:value={newSmartListHasDeadline}>
+            <option value="">Не важно</option>
+            <option value="yes">Есть дедлайн</option>
+            <option value="no">Без дедлайна</option>
+          </select>
+        </label>
+      </div>
+
+      <p class="hint">Условия комбинируются через «И» — задача должна подойти под все заданные.</p>
+
+      <div class="actions">
+        <button class="btn-ghost" onclick={() => { showSmartListModal = false; resetSmartListForm(); }}>Отмена</button>
+        <button class="btn-primary" onclick={createSmartList} disabled={!newSmartListName.trim()}>Создать</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
 <div class="page">
   <div class="page-head">
     <h1 class="page-title">Задачи</h1>
@@ -769,6 +911,30 @@
   {/if}
 
   {#if !searchQuery.trim()}
+    <div class="smart-lists">
+      <button
+        class="chip smart-list-chip"
+        class:active-toggle={activeSmartListId === null}
+        onclick={() => activeSmartListId = null}
+      >Все</button>
+      {#each BUILTIN_SMART_LISTS as l (l.id)}
+        <button
+          class="chip smart-list-chip"
+          class:active-toggle={activeSmartListId === l.id}
+          onclick={() => activeSmartListId = activeSmartListId === l.id ? null : l.id}
+        >{l.name}</button>
+      {/each}
+      {#each smartListStore.lists as l (l.id)}
+        <span class="chip smart-list-chip custom" class:active-toggle={activeSmartListId === l.id}>
+          <button class="smart-list-name" onclick={() => activeSmartListId = activeSmartListId === l.id ? null : l.id}>{l.name}</button>
+          <button class="smart-list-remove" title="Удалить список" onclick={() => removeSmartList(l.id)}>✕</button>
+        </span>
+      {/each}
+      <button class="chip smart-list-chip smart-list-add" title="Создать умный список" onclick={() => showSmartListModal = true}>+ Список</button>
+    </div>
+  {/if}
+
+  {#if !searchQuery.trim()}
     <div class="composer card">
       <textarea
         class="composer-input"
@@ -806,7 +972,7 @@
         <span class="muted">Создайте первую: «+ Новая» или Ctrl+Shift+N</span>
       </div>
     {:else if filteredActive.length === 0}
-      <div class="empty card">В этом проекте нет активных задач</div>
+      <div class="empty card">{activeSmartListId ? "В этом списке нет задач" : "В этом проекте нет активных задач"}</div>
     {:else if grouped}
       {#each grouped as group (group.id)}
         <div class="section-title project-head">
@@ -1076,6 +1242,71 @@
   .day-plan-time {
     color: var(--accent);
     font-weight: 600;
+  }
+
+  .smart-lists {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+  }
+
+  .smart-list-chip {
+    cursor: pointer;
+    border: none;
+  }
+
+  .smart-list-chip.custom {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding-right: 4px;
+    cursor: default;
+  }
+
+  .smart-list-name {
+    border: none;
+    background: transparent;
+    padding: 0;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+  }
+
+  .smart-list-remove {
+    border: none;
+    background: transparent;
+    padding: 0 2px;
+    font-size: 10px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    line-height: 1;
+  }
+
+  .smart-list-remove:hover {
+    color: var(--danger);
+  }
+
+  .smart-list-add {
+    color: var(--text-secondary);
+    background: transparent;
+    border: 1px dashed var(--border);
+  }
+
+  .pair {
+    display: flex;
+    gap: 10px;
+  }
+
+  .pair .field {
+    flex: 1;
+  }
+
+  .hint {
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin: 8px 0 0 0;
   }
 
   .ai-error {

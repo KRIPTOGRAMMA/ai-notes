@@ -308,7 +308,10 @@ pub fn run() {
                         commands::images::get_images_dir,
                         commands::checklists::get_checklist_templates,
                         commands::checklists::create_checklist_template,
-                        commands::checklists::delete_checklist_template
+                        commands::checklists::delete_checklist_template,
+                        commands::smart_lists::get_smart_lists,
+                        commands::smart_lists::create_smart_list,
+                        commands::smart_lists::delete_smart_list
                     ]
                 )
                 .setup(|app| {

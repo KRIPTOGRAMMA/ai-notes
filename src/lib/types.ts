@@ -215,6 +215,20 @@ export interface ChecklistTemplate {
   items: string[];
 }
 
+export interface SmartListFilter {
+  category: string | null;
+  priority: string | null;
+  tag: string | null;
+  has_deadline: boolean | null;
+}
+
+export interface SmartList {
+  id: string;
+  name: string;
+  filter: SmartListFilter;
+  position: number;
+}
+
 export interface DayCompletion {
   id: string;
   title: string;

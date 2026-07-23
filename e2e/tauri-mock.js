@@ -672,6 +672,27 @@
       persist();
     },
 
+    // --- умные списки ---
+    get_smart_lists: () =>
+      [...(db.smartLists ?? [])].sort((a, b) => a.position - b.position || a.name.localeCompare(b.name)).map((l) => ({ ...l })),
+    create_smart_list: ({ name, filter }) => {
+      const cleanName = (name ?? "").trim();
+      if (!cleanName) throw "Название списка не может быть пустым";
+      const f = filter ?? {};
+      const isEmpty = !f.category && !f.priority && !f.tag && f.has_deadline == null;
+      if (isEmpty) throw "Список без условий фильтра не имеет смысла";
+      if (!db.smartLists) db.smartLists = [];
+      const position = db.smartLists.length;
+      const full = { id: uuid(), name: cleanName, filter: f, position };
+      db.smartLists.push(full);
+      persist();
+      return { ...full };
+    },
+    delete_smart_list: ({ id }) => {
+      if (db.smartLists) db.smartLists = db.smartLists.filter((l) => l.id !== id);
+      persist();
+    },
+
     // --- плагины ---
     "plugin:event|listen": ({ event, handler }) => {
       if (!eventHandlers.has(event)) eventHandlers.set(event, new Set());
