@@ -96,6 +96,43 @@ pub async fn ai_summarize_note(app: tauri::AppHandle, request_id: String, text: 
     Ok(())
 }
 
+// ИИ: извлечение задач из заметки (v0.9.11) — кнопка в редакторе предлагает
+// список задач по тексту заметки (особенно полезно для daily note),
+// подтверждение создаёт их. Тот же suggest-then-confirm, что подзадачи
+// задачи (ai_subtasks) — и тот же промпт/парсер: "предложи 3-7 пунктов
+// действий" по смыслу совпадает с "раздели на подзадачи", а parse_subtasks
+// уже умеет надёжно чистить JSON/нумерацию/маркеры/мусор модели.
+const SYSTEM_EXTRACT_TASKS: &str =
+    "You are a task planner. Read the note below and extract concrete actionable tasks mentioned or implied \
+in it (things to do), 1-7 items. Reply ONLY with a JSON array of strings, nothing else. If there are no \
+actionable tasks, reply with an empty array []. Example: [\"task 1\", \"task 2\"]";
+
+#[derive(Clone, Serialize)]
+pub struct ExtractTasksPayload {
+    pub request_id: String,
+    pub items: Vec<String>,
+    pub error: Option<String>,
+}
+
+#[tauri::command]
+pub async fn ai_extract_tasks(app: tauri::AppHandle, request_id: String, text: String) -> Result<(), String> {
+    tokio::spawn(async move {
+        let r = async {
+            let raw = ask_ai(&app, SYSTEM_EXTRACT_TASKS, &text).await?;
+            match parse_subtasks(&raw) {
+                Some(joined) => Ok(joined.split("|||").map(|s| s.to_string()).collect::<Vec<_>>()),
+                None => Ok(vec![]), // пустой список — не ошибка, просто нечего извлекать
+            }
+        }.await;
+        let payload = match r {
+            Ok(items) => ExtractTasksPayload { request_id, items, error: None },
+            Err(e) => ExtractTasksPayload { request_id, items: vec![], error: Some(e) },
+        };
+        let _ = app.emit("ai-extract-tasks", payload);
+    });
+    Ok(())
+}
+
 #[derive(Clone, Serialize)]
 pub struct AiResult {
     pub task_id: String,

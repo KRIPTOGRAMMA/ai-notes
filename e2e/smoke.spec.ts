@@ -1290,6 +1290,42 @@ test("ИИ: резюме заметки — кнопка открывает ок
   await expect(page.locator(".summary-dialog")).toHaveCount(0);
 });
 
+test("ИИ: извлечение задач из заметки — предпросмотр списка, клик по пункту создаёт задачу, «Принять все» создаёт остальные", async ({ page }) => {
+  await seedDb(page, {
+    tasks: [],
+    notes: [{
+      id: "n1", title: "Заметка с делами", content: "нужно спланировать поездку",
+      tags: [], linked_task_id: null, project_id: null,
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    }],
+    settings: { onboarding_complete: true, ai_provider: "local" },
+  });
+  await withMock(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.locator(".note-item", { hasText: "Заметка с делами" }).click();
+
+  const extractBtn = page.getByTitle("ИИ: извлечь задачи из заметки");
+  await expect(extractBtn).toBeVisible();
+  await extractBtn.click();
+
+  const ticketsChip = page.locator(".link-chip", { hasText: "Купить билеты" });
+  const hotelChip = page.locator(".link-chip", { hasText: "Забронировать отель" });
+  await expect(ticketsChip).toBeVisible();
+  await expect(hotelChip).toBeVisible();
+
+  await ticketsChip.click();
+  await expect(ticketsChip).toHaveCount(0); // принятая задача пропадает из предпросмотра
+
+  await page.getByRole("button", { name: "Принять все" }).click();
+  await expect(hotelChip).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Задачи", exact: true }).click();
+  await expect(page.locator(".task-row", { hasText: "Купить билеты" })).toBeVisible();
+  await expect(page.locator(".task-row", { hasText: "Забронировать отель" })).toBeVisible();
+});
+
 test("экспорт заметки в HTML: кнопка сохраняет самодостаточный HTML-файл с заголовком и контентом", async ({ page }) => {
   await seedDb(page, {
     tasks: [],

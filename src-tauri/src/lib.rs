@@ -265,6 +265,7 @@ pub fn run() {
                         commands::ai::summarize_week,
                         commands::ai::ai_edit_selection,
                         commands::ai::ai_summarize_note,
+                        commands::ai::ai_extract_tasks,
                         commands::planner::ai_plan_day,
                         commands::planner::ai_what_now,
                         commands::notes::get_notes,

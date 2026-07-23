@@ -109,6 +109,7 @@
     selectionMenu = null;
     selectionResult = null;
     summaryResult = null;
+    extractedTasks = null;
   }
 
   // CodeMirror меняет editContent напрямую через bind:value (без oninput-хука),
@@ -371,6 +372,57 @@
     summaryCopied = false;
   }
 
+  // --- ИИ: извлечение задач из заметки (v0.9.11) — suggest-then-confirm,
+  // как автолинковка/резюме: модель только предлагает список, каждая задача
+  // создаётся отдельным явным кликом (или разом через «Принять все»), ничего
+  // не создаётся автоматически.
+  let extractingTasks = $state(false);
+  let extractedTasks: { requestId: string; items: string[]; error: string | null } | null = $state(null);
+  let extractRequestId: string | null = null;
+  let creatingExtractedTask = $state(false);
+
+  async function extractTasks() {
+    if (!selected) return;
+    const requestId = crypto.randomUUID();
+    extractRequestId = requestId;
+    extractingTasks = true;
+    extractedTasks = null;
+    try {
+      await api.aiExtractTasks(requestId, editContent);
+    } catch (e) {
+      extractingTasks = false;
+      extractedTasks = { requestId, items: [], error: String(e) };
+    }
+  }
+
+  async function acceptExtractedTask(title: string) {
+    creatingExtractedTask = true;
+    try {
+      await api.createTask({
+        title, description: null, status: "Todo", priority: "Medium",
+        category: "Other", deadline: null, tags: [], recurrence: "None",
+        project_id: editProjectId,
+      });
+      await taskStore.load();
+      extractedTasks = extractedTasks
+        ? { ...extractedTasks, items: extractedTasks.items.filter(t => t !== title) }
+        : null;
+    } finally {
+      creatingExtractedTask = false;
+    }
+  }
+
+  async function acceptAllExtractedTasks() {
+    if (!extractedTasks) return;
+    for (const title of [...extractedTasks.items]) {
+      await acceptExtractedTask(title);
+    }
+  }
+
+  function closeExtractedTasks() {
+    extractedTasks = null;
+  }
+
   // --- Версии заметки (v0.7.12) ---
   let revisionsOpen = $state(false);
   let revisions: NoteRevision[] = $state([]);
@@ -523,6 +575,11 @@ ${bodyHtml}
         summarizing = false;
         summaryResult = { requestId: e.payload.request_id, text: e.payload.result ?? "", error: e.payload.error };
       }));
+      unlisteners.push(await listen<{ request_id: string; items: string[]; error: string | null }>("ai-extract-tasks", (e) => {
+        if (e.payload.request_id !== extractRequestId) return;
+        extractingTasks = false;
+        extractedTasks = { requestId: e.payload.request_id, items: e.payload.items, error: e.payload.error };
+      }));
     })();
     return () => unlisteners.forEach(u => u());
   });
@@ -606,6 +663,9 @@ ${bodyHtml}
             <button class="btn-icon" disabled={summarizing} title="ИИ: резюме заметки" onclick={summarizeNote}>
               {#if summarizing}…{:else}<Icon name="sparkles" />{/if}
             </button>
+            <button class="btn-icon" disabled={extractingTasks} title="ИИ: извлечь задачи из заметки" onclick={extractTasks}>
+              {#if extractingTasks}…{:else}<Icon name="checklist" />{/if}
+            </button>
           {/if}
           <button class="btn-icon" disabled={exporting} title="Экспорт в HTML" onclick={exportNoteAsHtml}><Icon name="export" /></button>
         {/if}
@@ -632,6 +692,25 @@ ${bodyHtml}
             {/each}
           {/if}
           <button class="btn-icon" title="Закрыть" onclick={() => linkSuggestions = null}>✕</button>
+        </div>
+      {/if}
+
+      {#if !zenMode && extractedTasks}
+        <div class="link-suggest">
+          {#if extractedTasks.error}
+            <span class="alert" style="margin:0;">{extractedTasks.error}</span>
+          {:else if extractedTasks.items.length === 0}
+            <span class="muted">Задач в заметке не найдено</span>
+          {:else}
+            <span class="muted">Задачи из заметки:</span>
+            {#each extractedTasks.items as t (t)}
+              <button class="chip link-chip" disabled={creatingExtractedTask} onclick={() => acceptExtractedTask(t)} title="Создать задачу «{t}»">
+                + {t}
+              </button>
+            {/each}
+            <button class="btn-sm btn-primary" disabled={creatingExtractedTask} onclick={acceptAllExtractedTasks}>Принять все</button>
+          {/if}
+          <button class="btn-icon" title="Закрыть" onclick={closeExtractedTasks}>✕</button>
         </div>
       {/if}
 

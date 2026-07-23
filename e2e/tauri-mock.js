@@ -549,6 +549,16 @@
         error: null,
       }), 0);
     },
+    // ИИ: извлечение задач из заметки (v0.9.11) — детерминированный «ИИ»
+    // возвращает фиксированный список из 2 задач, чтобы e2e-тест мог
+    // проверить и предпросмотр, и последующее создание задач по клику.
+    ai_extract_tasks: ({ requestId }) => {
+      setTimeout(() => window.__mockEmit("ai-extract-tasks", {
+        request_id: requestId,
+        items: ["Купить билеты", "Забронировать отель"],
+        error: null,
+      }), 0);
+    },
     model_status: () => ({ exists: false, size_bytes: 0 }),
     list_model_options: () => ([
       { id: "qwen2.5-0.5b", name: "Qwen2.5 0.5B Instruct", url: "https://example.com/qwen2.5-0.5b.gguf", size_bytes: 491000000, description: "Самая быстрая и лёгкая — базовое качество.", ram_gb: 2, recommended: false },
