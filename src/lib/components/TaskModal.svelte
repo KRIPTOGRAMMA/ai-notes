@@ -206,13 +206,18 @@
 
   async function handleSave() {
     if (!title.trim()) { error = "Название не может быть пустым"; return; }
+    if (recurrenceKey === "Weekdays" && weekdaysMask() === 0) {
+      error = "Выберите хотя бы один день недели";
+      return;
+    }
     saving = true;
     error = "";
     try {
       const recurrence = buildRecurrence();
-      const deadlineIso = recurrenceKey === "None" && deadline
-        ? new Date(deadline).toISOString()
-        : null;
+      // Дедлайн больше не обнуляется при повторе — это время первого
+      // срабатывания, тот же смысл, что и без повтора (см. next_occurrence
+      // на бэкенде, которая сдвигает именно это поле при выполнении).
+      const deadlineIso = deadline ? new Date(deadline).toISOString() : null;
 
       if (isEdit) {
         // Подзадачи — до onSave: onSave обновляет задачу и перечитывает store,
@@ -386,47 +391,54 @@
       </label>
     {/if}
 
-    <div class="pair">
-      <label class="field">
-        <span class="label">Дедлайн</span>
-        <input type="datetime-local" bind:value={deadline} disabled={recurrenceKey !== "None"} />
-      </label>
-      <label class="field">
-        <span class="label">Повтор</span>
-        <select bind:value={recurrenceKey}>
-          <option value="None">Без повтора</option>
-          <option value="Hourly">Каждый час</option>
-          <option value="Daily">Каждый день</option>
-          <option value="Weekly">Каждую неделю</option>
-          <option value="Custom">Свой интервал</option>
-          <option value="Weekdays">По дням недели</option>
-        </select>
-      </label>
+    <div class="field recurrence-block">
+      <span class="label">Дедлайн и повтор</span>
+      <div class="pair">
+        <label class="field">
+          <span class="sublabel">{recurrenceKey === "None" ? "Дедлайн" : "Первое срабатывание"}</span>
+          <input type="datetime-local" bind:value={deadline} />
+        </label>
+        <label class="field">
+          <span class="sublabel">Повтор</span>
+          <select bind:value={recurrenceKey}>
+            <option value="None">Без повтора</option>
+            <option value="Hourly">Каждый час</option>
+            <option value="Daily">Каждый день</option>
+            <option value="Weekly">Каждую неделю</option>
+            <option value="Custom">Свой интервал</option>
+            <option value="Weekdays">По дням недели</option>
+          </select>
+        </label>
+      </div>
+
+      {#if recurrenceKey === "Custom"}
+        <div class="custom-row">
+          <span>Каждые</span>
+          <input type="number" bind:value={customN} min="1" style="width:64px;" />
+          <select bind:value={customUnit}>
+            <option value="Minutes">минут</option>
+            <option value="Hours">часов</option>
+            <option value="Days">дней</option>
+            <option value="Weeks">недель</option>
+          </select>
+        </div>
+      {/if}
+
+      {#if recurrenceKey === "Weekdays"}
+        <div class="day-picker">
+          {#each WEEKDAY_LABELS as d, i}
+            <label class="day-chip">
+              <input type="checkbox" bind:checked={weekdays[i]} />
+              <span>{d}</span>
+            </label>
+          {/each}
+        </div>
+      {/if}
+
+      {#if recurrenceKey !== "None"}
+        <span class="hint">При выполнении задача не закрывается — дедлайн сам сдвинется на следующий срок, задача останется активной.</span>
+      {/if}
     </div>
-
-    {#if recurrenceKey === "Custom"}
-      <div class="custom-row">
-        <span>Каждые</span>
-        <input type="number" bind:value={customN} min="1" style="width:64px;" />
-        <select bind:value={customUnit}>
-          <option value="Minutes">минут</option>
-          <option value="Hours">часов</option>
-          <option value="Days">дней</option>
-          <option value="Weeks">недель</option>
-        </select>
-      </div>
-    {/if}
-
-    {#if recurrenceKey === "Weekdays"}
-      <div class="day-picker">
-        {#each WEEKDAY_LABELS as d, i}
-          <label class="day-chip">
-            <input type="checkbox" bind:checked={weekdays[i]} />
-            <span>{d}</span>
-          </label>
-        {/each}
-      </div>
-    {/if}
 
     <label class="field">
       <span class="label">Теги (через запятую)</span>
@@ -486,6 +498,25 @@
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 12px;
+  }
+
+  /* Дедлайн+Повтор сгруппированы визуально (v0.9.21) — общая рамка
+     объясняет, что это одна связанная настройка, а не два независимых поля. */
+  .recurrence-block {
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    gap: 8px;
+  }
+
+  .sublabel {
+    font-size: 11px;
+    color: var(--text-secondary);
+  }
+
+  .hint {
+    font-size: 11px;
+    color: var(--text-secondary);
   }
 
   .custom-row {

@@ -137,6 +137,36 @@ test("повтор по дням недели: выбор в модалке со
   await editModal.getByRole("button", { name: "Отмена" }).click();
 });
 
+test("модалка задач: повтор без выбранных дней недели не сохраняется, дедлайн при повторе не обнуляется", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+
+  // «По дням недели» без единого выбранного дня — ошибка, а не тихий откат в «без повтора»
+  await page.getByRole("button", { name: "+ Новая", exact: true }).click();
+  const modal = page.locator(".modal");
+  await modal.getByPlaceholder("Название задачи").fill("без дней");
+  await modal.getByLabel("Повтор").selectOption("Weekdays");
+  await modal.getByRole("button", { name: "Создать" }).click();
+  await expect(modal.locator(".alert")).toHaveText("Выберите хотя бы один день недели");
+  await modal.getByRole("button", { name: "Отмена" }).click();
+
+  // Дедлайн, указанный вместе с повтором — это время первого срабатывания,
+  // и оно должно сохраниться, а не обнулиться (баг до v0.9.21).
+  await page.getByRole("button", { name: "+ Новая", exact: true }).click();
+  const modal2 = page.locator(".modal");
+  await modal2.getByPlaceholder("Название задачи").fill("полив цветов");
+  await modal2.locator('input[type="datetime-local"]').fill("2030-01-15T09:00");
+  await modal2.getByLabel("Повтор").selectOption("Daily");
+  await expect(modal2.locator(".hint")).toContainText("не закрывается");
+  await modal2.getByRole("button", { name: "Создать" }).click();
+
+  const row = page.locator(".task-row", { hasText: "полив цветов" });
+  await row.locator(".task-main").click();
+  const editModal = page.locator(".modal");
+  await expect(editModal.locator('input[type="datetime-local"]')).toHaveValue("2030-01-15T09:00");
+  await editModal.getByRole("button", { name: "Отмена" }).click();
+});
+
 test("корзина: мягкое удаление, восстановление возвращает в активные, «навсегда» удаляет", async ({ page }) => {
   await withMock(page);
   await page.goto("/");
