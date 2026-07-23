@@ -18,8 +18,10 @@
   let showGoalHistory = $state<Record<string, GoalSnapshot[]>>({});
   let goalHistoryLoading = $state<Record<string, boolean>>({});
 
-  let showHistory = $state(false);
-  let showTrash = $state(false);
+  // Список/История/Корзина — один взаимоисключающий переключатель (v0.9.22),
+  // раньше были двумя независимыми тоглами (можно было открыть оба сразу,
+  // визуально почти неотличимые друг от друга блоки под общим списком).
+  let listSubView = $state<"active" | "history" | "trash">("active");
   let showCreateModal = $state(false);
   let editingTask: Task | null = $state(null);
   let historyDetailTask: Task | null = $state(null);
@@ -1109,8 +1111,11 @@
       </button>
     {/if}
     <button onclick={() => { showProjects = true; projectStore.load(); }}>Проекты</button>
-    <button class:active-toggle={showHistory} onclick={() => showHistory = !showHistory}>История</button>
-    <button class:active-toggle={showTrash} onclick={() => { showTrash = !showTrash; if (showTrash) taskStore.loadDeleted(); }}>Корзина</button>
+    <div class="seg">
+      <button class:active={listSubView === "active"} onclick={() => listSubView = "active"}>Активные</button>
+      <button class:active={listSubView === "history"} onclick={() => listSubView = "history"}>История</button>
+      <button class:active={listSubView === "trash"} onclick={() => { listSubView = "trash"; taskStore.loadDeleted(); }}>Корзина</button>
+    </div>
     <button class="btn-primary" onclick={() => { boardCreateStatus = "Todo"; showCreateModal = true; }}>+ Новая</button>
   </div>
 
@@ -1224,6 +1229,7 @@
       </div>
     </div>
   {:else}
+  {#if listSubView === "active"}
   {#if todayBlocks.length > 0 && !searchQuery.trim()}
     <div class="day-plan card">
       <span class="day-plan-label">Сегодня:</span>
@@ -1350,71 +1356,74 @@
         {/each}
       </ul>
     {/if}
+  {/if}
 
-    {#if showHistory}
-      <div class="section-title" style="margin-top:20px;">История</div>
-      {#if taskStore.historyTasks.length === 0}
-        <div class="empty">История пуста</div>
-      {:else}
-        <ul class="task-list card history">
-          {#each taskStore.historyTasks as task (task.id)}
-            <li class="task-row">
-              <span class="task-check done">✓</span>
-              <div
-                class="task-main"
-                onclick={() => historyDetailTask = task}
-                onkeydown={(e) => { if (e.key === "Enter") historyDetailTask = task; }}
-                role="button"
-                tabindex="0"
-              >
-                <div class="task-title done-title">{task.title}</div>
-                {#if task.description}
-                  <div class="task-desc">{task.description}</div>
-                {/if}
-              </div>
-              <div class="task-meta">
-                {#if task.subtasks.length > 0}
-                  <span class="chip">{doneCount(task)}/{task.subtasks.length}</span>
-                {/if}
-                <span class="chip">{statusStore.name(task.status)}</span>
-              </div>
-              <div class="task-actions">
-                <button class="btn-icon btn-danger" title="Удалить" onclick={() => taskStore.remove(task.id)}>✕</button>
-              </div>
-            </li>
-          {/each}
-        </ul>
-      {/if}
+  {:else if listSubView === "history"}
+    <div class="empty-hint">
+      ✓ Выполненные задачи. Повторяющиеся не попадают сюда — они остаются активными.
+    </div>
+    {#if taskStore.historyTasks.length === 0}
+      <div class="empty card">История пуста</div>
+    {:else}
+      <ul class="task-list card history">
+        {#each taskStore.historyTasks as task (task.id)}
+          <li class="task-row">
+            <span class="task-check done history-icon">✓</span>
+            <div
+              class="task-main"
+              onclick={() => historyDetailTask = task}
+              onkeydown={(e) => { if (e.key === "Enter") historyDetailTask = task; }}
+              role="button"
+              tabindex="0"
+            >
+              <div class="task-title done-title">{task.title}</div>
+              {#if task.description}
+                <div class="task-desc">{task.description}</div>
+              {/if}
+            </div>
+            <div class="task-meta">
+              {#if task.subtasks.length > 0}
+                <span class="chip">{doneCount(task)}/{task.subtasks.length}</span>
+              {/if}
+              <span class="chip">{statusStore.name(task.status)}</span>
+            </div>
+            <div class="task-actions">
+              <button class="btn-icon btn-danger" title="Удалить" onclick={() => taskStore.remove(task.id)}>✕</button>
+            </div>
+          </li>
+        {/each}
+      </ul>
     {/if}
 
-    {#if showTrash}
-      <div class="section-title" style="margin-top:20px;">Корзина</div>
-      {#if taskStore.deletedTasks.length === 0}
-        <div class="empty">Корзина пуста</div>
-      {:else}
-        <ul class="task-list card history">
-          {#each taskStore.deletedTasks as task (task.id)}
-            <li class="task-row">
-              <span class="task-check done">🗑</span>
-              <div class="task-main">
-                <div class="task-title done-title">{task.title}</div>
-                {#if task.description}
-                  <div class="task-desc">{task.description}</div>
-                {/if}
-              </div>
-              <div class="task-meta">
-                {#if task.subtasks.length > 0}
-                  <span class="chip">{doneCount(task)}/{task.subtasks.length}</span>
-                {/if}
-              </div>
-              <div class="task-actions">
-                <button class="btn-sm" title="Восстановить" onclick={() => taskStore.restore(task.id)}>Восстановить</button>
-                <button class="btn-icon btn-danger" title="Удалить навсегда" onclick={() => taskStore.purge(task.id)}>✕</button>
-              </div>
-            </li>
-          {/each}
-        </ul>
-      {/if}
+  {:else}
+    <div class="empty-hint trash-hint">
+      🗑 Удалённые задачи. Восстановить можно в любой момент, пока не нажато «Удалить навсегда».
+    </div>
+    {#if taskStore.deletedTasks.length === 0}
+      <div class="empty card">Корзина пуста</div>
+    {:else}
+      <ul class="task-list card trash">
+        {#each taskStore.deletedTasks as task (task.id)}
+          <li class="task-row">
+            <span class="task-check trash-icon">🗑</span>
+            <div class="task-main">
+              <div class="task-title done-title">{task.title}</div>
+              {#if task.description}
+                <div class="task-desc">{task.description}</div>
+              {/if}
+            </div>
+            <div class="task-meta">
+              {#if task.subtasks.length > 0}
+                <span class="chip">{doneCount(task)}/{task.subtasks.length}</span>
+              {/if}
+            </div>
+            <div class="task-actions">
+              <button class="btn-sm" title="Восстановить" onclick={() => taskStore.restore(task.id)}>Восстановить</button>
+              <button class="btn-icon btn-danger" title="Удалить навсегда" onclick={() => taskStore.purge(task.id)}>✕</button>
+            </div>
+          </li>
+        {/each}
+      </ul>
     {/if}
   {/if}
   {/if}
@@ -2008,5 +2017,26 @@
 
   .history .task-row {
     opacity: 0.75;
+  }
+
+  /* Корзина (v0.9.22) — тот же приглушённый ряд, что История, но с явным
+     красным акцентом на иконке, чтобы «выполнено» и «удалено» не путались
+     визуально (раньше оба использовали одинаковый зелёный .task-check.done). */
+  .trash .task-row {
+    opacity: 0.75;
+  }
+
+  .trash-icon {
+    border-color: var(--danger) !important;
+    color: var(--danger) !important;
+  }
+
+  .empty-hint {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 10px;
   }
 </style>
