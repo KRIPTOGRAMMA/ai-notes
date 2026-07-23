@@ -15,12 +15,13 @@
   import Settings from "./views/Settings.svelte";
   import Dashboard from "./views/Dashboard.svelte";
   import Calendar from "./views/Calendar.svelte";
+  import Today from "./views/Today.svelte";
   import SearchOverlay from "./lib/components/SearchOverlay.svelte";
   import PomodoroWidget from "./lib/components/PomodoroWidget.svelte";
   import TrackingWidget from "./lib/components/TrackingWidget.svelte";
   import "./app.css";
 
-  type View = "tasks" | "notes" | "graph" | "dashboard" | "calendar" | "settings";
+  type View = "today" | "tasks" | "notes" | "graph" | "dashboard" | "calendar" | "settings";
   let activeView: View = $state("tasks");
   let showSearch = $state(false);
 
@@ -64,6 +65,7 @@
   });
 
   const NAV: { view: View; label: string; icon: string; actionId: string }[] = [
+    { view: "today",     label: "Сегодня",   actionId: "view_today",     icon: "M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10Z M12 1v2 M12 21v2 M4.22 4.22l1.42 1.42 M18.36 18.36l1.42 1.42 M1 12h2 M21 12h2 M4.22 19.78l1.42-1.42 M18.36 5.64l1.42-1.42" },
     { view: "tasks",     label: "Задачи",    actionId: "view_tasks",     icon: "M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z M9 12l2 2 4-4" },
     { view: "notes",     label: "Заметки",   actionId: "view_notes",     icon: "M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z M14 3v6h6 M8 14h8 M8 17h5" },
     { view: "graph",     label: "Граф",      actionId: "view_graph",     icon: "M6 6a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z M18 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z M6 20a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z M17 18a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z M7.5 5.5l6 1 M7 7l8.5 9 M6 16l9.5-9.7" },
@@ -88,6 +90,7 @@
     { label: "Новая задача", hint: "Создать задачу", keywords: "новая задача create task", run: () => { activeView = "tasks"; taskStore.requestCreate(); } },
     { label: "Новая заметка", hint: "Создать заметку", keywords: "новая заметка create note", run: () => { activeView = "notes"; } },
     { label: "Заметка дня", hint: "Открыть/создать дневную заметку", keywords: "заметка дня daily note today", run: () => { activeView = "notes"; noteStore.requestDaily(); } },
+    { label: "Перейти: Сегодня", keywords: "перейти сегодня go today", run: () => { activeView = "today"; } },
     { label: "Перейти: Задачи", keywords: "перейти задачи go tasks", run: () => { activeView = "tasks"; } },
     { label: "Перейти: Заметки", keywords: "перейти заметки go notes", run: () => { activeView = "notes"; } },
     { label: "Перейти: Граф заметок", keywords: "перейти граф graph notes", run: () => { activeView = "graph"; } },
@@ -132,7 +135,7 @@
       noteStore.requestDaily();
     } else {
       const viewActions: [string, View][] = [
-        ["view_tasks", "tasks"], ["view_notes", "notes"], ["view_dashboard", "dashboard"],
+        ["view_today", "today"], ["view_tasks", "tasks"], ["view_notes", "notes"], ["view_dashboard", "dashboard"],
         ["view_calendar", "calendar"], ["view_settings", "settings"], ["view_graph", "graph"],
       ];
       for (const [actionId, view] of viewActions) {
@@ -212,7 +215,9 @@
       </div>
     {/if}
 
-    {#if activeView === "tasks"}
+    {#if activeView === "today"}
+      <Today onOpenTask={(id) => { activeView = "tasks"; taskStore.requestFocus(id); }} />
+    {:else if activeView === "tasks"}
       <Tasks />
     {:else if activeView === "notes"}
       <Notes />

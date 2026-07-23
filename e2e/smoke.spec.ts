@@ -1736,3 +1736,42 @@ test("фокус-режим: тумблер в настройках сохран
   await page.locator(".settings-tab", { hasText: "Уведомления" }).click();
   await expect(page.getByLabel("Фокус-режим: авто-пауза уведомлений на время помодоро-работы и активных тайм-блоков")).not.toBeChecked();
 });
+
+test("экран «Сегодня»: показывает блок дня и дедлайны, клик по каждому ведёт в задачу", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+  await page.evaluate(() => {
+    const db = JSON.parse(localStorage.getItem("__mock_db")!);
+    const now = new Date();
+    const mk = (h: number, m: number) => {
+      const d = new Date(now); d.setHours(h, m, 0, 0); return d.toISOString();
+    };
+    db.tasks.push(
+      {
+        id: "today-block-1", title: "Блок сегодня", status: "Todo", priority: "Medium",
+        category: "Other", tags: [], description: null, deadline: null,
+        recurrence: "None", hidden: false, project_id: null,
+        scheduled_at: mk(9, 0), scheduled_mins: 60, sort_order: 1, subtasks: [],
+        created_at: now.toISOString(), updated_at: now.toISOString(), completed_at: null,
+      },
+      {
+        id: "today-due-1", title: "Дедлайн сегодня", status: "Todo", priority: "High",
+        category: "Other", tags: [], description: null, deadline: mk(23, 0),
+        recurrence: "None", hidden: false, project_id: null,
+        scheduled_at: null, scheduled_mins: null, sort_order: 2, subtasks: [],
+        created_at: now.toISOString(), updated_at: now.toISOString(), completed_at: null,
+      },
+    );
+    localStorage.setItem("__mock_db", JSON.stringify(db));
+  });
+  await page.reload();
+
+  await page.getByRole("button", { name: "Сегодня", exact: true }).click();
+  await expect(page.getByText("Блок сегодня")).toBeVisible();
+  await expect(page.getByText("Дедлайн сегодня")).toBeVisible();
+
+  // Клик по блоку таймлайна ведёт в раздел «Задачи» с открытой карточкой
+  await page.locator(".tl-block", { hasText: "Блок сегодня" }).click();
+  await expect(page.locator(".modal.dialog")).toBeVisible();
+  await expect(page.locator(".modal.dialog input").first()).toHaveValue("Блок сегодня");
+});
