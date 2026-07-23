@@ -130,6 +130,15 @@
       .filter(t => activeSmartListTest ? activeSmartListTest(t) : true)
   );
 
+  // Мультивыбор не переживает смену видимого списка (фильтр/поиск/смена умного
+  // списка) — иначе массовое действие могло бы незаметно задеть скрытые строки.
+  $effect(() => {
+    const visible = new Set(filteredActive.map(t => t.id));
+    if ([...selectedIds].some(id => !visible.has(id))) {
+      selectedIds = new Set([...selectedIds].filter(id => visible.has(id)));
+    }
+  });
+
   // Группировка «все проекты»: секция на проект (в порядке списка проектов) + «Без проекта».
   const grouped = $derived.by(() => {
     if (projectFilter !== "all" || projectStore.projects.length === 0) return null;
@@ -412,6 +421,102 @@
   let dragTaskId: string | null = $state(null);
   let dropTargetId: string | null = $state(null);
 
+  // --- Мультивыбор (v0.9.15): Ctrl/Shift+клик по строке вместо открытия карточки.
+  // Ctrl — точечный тоггл, Shift — диапазон от последней выбранной строки в
+  // пределах текущего видимого списка (без учёта группировки — «плоский» порядок).
+  let selectedIds = $state<Set<string>>(new Set());
+  let lastSelectedId: string | null = $state(null);
+  let bulkBusy = $state(false);
+  let bulkProjectId = $state("");
+  let bulkCategory = $state("");
+
+  function visibleTaskIds(): string[] {
+    if (grouped) return grouped.flatMap(g => g.tasks.map(t => t.id));
+    return filteredActive.map(t => t.id);
+  }
+
+  function toggleSelect(task: Task, e: MouseEvent) {
+    const ids = visibleTaskIds();
+    if (e.shiftKey && lastSelectedId) {
+      const from = ids.indexOf(lastSelectedId);
+      const to = ids.indexOf(task.id);
+      if (from >= 0 && to >= 0) {
+        const [lo, hi] = from < to ? [from, to] : [to, from];
+        const next = new Set(selectedIds);
+        for (let i = lo; i <= hi; i++) next.add(ids[i]);
+        selectedIds = next;
+        return;
+      }
+    }
+    const next = new Set(selectedIds);
+    if (next.has(task.id)) next.delete(task.id); else next.add(task.id);
+    selectedIds = next;
+    lastSelectedId = task.id;
+  }
+
+  function onRowClick(e: MouseEvent, task: Task) {
+    if (e.ctrlKey || e.metaKey || e.shiftKey) {
+      e.preventDefault();
+      toggleSelect(task, e);
+      return;
+    }
+    editingTask = task;
+  }
+
+  function clearSelection() {
+    selectedIds = new Set();
+    lastSelectedId = null;
+  }
+
+  async function bulkComplete() {
+    bulkBusy = true;
+    try {
+      await Promise.all([...selectedIds].map(id => api.completeTask(id)));
+      await taskStore.load();
+      clearSelection();
+    } finally {
+      bulkBusy = false;
+    }
+  }
+
+  async function bulkDelete() {
+    bulkBusy = true;
+    try {
+      await Promise.all([...selectedIds].map(id => api.deleteTask(id)));
+      await taskStore.load();
+      clearSelection();
+    } finally {
+      bulkBusy = false;
+    }
+  }
+
+  async function bulkMoveToProject() {
+    if (!bulkProjectId) return;
+    bulkBusy = true;
+    try {
+      const project_id = bulkProjectId === "none" ? "" : bulkProjectId;
+      await Promise.all([...selectedIds].map(id => api.updateTask(id, { project_id })));
+      await taskStore.load();
+      clearSelection();
+      bulkProjectId = "";
+    } finally {
+      bulkBusy = false;
+    }
+  }
+
+  async function bulkSetCategory() {
+    if (!bulkCategory) return;
+    bulkBusy = true;
+    try {
+      await Promise.all([...selectedIds].map(id => api.updateTask(id, { category: bulkCategory as Category })));
+      await taskStore.load();
+      clearSelection();
+      bulkCategory = "";
+    } finally {
+      bulkBusy = false;
+    }
+  }
+
   function listForTask(task: Task): Task[] {
     if (grouped) {
       const g = grouped.find(g => g.tasks.some(t => t.id === task.id));
@@ -561,6 +666,7 @@
     style="--prio: var(--prio-{task.priority.toLowerCase()});"
     class:dragging={dragTaskId === task.id}
     class:drop-target={dropTargetId === task.id}
+    class:selected={selectedIds.has(task.id)}
     draggable={!searchQuery.trim() && !task.hidden}
     ondragstart={(e) => rowDragStart(e, task)}
     ondragover={(e) => rowDragOver(e, task)}
@@ -576,7 +682,7 @@
 
     <div
       class="task-main"
-      onclick={() => editingTask = task}
+      onclick={(e) => onRowClick(e, task)}
       onkeydown={(e) => { if (e.key === "Enter") editingTask = task; }}
       role="button"
       tabindex="0"
@@ -884,6 +990,35 @@
     <button class="btn-primary" onclick={() => showCreateModal = true}>+ Новая</button>
   </div>
 
+  {#if selectedIds.size > 0}
+    <div class="bulk-bar card">
+      <span class="bulk-count">{selectedIds.size} выбрано</span>
+      <select bind:value={bulkProjectId} disabled={bulkBusy} title="Перенести в проект">
+        <option value="" disabled selected>В проект…</option>
+        <option value="none">Без проекта</option>
+        {#each projectStore.active as p (p.id)}
+          <option value={p.id}>{p.name}</option>
+        {/each}
+      </select>
+      {#if bulkProjectId}
+        <button class="btn-sm" disabled={bulkBusy} onclick={bulkMoveToProject}>Перенести</button>
+      {/if}
+      <select bind:value={bulkCategory} disabled={bulkBusy} title="Сменить категорию">
+        <option value="" disabled selected>Категория…</option>
+        {#each categoryStore.categories as c (c.id)}
+          <option value={c.id}>{c.name}</option>
+        {/each}
+      </select>
+      {#if bulkCategory}
+        <button class="btn-sm" disabled={bulkBusy} onclick={bulkSetCategory}>Применить</button>
+      {/if}
+      <button class="btn-sm" disabled={bulkBusy} onclick={bulkComplete}>Выполнить</button>
+      <button class="btn-sm btn-danger" disabled={bulkBusy} onclick={bulkDelete}>Удалить</button>
+      <span style="flex:1;"></span>
+      <button class="btn-icon" title="Снять выбор" onclick={clearSelection}>✕</button>
+    </div>
+  {/if}
+
   {#if aiError}
     <div class="ai-error">
       <span>{aiError}</span>
@@ -1190,6 +1325,25 @@
 
   .task-row.dragging { opacity: 0.5; }
   .task-row.drop-target { box-shadow: inset 0 2px 0 var(--accent); }
+  .task-row.selected {
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    box-shadow: inset 3px 0 0 var(--accent);
+  }
+
+  .bulk-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 8px 12px;
+    margin-bottom: 12px;
+  }
+
+  .bulk-count {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--accent);
+  }
 
   .composer {
     display: flex;

@@ -51,6 +51,80 @@
     await noteStore.update(note.id, { pinned: !note.pinned });
   }
 
+  // --- Мультивыбор заметок (v0.9.15, следом за мультивыбором задач): тот же
+  // паттерн — Ctrl тоггл, Shift диапазон от последней выбранной строки в
+  // порядке видимого (отфильтрованного) списка.
+  let selectedNoteIds = $state<Set<string>>(new Set());
+  let lastSelectedNoteId: string | null = $state(null);
+  let bulkNotesBusy = $state(false);
+  let bulkNotesProjectId = $state("");
+
+  $effect(() => {
+    const visible = new Set(filteredNotes.map(n => n.id));
+    if ([...selectedNoteIds].some(id => !visible.has(id))) {
+      selectedNoteIds = new Set([...selectedNoteIds].filter(id => visible.has(id)));
+    }
+  });
+
+  function toggleNoteSelect(note: Note, e: MouseEvent) {
+    const ids = filteredNotes.map(n => n.id);
+    if (e.shiftKey && lastSelectedNoteId) {
+      const from = ids.indexOf(lastSelectedNoteId);
+      const to = ids.indexOf(note.id);
+      if (from >= 0 && to >= 0) {
+        const [lo, hi] = from < to ? [from, to] : [to, from];
+        const next = new Set(selectedNoteIds);
+        for (let i = lo; i <= hi; i++) next.add(ids[i]);
+        selectedNoteIds = next;
+        return;
+      }
+    }
+    const next = new Set(selectedNoteIds);
+    if (next.has(note.id)) next.delete(note.id); else next.add(note.id);
+    selectedNoteIds = next;
+    lastSelectedNoteId = note.id;
+  }
+
+  function onNoteRowClick(e: MouseEvent, note: Note) {
+    if (e.ctrlKey || e.metaKey || e.shiftKey) {
+      e.preventDefault();
+      toggleNoteSelect(note, e);
+      return;
+    }
+    selectNote(note);
+  }
+
+  function clearNoteSelection() {
+    selectedNoteIds = new Set();
+    lastSelectedNoteId = null;
+  }
+
+  async function bulkDeleteNotes() {
+    bulkNotesBusy = true;
+    try {
+      await Promise.all([...selectedNoteIds].map(id => api.deleteNote(id)));
+      if (selectedId && selectedNoteIds.has(selectedId)) selectedId = null;
+      await noteStore.load();
+      clearNoteSelection();
+    } finally {
+      bulkNotesBusy = false;
+    }
+  }
+
+  async function bulkMoveNotesToProject() {
+    if (!bulkNotesProjectId) return;
+    bulkNotesBusy = true;
+    try {
+      const project_id = bulkNotesProjectId === "none" ? null : bulkNotesProjectId;
+      await Promise.all([...selectedNoteIds].map(id => api.updateNote(id, { project_id })));
+      await noteStore.load();
+      clearNoteSelection();
+      bulkNotesProjectId = "";
+    } finally {
+      bulkNotesBusy = false;
+    }
+  }
+
   // Заметки, ссылающиеся на текущую через [[название]] (без учёта регистра).
   const backlinks = $derived.by<Note[]>(() => {
     if (!selectedId) return [];
@@ -610,6 +684,25 @@ ${bodyHtml}
       </div>
     </div>
 
+    {#if selectedNoteIds.size > 0}
+      <div class="bulk-notes-bar">
+        <span class="bulk-notes-count">{selectedNoteIds.size} выбрано</span>
+        <select bind:value={bulkNotesProjectId} disabled={bulkNotesBusy} title="Перенести в проект">
+          <option value="" disabled selected>В проект…</option>
+          <option value="none">Без проекта</option>
+          {#each projectStore.active as p (p.id)}
+            <option value={p.id}>{p.name}</option>
+          {/each}
+        </select>
+        {#if bulkNotesProjectId}
+          <button class="btn-sm" disabled={bulkNotesBusy} onclick={bulkMoveNotesToProject}>Перенести</button>
+        {/if}
+        <button class="btn-sm btn-danger" disabled={bulkNotesBusy} onclick={bulkDeleteNotes}>Удалить</button>
+        <span style="flex:1;"></span>
+        <button class="btn-icon" title="Снять выбор" onclick={clearNoteSelection}>✕</button>
+      </div>
+    {/if}
+
     {#if noteStore.notes.length === 0}
       <div class="empty">Нет заметок</div>
     {:else if filteredNotes.length === 0}
@@ -617,8 +710,8 @@ ${bodyHtml}
     {:else}
       <ul class="note-list">
         {#each filteredNotes as note (note.id)}
-          <li class="note-row" class:pinned={note.pinned}>
-            <button class="note-item" class:active={selectedId === note.id} onclick={() => selectNote(note)}>
+          <li class="note-row" class:pinned={note.pinned} class:selected={selectedNoteIds.has(note.id)}>
+            <button class="note-item" class:active={selectedId === note.id} onclick={(e) => onNoteRowClick(e, note)}>
               <div class="note-title">{note.title}</div>
               <div class="note-date">{formatDate(note.updated_at)}</div>
             </button>
@@ -958,6 +1051,26 @@ ${bodyHtml}
     align-items: center;
     gap: 2px;
     border-radius: var(--radius);
+  }
+
+  .note-row.selected {
+    box-shadow: inset 3px 0 0 var(--accent);
+  }
+
+  .bulk-notes-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    padding: 6px 4px;
+    margin-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .bulk-notes-count {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--accent);
   }
 
   .note-item {
