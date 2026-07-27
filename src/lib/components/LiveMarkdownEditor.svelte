@@ -23,6 +23,8 @@
     type CompletionContext, type CompletionResult,
   } from "@codemirror/autocomplete";
   import { convertFileSrc } from "@tauri-apps/api/core";
+  import { openUrl } from "@tauri-apps/plugin-opener";
+  import { isSafeUrl } from "../urlSafety";
   import { api } from "../api/tauri";
   import { IMAGE_RE, imageMarkdown, extImageExt, parseTableAt, serializeTable, emptyTable, type ParsedTable, type TableAlign } from "../markdown";
 
@@ -114,6 +116,37 @@
       a.onclick = (e) => {
         e.preventDefault();
         linkCtx.onWikiLinkClick?.(this.target);
+      };
+      return a;
+    }
+    ignoreEvent() { return false; }
+  }
+
+  // Обычная markdown-ссылка [текст](url) (v0.9.27). В отличие от вики-ссылки
+  // ведёт наружу, поэтому открывается системным браузером через plugin-opener,
+  // а не внутренней навигацией. Схему проверяем: в markdown может оказаться
+  // javascript:/data:/file:, и отдавать такое в openUrl нельзя.
+  class MdLinkWidget extends WidgetType {
+    href: string;
+    label: string;
+    constructor(href: string, label: string) {
+      super();
+      this.href = href;
+      this.label = label;
+    }
+    eq(other: MdLinkWidget) { return other.href === this.href && other.label === this.label; }
+    toDOM() {
+      const a = document.createElement("a");
+      a.href = "#";
+      a.className = "cm-mdlink";
+      a.textContent = this.label;
+      const safe = isSafeUrl(this.href);
+      if (!safe) a.classList.add("unsafe");
+      a.title = safe ? this.href : `Ссылка заблокирована: ${this.href}`;
+      a.onmousedown = (e) => e.preventDefault();
+      a.onclick = (e) => {
+        e.preventDefault();
+        if (safe) openUrl(this.href).catch(() => {});
       };
       return a;
     }
@@ -562,6 +595,21 @@
             items.push({ from: from + 1, to: to - 1, deco: Decoration.mark({ class: "cm-code" }) });
             items.push({ from: to - 1, to, deco: Decoration.replace({}) });
           }
+          // Обычные ссылки [текст](url) — НЕ внутри кода. Картинки
+          // ![alt](file) исключены отрицательным lookbehind: у них свой
+          // ImageWidget выше, иначе один диапазон получил бы две замены.
+          for (const m of text.matchAll(/(?<!!)\[([^\[\]\n]+)\]\(([^()\s]+)\)/g)) {
+            const from = lineStart + m.index!;
+            const to = from + m[0].length;
+            if (inCode(from, codePositions)) continue;
+            const label = m[1].trim();
+            const href = m[2].trim();
+            if (!label || !href) continue;
+            items.push({
+              from, to,
+              deco: Decoration.replace({ widget: new MdLinkWidget(href, label) }),
+            });
+          }
           // Вики-ссылки [[target]] / [[target|label]] — НЕ внутри кода
           for (const m of text.matchAll(/\[\[([^\[\]|]+)(?:\|([^\[\]]+))?\]\]/g)) {
             const from = lineStart + m.index!;
@@ -579,11 +627,15 @@
       }
     }
 
-    // FencedCode → CodeText: моноширинный фон через Lezer-дерево
+    // Блочные конструкции по Lezer-дереву, а не построчным regex (v0.9.27):
+    // цитаты и нумерованные списки многострочны и вкладываются друг в друга,
+    // и разбирать это регулярками построчно — заведомо неверно. Дерево уже
+    // разобрало вложенность, остаётся навесить классы на строки.
     syntaxTree(state).iterate({
       from: 0,
       to: state.doc.length,
       enter: (node) => {
+        // FencedCode → CodeText: моноширинный фон
         if (node.name === "FencedCode") {
           let child = node.node.firstChild;
           while (child) {
@@ -597,6 +649,52 @@
           }
           return false;
         }
+
+        // Цитата: класс на каждую строку блока (вертикальная линия + отступ
+        // рисуются CSS). Маркер '>' прячем — но только на строках без курсора,
+        // иначе его нельзя было бы стереть.
+        if (node.name === "Blockquote") {
+          const first = state.doc.lineAt(node.from).number;
+          const last = state.doc.lineAt(node.to).number;
+          for (let n = first; n <= last; n++) {
+            const line = state.doc.line(n);
+            items.push({
+              from: line.from, to: line.from,
+              deco: Decoration.line({ class: "cm-quote" }),
+            });
+            if (n === cursorLine) continue;
+            // '> ' в начале строки (с возможным отступом у вложенных цитат)
+            const mark = /^\s*>\s?/.exec(line.text);
+            if (mark && mark[0].length > 0) {
+              items.push({
+                from: line.from, to: line.from + mark[0].length,
+                deco: Decoration.replace({}),
+              });
+            }
+          }
+          // return undefined — вложенные Blockquote/OrderedList внутри цитаты
+          // должны обработаться тоже.
+          return undefined;
+        }
+
+        // Нумерованный список: класс на строку для отступа. Сам номер НЕ
+        // прячем — в отличие от '>' и '#', цифра несёт смысл (пользователь
+        // видит и правит нумерацию), её подменять виджетом нельзя.
+        if (node.name === "OrderedList") {
+          let child = node.node.firstChild;
+          while (child) {
+            if (child.name === "ListItem") {
+              const line = state.doc.lineAt(child.from);
+              items.push({
+                from: line.from, to: line.from,
+                deco: Decoration.line({ class: "cm-ol-item" }),
+              });
+            }
+            child = child.nextSibling;
+          }
+          return undefined;
+        }
+
         return undefined;
       },
     });
@@ -670,6 +768,31 @@
       color: "var(--text-secondary)",
       borderBottomStyle: "dashed",
     },
+    // Внешняя ссылка (v0.9.27): визуально отличается от вики-ссылки —
+    // вики ведёт внутрь приложения, эта наружу, в браузер.
+    ".cm-mdlink": {
+      textDecoration: "underline",
+      textDecorationStyle: "solid",
+      color: "var(--accent)",
+      cursor: "pointer",
+    },
+    // Заблокированная схема (javascript:/data:/file:) — видно, что ссылка
+    // мёртвая, а не «клик не сработал».
+    ".cm-mdlink.unsafe": {
+      color: "var(--danger)",
+      textDecorationStyle: "wavy",
+      cursor: "not-allowed",
+    },
+    // Цитата: вертикальная линия слева + приглушённый текст (v0.9.27)
+    ".cm-quote": {
+      borderLeft: "3px solid color-mix(in srgb, var(--accent) 35%, transparent)",
+      paddingLeft: "10px",
+      color: "var(--text-secondary)",
+      fontStyle: "italic",
+    },
+    // Нумерованный список: только отступ. Номер остаётся видимым —
+    // он часть текста, а не разметка.
+    ".cm-ol-item": { paddingLeft: "8px" },
     ".cm-task-checkbox": { marginRight: "4px", cursor: "pointer", verticalAlign: "middle" },
     ".cm-placeholder": { color: "var(--text-secondary)" },
     ".cm-note-image": {
@@ -989,6 +1112,75 @@
   export function formatHeading() { toggleLinePrefix("## "); }
   export function formatChecklist() { toggleLinePrefix("- [ ] "); }
   export function formatWikiLink() { wrapSelection("[[", "]]"); }
+  export function formatQuote() { toggleLinePrefix("> "); }
+
+  // Нумерованный список (v0.9.27): нельзя через toggleLinePrefix — у него
+  // префикс статический, а здесь у каждой строки свой номер. Нумеруем строки
+  // выделения подряд с 1; если список уже есть — снимаем.
+  export function formatOrderedList() {
+    if (!view) return;
+    const { state } = view;
+    const range = state.selection.main;
+    const first = state.doc.lineAt(range.from).number;
+    const last = state.doc.lineAt(range.to).number;
+
+    const NUM_RE = /^(\s*)\d+\.\s+/;
+    // Снимаем нумерацию, только если она есть на КАЖДОЙ непустой строке —
+    // иначе клик по частично оформленному куску молча терял бы номера.
+    let allNumbered = true;
+    for (let n = first; n <= last; n++) {
+      const t = state.doc.line(n).text;
+      if (t.trim() && !NUM_RE.test(t)) { allNumbered = false; break; }
+    }
+
+    const changes: { from: number; to: number; insert: string }[] = [];
+    let counter = 1;
+    for (let n = first; n <= last; n++) {
+      const line = state.doc.line(n);
+      if (!line.text.trim()) continue; // пустые строки не нумеруем
+      if (allNumbered) {
+        const m = NUM_RE.exec(line.text)!;
+        changes.push({ from: line.from, to: line.from + m[0].length, insert: m[1] });
+      } else {
+        const m = NUM_RE.exec(line.text);
+        // Уже пронумерованную строку перенумеровываем, а не префиксуем повторно
+        const from = line.from;
+        const to = m ? line.from + m[0].length : line.from;
+        changes.push({ from, to, insert: `${counter}. ` });
+      }
+      counter++;
+    }
+    if (changes.length === 0) return;
+    view.dispatch({ changes, scrollIntoView: true });
+    view.focus();
+  }
+
+  // Обычная ссылка [текст](url): выделение становится подписью, курсор
+  // встаёт внутрь пустых скобок — url дописывается сразу, без второго клика.
+  // Без выделения вставляется заготовка с курсором на слове "текст".
+  export function formatLink() {
+    if (!view) return;
+    const { state } = view;
+    const range = state.selection.main;
+    const label = state.sliceDoc(range.from, range.to);
+
+    if (label) {
+      const insert = `[${label}]()`;
+      view.dispatch({
+        changes: { from: range.from, to: range.to, insert },
+        selection: EditorSelection.cursor(range.from + insert.length - 1),
+        scrollIntoView: true,
+      });
+    } else {
+      const insert = "[текст](url)";
+      view.dispatch({
+        changes: { from: range.from, insert },
+        selection: EditorSelection.range(range.from + 1, range.from + 6),
+        scrollIntoView: true,
+      });
+    }
+    view.focus();
+  }
 
   // Вставка таблицы (v0.9.06, добавлено в панель после первого прохода):
   // стартовая 2x2-таблица на новой строке под курсором. Пустые строки

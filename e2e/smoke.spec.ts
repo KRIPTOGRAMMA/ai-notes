@@ -569,6 +569,106 @@ test("редактор: **жирный** внутри ```кода``` не рен
   await expect(page.locator(".cm-strong")).toHaveCount(1);
 });
 
+// v0.9.27: декорации на Lezer-дереве — цитаты и нумерованные списки
+// многострочны и вкладываются, построчным regex их разбирать нельзя.
+test("редактор: цитаты и нумерованные списки декорируются по Lezer-дереву", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.getByRole("button", { name: "+ Новая заметка" }).click();
+  const editor = noteEditor(page);
+
+  await fillNoteEditor(page, "> первая строка цитаты\n> вторая строка\n\n1. раз\n2. два\n3. три");
+
+  // Уводим курсор в конец, чтобы маркеры '>' не показывались как сырые
+  await editor.click();
+  await page.keyboard.press("ControlOrMeta+End");
+
+  // обе строки цитаты получили класс, а не только первая
+  await expect(page.locator(".cm-quote")).toHaveCount(2);
+  // каждый пункт нумерованного списка — своя строка
+  await expect(page.locator(".cm-ol-item")).toHaveCount(3);
+  // номера НЕ прячутся: цифра — часть текста, её правит пользователь
+  await expect(editor).toContainText("1. раз");
+  await expect(editor).toContainText("3. три");
+});
+
+test("редактор: цитата внутри цитаты не ломает разметку", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.getByRole("button", { name: "+ Новая заметка" }).click();
+  const editor = noteEditor(page);
+
+  await fillNoteEditor(page, "> внешняя\n> > вложенная\n> снова внешняя");
+  await editor.click();
+  await page.keyboard.press("ControlOrMeta+End");
+
+  // все три строки — часть цитаты (вложенность обрабатывается деревом)
+  await expect(page.locator(".cm-quote")).toHaveCount(3);
+});
+
+// v0.9.27: кнопки на панели форматирования для тех же трёх конструкций.
+test("панель: кнопки цитаты, нумерованного списка и ссылки", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.getByRole("button", { name: "+ Новая заметка" }).click();
+  const editor = noteEditor(page);
+
+  // Цитата — префикс на текущей строке, повторный клик снимает.
+  // fillNoteEditor паркует курсор на пустой строке НИЖЕ текста, поэтому
+  // возвращаем его на саму строку — префикс ставится по строке курсора.
+  await fillNoteEditor(page, "мысль");
+  await page.keyboard.press("ControlOrMeta+Home");
+  await page.getByTitle("Цитата").click();
+  await expect(editor).toContainText("> мысль");
+  await page.getByTitle("Цитата").click();
+  await expect(editor).not.toContainText("> мысль");
+
+  // Нумерованный список: выделяем три строки — нумерация идёт подряд,
+  // а не одинаковым префиксом на всех
+  await fillNoteEditor(page, "раз\nдва\nтри");
+  await editor.click();
+  await page.keyboard.press("ControlOrMeta+a");
+  await page.getByTitle("Нумерованный список").click();
+  await expect(editor).toContainText("1. раз");
+  await expect(editor).toContainText("2. два");
+  await expect(editor).toContainText("3. три");
+
+  // Ссылка из выделения: текст становится подписью, курсор — внутри скобок,
+  // поэтому url допечатывается сразу
+  await fillNoteEditor(page, "документация");
+  await editor.click();
+  await page.keyboard.press("ControlOrMeta+a");
+  await page.getByTitle("Ссылка", { exact: true }).click();
+  await page.keyboard.type("https://example.com");
+  await expect(editor).toContainText("[документация](https://example.com)");
+});
+
+// v0.9.27: обычные [текст](url) раньше не декорировались вообще.
+test("редактор: markdown-ссылка рендерится, опасная схема блокируется", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.getByRole("button", { name: "+ Новая заметка" }).click();
+  const editor = noteEditor(page);
+
+  // Пустая строка в конце: курсор паркуется там, чтобы ни одна строка со
+  // ссылкой не была «сырой» (на строке с курсором декорации не применяются).
+  await fillNoteEditor(page, "[документация](https://example.com/docs)\n\n[плохая](javascript:void)\n\nконец");
+  await editor.click();
+  await page.keyboard.press("ControlOrMeta+End");
+
+  // нормальная ссылка — виджет с текстом, без markdown-синтаксиса вокруг
+  const good = page.locator("a.cm-mdlink", { hasText: "документация" });
+  await expect(good).toBeVisible();
+  await expect(good).not.toHaveClass(/unsafe/);
+
+  // javascript: помечена как заблокированная, а не открывается молча
+  await expect(page.locator("a.cm-mdlink.unsafe", { hasText: "плохая" })).toBeVisible();
+});
+
 test("вики-заметки: автодополнение, [[ссылка]] открывает/создаёт, бэклинки, поиск", async ({ page }) => {
   await withMock(page);
   await page.goto("/");

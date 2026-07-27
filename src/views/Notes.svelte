@@ -10,7 +10,7 @@
   import { save as saveDialog } from "@tauri-apps/plugin-dialog";
   import Icon from "../lib/components/Icon.svelte";
   import type { Note, NoteRevision } from "../lib/types";
-  type EditorExports = { focus: () => void; formatBold: () => void; formatItalic: () => void; formatCode: () => void; formatHeading: () => void; formatChecklist: () => void; formatWikiLink: () => void; insertTable: () => void; replaceRange: (from: number, to: number, text: string) => void };
+  type EditorExports = { focus: () => void; formatBold: () => void; formatItalic: () => void; formatCode: () => void; formatHeading: () => void; formatChecklist: () => void; formatWikiLink: () => void; formatQuote: () => void; formatOrderedList: () => void; formatLink: () => void; insertTable: () => void; replaceRange: (from: number, to: number, text: string) => void };
   let editorRef: EditorExports | undefined = $state();
 
   let selectedId: string | null = $state(null);
@@ -877,7 +877,10 @@ ${bodyHtml}
           <button class="btn-icon" title="Курсив (Ctrl+I)" onclick={() => editorRef?.formatItalic()}><Icon name="italic" /></button>
           <button class="btn-icon" title="Заголовок" onclick={() => editorRef?.formatHeading()}><Icon name="heading" /></button>
           <button class="btn-icon" title="Чек-лист" onclick={() => editorRef?.formatChecklist()}><Icon name="checklist" /></button>
+          <button class="btn-icon" title="Нумерованный список" onclick={() => editorRef?.formatOrderedList()}><Icon name="orderlist" /></button>
+          <button class="btn-icon" title="Цитата" onclick={() => editorRef?.formatQuote()}><Icon name="quote" /></button>
           <button class="btn-icon" title="Вики-ссылка (Ctrl+Shift+K)" onclick={() => editorRef?.formatWikiLink()}><Icon name="wikilink" /></button>
+          <button class="btn-icon" title="Ссылка" onclick={() => editorRef?.formatLink()}><Icon name="link" /></button>
           <button class="btn-icon" title="Код" onclick={() => editorRef?.formatCode()}><Icon name="code" /></button>
           <button class="btn-icon" title="Таблица" onclick={() => editorRef?.insertTable()}><Icon name="table" /></button>
         </div>
