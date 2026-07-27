@@ -292,3 +292,8 @@ export interface ModelOption {
   ram_gb: number;
   recommended: boolean;
 }
+
+// Режим окна быстрого ввода. "clipboard" (v0.9.26) — та же форма заметки,
+// но предзаполненная текстом из буфера обмена; зеркало normalize_quick_mode
+// в lib.rs, где неизвестный режим схлопывается в "task".
+export type QuickMode = "task" | "note" | "clipboard";

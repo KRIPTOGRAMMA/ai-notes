@@ -127,6 +127,9 @@
       persist();
     },
     get_quick_mode: () => db.quickMode ?? "task",
+    // v0.9.26: реального буфера в e2e нет — тест кладёт текст в
+    // window.__mockClipboard, мок отдаёт его как Rust-команда.
+    read_clipboard_text: () => window.__mockClipboard ?? "",
 
     // --- задачи ---
     get_tasks: () =>
@@ -788,6 +791,15 @@
       return id;
     },
     async invoke(cmd, args = {}) {
+      // Инъекция сбоя (v0.9.25): тест ставит window.__mockFailNext = {cmd, msg}
+      // и следующий вызов этой команды падает, как упала бы Rust-команда.
+      // Нужно, чтобы проверить показ ошибки в UI: обычные пути мока не падают,
+      // а без реального сбоя баннер ошибки нечем вызвать.
+      const fail = window.__mockFailNext;
+      if (fail && fail.cmd === cmd) {
+        window.__mockFailNext = null;
+        throw fail.msg;
+      }
       const handler = commands[cmd];
       if (!handler) {
         window.__unknownInvokes.push(cmd);

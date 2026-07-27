@@ -1131,6 +1131,18 @@
     <button class="btn-primary" onclick={() => { boardCreateStatus = "Todo"; showCreateModal = true; }}>+ Новая</button>
   </div>
 
+  <!-- v0.9.25: ошибки стора наконец видны. Раньше taskStore.error только
+       выставлялся, но нигде не рендерился — упавшая операция выглядела как
+       «кнопка не работает», без единого признака, что что-то пошло не так
+       (ровно так выглядел баг с повтором в v0.9.24). Тот же инлайновый
+       .alert, что уже используется в Заметках и Настройках. -->
+  {#if taskStore.error}
+    <div class="alert task-error" role="alert">
+      <span>{taskStore.error}</span>
+      <button class="btn-sm" onclick={() => taskStore.clearError()} title="Скрыть">✕</button>
+    </div>
+  {/if}
+
   {#if selectedIds.size > 0}
     <div class="bulk-bar card">
       <span class="bulk-count">{selectedIds.size} выбрано</span>
@@ -1462,6 +1474,16 @@
   }
 
   .count { font-size: 12px; }
+
+  /* .alert задаёт фон/цвет/паддинги глобально (app.css) — здесь только
+     раскладка под кнопку закрытия. */
+  .task-error {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .task-error span { flex: 1; }
 
   .head-search {
     width: 200px;

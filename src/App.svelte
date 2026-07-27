@@ -136,6 +136,13 @@
       api.openQuickCapture("note").catch(() => {});
       return;
     }
+    // Ctrl+Shift+B — заметка из буфера обмена (v0.9.26), там же в lib.rs.
+    // Не V — он занят «вставить без форматирования» почти везде.
+    if (e.shiftKey && e.code === "KeyB") {
+      e.preventDefault();
+      api.openQuickCapture("clipboard").catch(() => {});
+      return;
+    }
     if (comboMatches(comboFor(keybinds, "palette"), e)) {
       e.preventDefault();
       showSearch = true;

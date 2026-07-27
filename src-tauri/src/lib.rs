@@ -48,7 +48,14 @@ fn get_window_tracking(state: tauri::State<'_, WindowTracking>) -> Option<&'stat
 }
 
 fn normalize_quick_mode(mode: &str) -> &'static str {
-    if mode == "note" { "note" } else { "task" }
+    match mode {
+        "note" => "note",
+        // v0.9.26: заметка из буфера обмена. Отдельный режим, а не флаг у
+        // "note": окно должно открыться уже с текстом и не требовать вставки
+        // руками, но всё равно дать отредактировать и подтвердить.
+        "clipboard" => "clipboard",
+        _ => "task",
+    }
 }
 
 // Единый путь открытия окна быстрого ввода: фиксируем режим, оповещаем окно
@@ -71,11 +78,22 @@ fn open_quick_capture(app: tauri::AppHandle, mode: String) {
     show_quick_capture(&app, &mode);
 }
 
+// Текст из буфера обмена для режима "clipboard" (v0.9.26). Пустой буфер и
+// буфер с картинкой/файлом — не ошибка, а пустая строка: фронт в этом случае
+// просто открывает обычную пустую заметку, а не показывает ошибку.
+#[tauri::command]
+fn read_clipboard_text(app: tauri::AppHandle) -> String {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+    app.clipboard().read_text().unwrap_or_default()
+}
+
 // Режим быстрого ввода из аргументов CLI (--quick-note / --quick-task / -q).
 // Общий парсер для первого запуска и для аргументов, пересланных вторым
 // экземпляром через single-instance (биндами WM на Wayland).
 fn quick_mode_from_args(args: &[String]) -> Option<&'static str> {
-    if args.iter().any(|a| a == "--quick-note") {
+    if args.iter().any(|a| a == "--quick-clip") {
+        Some("clipboard")
+    } else if args.iter().any(|a| a == "--quick-note") {
         Some("note")
     } else if args.iter().any(|a| a == "--quick-task" || a == "-q") {
         Some("task")
@@ -246,6 +264,7 @@ pub fn run() {
                         commands::pomodoro::pomodoro_stop,
                         commands::pomodoro::get_pomodoro_stats,
                         open_quick_capture,
+                        read_clipboard_text,
                         get_quick_mode,
                         is_wayland,
                         get_tracking_mode,
@@ -457,17 +476,30 @@ pub fn run() {
                         show_quick_capture(&app.app_handle(), mode);
                     }
 
-                    // Глобальные хоткеи: Ctrl+Shift+N — задача, Ctrl+Shift+M — заметка
+                    // Глобальные хоткеи: Ctrl+Shift+N — задача, Ctrl+Shift+M — заметка,
+                    // Ctrl+Shift+B — заметка из буфера обмена (v0.9.26).
+                    // Не V: Ctrl+Shift+V почти везде занят «вставить без
+                    // форматирования», перехват сломал бы его в терминале и
+                    // браузере. B — от «буфер».
                     use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
                     let task_shortcut = "Ctrl+Shift+N".parse::<Shortcut>().unwrap();
                     let note_shortcut = "Ctrl+Shift+M".parse::<Shortcut>().unwrap();
+                    let clip_shortcut = "Ctrl+Shift+B".parse::<Shortcut>().unwrap();
                     let note_id = note_shortcut.id();
+                    let clip_id = clip_shortcut.id();
 
                     app.global_shortcut().on_shortcuts(
-                        [task_shortcut, note_shortcut],
+                        [task_shortcut, note_shortcut, clip_shortcut],
                         move |app, shortcut, event| {
                             if event.state == ShortcutState::Pressed {
-                                let mode = if shortcut.id() == note_id { "note" } else { "task" };
+                                let id = shortcut.id();
+                                let mode = if id == clip_id {
+                                    "clipboard"
+                                } else if id == note_id {
+                                    "note"
+                                } else {
+                                    "task"
+                                };
                                 show_quick_capture(app, mode);
                             }
                         }
@@ -610,7 +642,7 @@ pub fn run() {
 }
 #[cfg(test)]
 mod tests {
-    use super::{quick_mode_from_args, quiet_check_id, quiet_remaining_mins};
+    use super::{normalize_quick_mode, quick_mode_from_args, quiet_check_id, quiet_remaining_mins};
     use chrono::{TimeZone, Utc};
 
     fn now() -> chrono::DateTime<Utc> {
@@ -626,6 +658,22 @@ mod tests {
         // заметка приоритетнее, как и в старом коде запуска
         assert_eq!(quick_mode_from_args(&args(&["ai-notes", "--quick-task", "--quick-note"])), Some("note"));
         assert_eq!(quick_mode_from_args(&args(&["ai-notes"])), None);
+        // v0.9.26: буфер обмена — самый специфичный режим, приоритетнее обоих
+        assert_eq!(quick_mode_from_args(&args(&["ai-notes", "--quick-clip"])), Some("clipboard"));
+        assert_eq!(
+            quick_mode_from_args(&args(&["ai-notes", "--quick-note", "--quick-clip"])),
+            Some("clipboard")
+        );
+    }
+
+    #[test]
+    fn normalize_quick_mode_keeps_known_modes_and_falls_back() {
+        assert_eq!(normalize_quick_mode("note"), "note");
+        assert_eq!(normalize_quick_mode("clipboard"), "clipboard");
+        assert_eq!(normalize_quick_mode("task"), "task");
+        // неизвестный режим — не паника и не пустая строка, а безопасный фолбэк
+        assert_eq!(normalize_quick_mode("мусор"), "task");
+        assert_eq!(normalize_quick_mode(""), "task");
     }
 
     #[test]

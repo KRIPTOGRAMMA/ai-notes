@@ -4,11 +4,17 @@
   import { emit, listen } from "@tauri-apps/api/event";
   import { api } from "../api/tauri";
   import { categoryStore } from "../stores/categories.svelte";
+  import { parseClipboardNote } from "../clipboardNote";
   import { applyCachedTheme } from "../theme";
   import "../../app.css";
 
   type Mode = "task" | "note";
   let mode = $state<Mode>("task");
+  // v0.9.26: подсказка «текст взят из буфера» — только для режима clipboard,
+  // снимается при первой же правке, чтобы не висеть над отредактированным
+  // текстом. Сам "clipboard" в Mode не входит: это не третья вкладка, а
+  // предзаполненная заметка, поэтому в UI он схлопывается в "note".
+  let fromClipboard = $state(false);
 
   // Задача
   let title = $state("");
@@ -26,15 +32,34 @@
 
   applyCachedTheme();
 
+  // Режим clipboard раскрывается в заметку, предзаполненную буфером обмена.
+  // Пустой буфер (или картинка/файл в нём) — не ошибка: открывается обычная
+  // пустая заметка, как по Ctrl+Shift+M.
+  async function applyMode(m: string) {
+    if (m !== "clipboard") {
+      mode = m === "note" ? "note" : "task";
+      fromClipboard = false;
+      return;
+    }
+    mode = "note";
+    const text = await api.readClipboardText().catch(() => "");
+    const parsed = parseClipboardNote(text);
+    if (!parsed) {
+      fromClipboard = false;
+      return;
+    }
+    noteTitle = parsed.title;
+    noteContent = parsed.content;
+    fromClipboard = true;
+  }
+
   onMount(() => {
     // Начальный режим — из managed-state (покрывает случай, когда окно уже было
     // смонтировано до эмита события).
-    api.getQuickMode().then((m) => { mode = m; }).catch(() => {});
+    api.getQuickMode().then(applyMode).catch(() => {});
     categoryStore.load();
     // Живая смена режима, пока окно открыто.
-    const un = listen<string>("quick-mode", (e) => {
-      mode = e.payload === "note" ? "note" : "task";
-    });
+    const un = listen<string>("quick-mode", (e) => { applyMode(e.payload); });
     return () => { un.then((f) => f()); };
   });
 
@@ -42,6 +67,7 @@
     title = ""; description = ""; priority = "Medium"; category = "Other"; showDescription = false;
     noteTitle = ""; noteContent = "";
     errorMsg = null;
+    fromClipboard = false;
   }
 
   async function createTask() {
@@ -158,9 +184,14 @@
       <button class="btn-primary" onclick={createTask} disabled={!title.trim()}>Создать</button>
     </div>
   {:else}
+    {#if fromClipboard}
+      <p class="clip-hint">Текст из буфера обмена — можно поправить перед сохранением</p>
+    {/if}
     <!-- svelte-ignore a11y_autofocus -->
-    <input bind:value={noteTitle} placeholder="Заголовок заметки..." autofocus />
-    <textarea bind:value={noteContent} placeholder="Текст заметки... (Ctrl+Enter — сохранить)" rows="3"></textarea>
+    <input bind:value={noteTitle} placeholder="Заголовок заметки..." autofocus
+      oninput={() => fromClipboard = false} />
+    <textarea bind:value={noteContent} placeholder="Текст заметки... (Ctrl+Enter — сохранить)" rows="3"
+      oninput={() => fromClipboard = false}></textarea>
 
     <div class="buttons">
       <button class="btn-ghost" onclick={cancel}>Отмена</button>
@@ -187,6 +218,11 @@
   .error {
     font-size: 12px;
     color: var(--danger);
+    margin: 0;
+  }
+  .clip-hint {
+    font-size: 11px;
+    color: var(--text-muted, #888);
     margin: 0;
   }
   .row {

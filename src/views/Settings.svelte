@@ -736,8 +736,9 @@
   <section class="card panel" class:hidden-by-search={sectionMatches[8] === false} class:hidden-by-tab={SECTION_TAB[8] !== activeTab} bind:this={sectionEls[8]}>
     <h3 class="section-title">Хоткеи</h3>
     <p class="hint" style="margin-top:0;">
-      Только хоткеи внутри окна приложения. <code>Ctrl+Shift+N</code>/<code>Ctrl+Shift+M</code>
-      (быстрая задача/заметка) переназначению не подлежат — они завязаны на системный хоткей.
+      Только хоткеи внутри окна приложения. <code>Ctrl+Shift+N</code>/<code>Ctrl+Shift+M</code>/<code>Ctrl+Shift+B</code>
+      (быстрая задача / заметка / заметка из буфера обмена) переназначению не подлежат —
+      они завязаны на системный хоткей.
     </p>
     <div class="keybind-list">
       {#each KEYBIND_ACTIONS as action (action.id)}

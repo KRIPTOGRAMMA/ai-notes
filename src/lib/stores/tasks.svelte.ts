@@ -1,4 +1,5 @@
 import { api } from "../api/tauri";
+import { runGuarded } from "../guard";
 import type { Task, CreateTaskPayload, UpdateTaskPayload } from "../types";
 
 let tasks: Task[] = $state([]);
@@ -10,10 +11,20 @@ let focusTaskId: string | null = $state(null);
 let createRequested = $state(0); // инкремент — сигнал открыть модалку создания
 let planDayRequested = $state(0); // инкремент — сигнал перейти в Календарь-неделю и запустить план дня
 
-function describeError(e: unknown): string {
-  if (typeof e === "string") return e;
-  if (e instanceof Error) return e.message;
-  return "Неизвестная ошибка";
+// Обёртка вместо try/catch в каждом методе (v0.9.25). Главное здесь —
+// сброс error на успехе: раньше он только выставлялся, и первая же ошибка
+// оставляла баннер висеть навсегда, даже когда всё уже работало.
+// Успех/ошибка различаются по флагу ok, а не по truthiness результата —
+// иначе методы, законно возвращающие null/0/false, считались бы упавшими.
+// fallback возвращается вызывающему при ошибке (null/[] — по сигнатуре).
+async function guard<T>(op: () => Promise<T>, fallback: T): Promise<T> {
+  const r = await runGuarded(op);
+  if (r.ok) {
+    error = null;
+    return r.value;
+  }
+  error = r.error;
+  return fallback;
 }
 
 export const taskStore = {
@@ -32,99 +43,63 @@ export const taskStore = {
   requestPlanDay() { planDayRequested++; },
 
   async load() {
-    try {
-      tasks = await api.getTasks();
-    } catch (e) {
-      error = describeError(e);
-    }
+    tasks = await guard(() => api.getTasks(), tasks);
   },
 
   // Возвращает созданную задачу — модалке нужен id, чтобы дописать подзадачи
   // из инлайн-чеклиста (v0.8.3) сразу после создания.
   async create(payload: CreateTaskPayload): Promise<Task | null> {
-    try {
-      const task = await api.createTask(payload);
-      await taskStore.load();
-      return task;
-    } catch (e) {
-      error = describeError(e);
-      return null;
-    }
+    const task = await guard(() => api.createTask(payload), null);
+    if (task) await taskStore.load();
+    return task;
   },
 
   async update(id: string, patch: UpdateTaskPayload) {
-    try {
-      await api.updateTask(id, patch);
+    if (await guard(async () => { await api.updateTask(id, patch); return true; }, false)) {
       await taskStore.load();
-    } catch (e) {
-      error = describeError(e);
     }
   },
 
   async complete(id: string) {
-    try {
-      await api.completeTask(id);
+    if (await guard(async () => { await api.completeTask(id); return true; }, false)) {
       await taskStore.load();
-    } catch (e) {
-      error = describeError(e);
     }
   },
 
   async remove(id: string) {
-    try {
-      await api.deleteTask(id);
+    if (await guard(async () => { await api.deleteTask(id); return true; }, false)) {
       await taskStore.load();
       // Обновляем и корзину — если панель сейчас открыта, задача должна
       // появиться в ней сразу, а не только при следующем ручном переключении.
       await taskStore.loadDeleted();
-    } catch (e) {
-      error = describeError(e);
     }
   },
 
   async loadDeleted() {
-    try {
-      deletedTasks = await api.getDeletedTasks();
-    } catch (e) {
-      error = describeError(e);
-    }
+    deletedTasks = await guard(() => api.getDeletedTasks(), deletedTasks);
   },
 
   async restore(id: string) {
-    try {
-      await api.restoreTask(id);
+    if (await guard(async () => { await api.restoreTask(id); return true; }, false)) {
       await taskStore.loadDeleted();
       await taskStore.load();
-    } catch (e) {
-      error = describeError(e);
     }
   },
 
   async purge(id: string) {
-    try {
-      await api.purgeDeletedTask(id);
+    if (await guard(async () => { await api.purgeDeletedTask(id); return true; }, false)) {
       await taskStore.loadDeleted();
-    } catch (e) {
-      error = describeError(e);
     }
   },
 
   async reorder(ids: string[]) {
-    try {
-      await api.reorderTasks(ids);
+    if (await guard(async () => { await api.reorderTasks(ids); return true; }, false)) {
       await taskStore.load();
-    } catch (e) {
-      error = describeError(e);
     }
   },
 
   async search(query: string): Promise<Task[]> {
     if (!query.trim()) return [];
-    try {
-      return await api.searchTasks(query);
-    } catch (e) {
-      error = describeError(e);
-      return [];
-    }
+    return await guard(() => api.searchTasks(query), []);
   },
 };

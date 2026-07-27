@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Task, Subtask, CreateTaskPayload, UpdateTaskPayload, Note, CreateNotePayload, UpdateNotePayload, AppSettings, Project, UpdateProjectPayload, CategoryInfo, StatusInfo, NoteSnippet, TaskSnippet, GoalSnapshot, Routine, RoutineBlock, ActiveSession, NoteRevision, ChecklistTemplate, DayCompletion, ModelOption, SmartList, SmartListFilter, NotificationEntry } from "../types";
+import type { Task, Subtask, CreateTaskPayload, UpdateTaskPayload, Note, CreateNotePayload, UpdateNotePayload, AppSettings, Project, UpdateProjectPayload, CategoryInfo, StatusInfo, NoteSnippet, TaskSnippet, GoalSnapshot, Routine, RoutineBlock, ActiveSession, NoteRevision, ChecklistTemplate, DayCompletion, ModelOption, SmartList, SmartListFilter, NotificationEntry, QuickMode } from "../types";
 
 export const api = {
   getTasks: () => invoke<Task[]>("get_tasks"),
@@ -30,8 +30,9 @@ export const api = {
     invoke<void>("update_status", { id, patch }),
   deleteStatus: (id: string) => invoke<void>("delete_status", { id }),
   recordInput: () => invoke<void>("record_input"),
-  openQuickCapture: (mode: "task" | "note") => invoke<void>("open_quick_capture", { mode }),
-  getQuickMode: () => invoke<"task" | "note">("get_quick_mode"),
+  openQuickCapture: (mode: QuickMode) => invoke<void>("open_quick_capture", { mode }),
+  getQuickMode: () => invoke<QuickMode>("get_quick_mode"),
+  readClipboardText: () => invoke<string>("read_clipboard_text"),
   aiRewrite: (taskId: string, title: string) => invoke<void>("ai_rewrite", { taskId, title }),
   aiSubtasks: (taskId: string, title: string) => invoke<void>("ai_subtasks", { taskId, title }),
   aiClassify: (taskId: string, title: string) => invoke<void>("ai_classify", { taskId, title }),

@@ -135,6 +135,112 @@ test("завершение задачи проставляет done всем е�
   await expect(modal.locator(".check-row").nth(1).locator("input")).toBeChecked();
 });
 
+// v0.9.26: заметка из буфера обмена (Ctrl+Shift+B). Отдельная точка входа
+// quick-task.html — то же окно быстрого ввода, что и для Ctrl+Shift+N/M.
+test("заметка из буфера: окно открывается предзаполненным и сохраняет заметку", async ({ page }) => {
+  // Сид ДО tauri-mock.js: мок читает localStorage один раз при загрузке,
+  // поэтому init-скрипт с состоянием обязан быть зарегистрирован раньше.
+  await seedDb(page, { tasks: [], notes: [], projects: [], quickMode: "clipboard" });
+  await page.addInitScript(() => {
+    (window as any).__mockClipboard = "Идея для доклада\nразобрать примеры\nи выводы";
+  });
+  await withMock(page);
+  await page.goto("/quick-task.html");
+
+  // первая строка — заголовок, остальное — тело
+  await expect(page.locator("input")).toHaveValue("Идея для доклада");
+  await expect(page.locator("textarea")).toHaveValue("разобрать примеры\nи выводы");
+  await expect(page.locator(".clip-hint")).toBeVisible();
+
+  // подсказка снимается, как только текст правят руками
+  await page.locator("input").fill("Идея для доклада (правка)");
+  await expect(page.locator(".clip-hint")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Создать" }).click();
+  const notes = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("__mock_db")!).notes.map((n: any) => n.title));
+  expect(notes).toContain("Идея для доклада (правка)");
+});
+
+// Скопированная ссылка — самый частый случай этого хоткея, и голый URL в
+// заголовке нечитаем в списке заметок. Такой буфер целиком уходит в тело.
+test("заметка из буфера: скопированная ссылка попадает в тело, заголовок пуст", async ({ page }) => {
+  await seedDb(page, { tasks: [], notes: [], projects: [], quickMode: "clipboard" });
+  await page.addInitScript(() => {
+    (window as any).__mockClipboard = "https://example.com/article?id=42";
+  });
+  await withMock(page);
+  await page.goto("/quick-task.html");
+
+  await expect(page.locator("input")).toHaveValue("");
+  await expect(page.locator("textarea")).toHaveValue("https://example.com/article?id=42");
+  // фокус в пустом заголовке — можно сразу печатать название
+  await expect(page.locator("input")).toBeFocused();
+
+  // сохранение без заголовка не блокируется, название падает в фолбэк
+  await page.getByRole("button", { name: "Создать" }).click();
+  const notes = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("__mock_db")!).notes);
+  expect(notes[0].title).toBe("Без названия");
+  expect(notes[0].content).toBe("https://example.com/article?id=42");
+});
+
+test("заметка из буфера: пустой буфер даёт обычную пустую заметку, а не ошибку", async ({ page }) => {
+  await seedDb(page, { tasks: [], notes: [], projects: [], quickMode: "clipboard" });
+  await page.addInitScript(() => {
+    (window as any).__mockClipboard = "   \n\n  ";
+  });
+  await withMock(page);
+  await page.goto("/quick-task.html");
+
+  await expect(page.locator("input")).toHaveValue("");
+  await expect(page.locator("textarea")).toHaveValue("");
+  await expect(page.locator(".clip-hint")).toHaveCount(0);
+  await expect(page.locator(".error")).toHaveCount(0);
+});
+
+// v0.9.25: taskStore.error выставлялся, но нигде не рендерился — упавшая
+// операция выглядела как «кнопка не работает». Теперь ошибка видна и, что
+// не менее важно, снимается после первой же успешной операции.
+test("ошибки задач видны в UI и пропадают после успешной операции", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+
+  await createTask(page, "первая");
+  await expect(page.locator(".task-error")).toHaveCount(0);
+
+  // следующее завершение падает, как упала бы Rust-команда
+  await page.evaluate(() => {
+    (window as any).__mockFailNext = { cmd: "complete_task", msg: "Задача не найдена: xyz" };
+  });
+  await page.locator(".task-check").first().click();
+
+  await expect(page.locator(".task-error")).toContainText("Задача не найдена: xyz");
+  // задача осталась на месте — но теперь понятно, почему
+  await expect(page.locator(".task-main", { hasText: "первая" })).toBeVisible();
+
+  // успешное завершение снимает баннер (раньше error только выставлялся
+  // и висел бы навсегда)
+  await page.locator(".task-check").first().click();
+  await expect(page.locator(".task-error")).toHaveCount(0);
+  await expect(page.locator(".task-main", { hasText: "первая" })).toHaveCount(0);
+});
+
+test("ошибку задач можно закрыть крестиком", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+
+  await createTask(page, "вторая");
+  await page.evaluate(() => {
+    (window as any).__mockFailNext = { cmd: "complete_task", msg: "Что-то пошло не так" };
+  });
+  await page.locator(".task-check").first().click();
+  await expect(page.locator(".task-error")).toBeVisible();
+
+  await page.locator(".task-error button").click();
+  await expect(page.locator(".task-error")).toHaveCount(0);
+});
+
 // v0.9.24: баг из боевой БД — повторяющаяся задача в статусе InProgress
 // после клика по ✓ оставалась InProgress на том же месте: визуально ничего
 // не происходило, закрыть прогон было невозможно.
