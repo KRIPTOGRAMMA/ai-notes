@@ -554,6 +554,9 @@
       db.pomodoroStats ?? { today: 0, week: 0, task_streak: 0, pomodoro_streak: 0 },
     get_category_distribution: () => [],
     get_active_idle_ratio: () => ({ today_active: 0, today_idle: 0, week_active: 0, week_idle: 0 }),
+    // v0.9.30: мониторинга в e2e нет, поэтому простой берётся из сида
+    // (db.blockIdle: { "YYYY-MM-DD": [{task_id, idle_mins, ...}] }).
+    get_block_idle: ({ date }) => (db.blockIdle ?? {})[date] ?? [],
     get_app_usage: () => [],
     get_app_category_time: () => [],
     dashboard_insight: () => {},

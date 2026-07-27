@@ -271,10 +271,58 @@ pub struct ActiveIdleRatio {
     pub week_idle: i64,
 }
 
+// Простой внутри запланированного тайм-блока (v0.9.30). Блок — это план,
+// а сколько времени реально работалось, знает мониторинг: сопоставление
+// даёт честное «план vs факт» вместо расписания, принятого за факт.
+#[derive(Debug, serde::Serialize, PartialEq)]
+pub struct BlockIdle {
+    pub task_id: String,
+    pub task_title: String,
+    pub planned_mins: i64,
+    pub idle_mins: i64,
+    pub active_mins: i64,
+}
+
+// Пересечение двух полуинтервалов [a_start, a_end) и [b_start, b_end)
+// в секундах. Вынесено отдельной чистой функцией: это единственная
+// арифметика во всей фиче, и именно в ней легко ошибиться на границах
+// (тик мониторинга частично попадает в блок, начинается до него или
+// заканчивается после).
+pub fn overlap_secs(a_start: i64, a_end: i64, b_start: i64, b_end: i64) -> i64 {
+    let start = a_start.max(b_start);
+    let end = a_end.min(b_end);
+    (end - start).max(0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use chrono::Duration as ChronoDuration;
+
+    // v0.9.30: границы — единственное место, где эта фича может тихо
+    // соврать (посчитать простой, которого не было, или потерять реальный).
+    #[test]
+    fn overlap_handles_all_boundary_cases() {
+        // Тик целиком внутри блока
+        assert_eq!(overlap_secs(100, 160, 0, 600), 60);
+        // Блок целиком внутри тика (длинный idle-тик поглощает короткий блок)
+        assert_eq!(overlap_secs(0, 600, 100, 160), 60);
+        // Частичное перекрытие слева и справа
+        assert_eq!(overlap_secs(0, 120, 60, 600), 60);
+        assert_eq!(overlap_secs(540, 660, 0, 600), 60);
+        // Точное совпадение границ
+        assert_eq!(overlap_secs(0, 600, 0, 600), 600);
+
+        // Никакого перекрытия — ноль, а НЕ отрицательное число: иначе
+        // суммирование по тикам вычитало бы чужое время.
+        assert_eq!(overlap_secs(0, 60, 600, 660), 0);
+        assert_eq!(overlap_secs(600, 660, 0, 60), 0);
+        // Касание в точке — полуинтервалы, поэтому ноль, а не 1 секунда
+        assert_eq!(overlap_secs(0, 600, 600, 660), 0);
+        assert_eq!(overlap_secs(600, 660, 0, 600), 0);
+        // Пустой интервал
+        assert_eq!(overlap_secs(300, 300, 0, 600), 0);
+    }
 
     fn at(now: chrono::DateTime<Utc>, secs_ago: i64) -> chrono::DateTime<Utc> {
         now - ChronoDuration::seconds(secs_ago)

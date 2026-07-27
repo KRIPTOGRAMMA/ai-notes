@@ -1051,6 +1051,44 @@ test("цель проекта: прогресс в заголовке групп
   await expect(goalCard.locator(".goal-val")).toHaveText("1/1");
 });
 
+// v0.9.30: простой внутри тайм-блока по данным мониторинга — «план vs факт».
+test("тайм-блок: простой из мониторинга виден на блоке, ноль не показывается", async ({ page }) => {
+  const now = new Date();
+  const iso = (h: number) =>
+    new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, 0).toISOString();
+  const dayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+
+  await seedDb(page, {
+    tasks: [
+      { id: "b1", title: "с простоем", status: "Todo", priority: "Medium", category: "Other",
+        tags: [], description: null, deadline: null, recurrence: "None", hidden: false,
+        project_id: null, scheduled_at: iso(10), scheduled_mins: 60, sort_order: 1,
+        subtasks: [], created_at: iso(9), updated_at: iso(9), completed_at: null },
+      { id: "b2", title: "без простоя", status: "Todo", priority: "Medium", category: "Other",
+        tags: [], description: null, deadline: null, recurrence: "None", hidden: false,
+        project_id: null, scheduled_at: iso(14), scheduled_mins: 60, sort_order: 2,
+        subtasks: [], created_at: iso(9), updated_at: iso(9), completed_at: null },
+    ],
+    notes: [],
+    // Мониторинг вернул простой только для первого блока
+    blockIdle: { [dayKey]: [{ task_id: "b1", task_title: "с простоем", planned_mins: 60, idle_mins: 25, active_mins: 35 }] },
+  });
+  await withMock(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Календарь" }).click();
+  await page.getByRole("button", { name: "Неделя" }).click();
+
+  // Блок с простоем — подпись есть
+  await expect(page.locator(".block", { hasText: "с простоем" }).locator(".block-idle"))
+    .toHaveText(/простой 25 мин/);
+
+  // Блок без данных — подписи нет вовсе (а не «0 мин»): у будущего блока
+  // простоя нет по определению, и ноль читался бы как утверждение о факте.
+  await expect(page.locator(".block", { hasText: "без простоя" }).locator(".block-idle"))
+    .toHaveCount(0);
+});
+
 test("тайм-блокинг: drag из бэклога ставит блок, задача видна в «Сегодня»", async ({ page }) => {
   await withMock(page);
   await page.goto("/");

@@ -2,7 +2,7 @@ use tauri::State;
 use std::sync::Arc;
 use sqlx::{SqlitePool, Row};
 use crate::error::AppResult;
-use crate::monitor::activity::{ActivityTracker, SessionStats, ActivityState, ActivityDay, TaskCompletion, CategoryCount, ActiveIdleRatio};
+use crate::monitor::activity::{ActivityTracker, SessionStats, ActivityState, ActivityDay, TaskCompletion, CategoryCount, ActiveIdleRatio, BlockIdle};
 
 #[tauri::command]
 pub fn record_input(tracker: State<'_, Arc<ActivityTracker>>) {
@@ -98,6 +98,89 @@ pub async fn get_active_idle_ratio_impl(pool: &SqlitePool) -> AppResult<ActiveId
     let (week_active, week_idle) =
         state_sums(pool, "date(timestamp) >= date('now','-6 days')").await?;
     Ok(ActiveIdleRatio { today_active, today_idle, week_active, week_idle })
+}
+
+// Простой внутри запланированных тайм-блоков за день (v0.9.30).
+//
+// Тайм-блок — это план: «с 14:00 два часа на задачу X». Сколько времени
+// реально работалось, знает мониторинг (activity_log). Пересечение даёт
+// честное «план vs факт» — до этой версии тайм-блоки считались выполненными
+// по факту наступления времени, независимо от того, был ли пользователь
+// вообще за компьютером.
+//
+// Считается на SQL-стороне без сложных оконных функций: тиков мониторинга
+// за день немного (по одному на log_interval_secs, по умолчанию минуту),
+// блоков тем более, поэтому простое соединение дешевле любой оптимизации.
+#[tauri::command]
+pub async fn get_block_idle(pool: State<'_, SqlitePool>, date: String) -> AppResult<Vec<BlockIdle>> {
+    get_block_idle_impl(pool.inner(), &date).await
+}
+
+pub async fn get_block_idle_impl(pool: &SqlitePool, date: &str) -> AppResult<Vec<BlockIdle>> {
+    // Блоки этого дня. scheduled_mins может быть NULL — берём час по
+    // умолчанию, тот же фолбэк, что и в остальном коде тайм-блоков.
+    let blocks = sqlx::query(
+        "SELECT id, title, scheduled_at, COALESCE(scheduled_mins, 60) AS mins
+         FROM tasks
+         WHERE deleted_at IS NULL AND scheduled_at IS NOT NULL
+           AND date(scheduled_at) = date(?)
+         ORDER BY scheduled_at"
+    )
+    .bind(date)
+    .fetch_all(pool)
+    .await?;
+
+    let ticks = sqlx::query(
+        "SELECT timestamp, duration_secs, state FROM activity_log
+         WHERE date(timestamp) = date(?)"
+    )
+    .bind(date)
+    .fetch_all(pool)
+    .await?;
+
+    // Разбираем тики один раз, а не внутри цикла по блокам.
+    let parsed: Vec<(i64, i64, bool)> = ticks.iter().filter_map(|r| {
+        let ts: String = r.get("timestamp");
+        let start = parse_ts(&ts)?;
+        let dur: i64 = r.get("duration_secs");
+        let state: String = r.get("state");
+        Some((start, start + dur, state == "Idle"))
+    }).collect();
+
+    let mut out = Vec::new();
+    for b in &blocks {
+        let sched: String = b.get("scheduled_at");
+        let Some(bs) = parse_ts(&sched) else { continue };
+        let mins: i64 = b.get("mins");
+        let be = bs + mins * 60;
+
+        let (mut idle, mut active) = (0i64, 0i64);
+        for &(ts, te, is_idle) in &parsed {
+            let secs = crate::monitor::activity::overlap_secs(ts, te, bs, be);
+            if secs == 0 { continue; }
+            if is_idle { idle += secs; } else { active += secs; }
+        }
+
+        out.push(BlockIdle {
+            task_id: b.get("id"),
+            task_title: b.get("title"),
+            planned_mins: mins,
+            // Округление вниз: показать «простаивал 9 минут» при 9:59
+            // честнее, чем округлить до 10 и завысить претензию.
+            idle_mins: idle / 60,
+            active_mins: active / 60,
+        });
+    }
+    Ok(out)
+}
+
+// RFC3339 из БД → unix-секунды. Неразобранная метка пропускается, а не
+// роняет всю сводку: одна битая строка не должна лишать пользователя
+// статистики за день.
+fn parse_ts(s: &str) -> Option<i64> {
+    chrono::DateTime::parse_from_rfc3339(s)
+        .ok()
+        .map(|d| d.timestamp())
 }
 
 async fn state_sums(pool: &SqlitePool, window: &str) -> AppResult<(i64, i64)> {
@@ -339,6 +422,97 @@ mod tests {
              VALUES (?, ?, 1, 0, ?)")
             .bind(ts).bind(state).bind(duration_secs)
             .execute(pool).await.unwrap();
+    }
+
+    // v0.9.30 — простой в тайм-блоках
+    async fn block(pool: &SqlitePool, id: &str, title: &str, at: &str, mins: i64) {
+        sqlx::query(
+            "INSERT INTO tasks (id, title, description, status, priority, category,
+             deadline, tags, recurrence, hidden, created_at, updated_at, sort_order,
+             scheduled_at, scheduled_mins)
+             VALUES (?, ?, NULL, 'Todo', 'Medium', 'Other', NULL, '[]', 'None', 0,
+             ?, ?, 1, ?, ?)")
+            .bind(id).bind(title).bind(at).bind(at).bind(at).bind(mins)
+            .execute(pool).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn block_idle_splits_active_and_idle_within_block() {
+        let pool = test_pool().await;
+        // Блок 14:00–15:00 (60 мин)
+        block(&pool, "t1", "работа", "2026-07-01T14:00:00+00:00", 60).await;
+
+        // 20 минут активности, 10 минут простоя — внутри блока
+        for i in 0..20 {
+            log(&pool, &format!("2026-07-01T14:{:02}:00+00:00", i), "Active", 60).await;
+        }
+        for i in 20..30 {
+            log(&pool, &format!("2026-07-01T14:{:02}:00+00:00", i), "Idle", 60).await;
+        }
+
+        let r = get_block_idle_impl(&pool, "2026-07-01").await.unwrap();
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].task_title, "работа");
+        assert_eq!(r[0].planned_mins, 60);
+        assert_eq!(r[0].active_mins, 20);
+        assert_eq!(r[0].idle_mins, 10);
+    }
+
+    // Главное, ради чего вынесен overlap_secs: активность ВНЕ блока не должна
+    // приписываться блоку, иначе «факт» окажется больше плана.
+    #[tokio::test]
+    async fn block_idle_ignores_activity_outside_block() {
+        let pool = test_pool().await;
+        block(&pool, "t1", "встреча", "2026-07-01T14:00:00+00:00", 30).await;
+
+        // До блока и после него — не должно попасть в счёт
+        log(&pool, "2026-07-01T13:00:00+00:00", "Active", 60).await;
+        log(&pool, "2026-07-01T13:59:00+00:00", "Idle", 60).await;
+        log(&pool, "2026-07-01T14:30:00+00:00", "Active", 60).await;
+        log(&pool, "2026-07-01T15:00:00+00:00", "Idle", 60).await;
+        // Внутри блока — 5 минут простоя
+        for i in 0..5 {
+            log(&pool, &format!("2026-07-01T14:{:02}:00+00:00", i), "Idle", 60).await;
+        }
+
+        let r = get_block_idle_impl(&pool, "2026-07-01").await.unwrap();
+        assert_eq!(r[0].idle_mins, 5);
+        assert_eq!(r[0].active_mins, 0);
+    }
+
+    #[tokio::test]
+    async fn block_idle_counts_partial_tick_overlap() {
+        let pool = test_pool().await;
+        // Блок 14:00–14:10
+        block(&pool, "t1", "короткий", "2026-07-01T14:00:00+00:00", 10).await;
+        // Длинный idle-тик 13:55–14:55: в блок попадают только 10 минут
+        log(&pool, "2026-07-01T13:55:00+00:00", "Idle", 3600).await;
+
+        let r = get_block_idle_impl(&pool, "2026-07-01").await.unwrap();
+        assert_eq!(r[0].idle_mins, 10);
+    }
+
+    #[tokio::test]
+    async fn block_idle_returns_empty_without_blocks_and_skips_other_days() {
+        let pool = test_pool().await;
+        block(&pool, "t1", "вчерашний", "2026-06-30T14:00:00+00:00", 60).await;
+        log(&pool, "2026-06-30T14:00:00+00:00", "Idle", 60).await;
+
+        // Запрошен другой день — блок вчерашнего дня не возвращается
+        assert!(get_block_idle_impl(&pool, "2026-07-01").await.unwrap().is_empty());
+        assert_eq!(get_block_idle_impl(&pool, "2026-06-30").await.unwrap().len(), 1);
+    }
+
+    // Задача в Корзине не должна светиться в сводке дня.
+    #[tokio::test]
+    async fn block_idle_skips_deleted_tasks() {
+        let pool = test_pool().await;
+        block(&pool, "t1", "удалённая", "2026-07-01T14:00:00+00:00", 60).await;
+        sqlx::query("UPDATE tasks SET deleted_at = ? WHERE id = 't1'")
+            .bind("2026-07-01T15:00:00+00:00").execute(&pool).await.unwrap();
+        log(&pool, "2026-07-01T14:00:00+00:00", "Idle", 60).await;
+
+        assert!(get_block_idle_impl(&pool, "2026-07-01").await.unwrap().is_empty());
     }
 
     #[tokio::test]

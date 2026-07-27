@@ -280,6 +280,7 @@ pub fn run() {
                         commands::monitor::get_app_category_time,
                         commands::monitor::get_category_distribution,
                         commands::monitor::get_active_idle_ratio,
+                        commands::monitor::get_block_idle,
                         commands::ai::ai_rewrite,
                         commands::ai::ai_subtasks,
                         commands::ai::ai_classify,

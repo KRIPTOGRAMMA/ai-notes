@@ -297,3 +297,13 @@ export interface ModelOption {
 // но предзаполненная текстом из буфера обмена; зеркало normalize_quick_mode
 // в lib.rs, где неизвестный режим схлопывается в "task".
 export type QuickMode = "task" | "note" | "clipboard";
+
+// Простой внутри запланированного тайм-блока (v0.9.30): план из задачи,
+// факт — из мониторинга активности.
+export interface BlockIdle {
+  task_id: string;
+  task_title: string;
+  planned_mins: number;
+  idle_mins: number;
+  active_mins: number;
+}

@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Task, Subtask, CreateTaskPayload, UpdateTaskPayload, Note, CreateNotePayload, UpdateNotePayload, AppSettings, Project, UpdateProjectPayload, CategoryInfo, StatusInfo, NoteSnippet, TaskSnippet, GoalSnapshot, Routine, RoutineBlock, ActiveSession, NoteRevision, ChecklistTemplate, DayCompletion, ModelOption, SmartList, SmartListFilter, NotificationEntry, QuickMode } from "../types";
+import type { Task, Subtask, CreateTaskPayload, UpdateTaskPayload, Note, CreateNotePayload, UpdateNotePayload, AppSettings, Project, UpdateProjectPayload, CategoryInfo, StatusInfo, NoteSnippet, TaskSnippet, GoalSnapshot, Routine, RoutineBlock, ActiveSession, NoteRevision, ChecklistTemplate, DayCompletion, ModelOption, SmartList, SmartListFilter, NotificationEntry, QuickMode, BlockIdle } from "../types";
 
 export const api = {
   getTasks: () => invoke<Task[]>("get_tasks"),
@@ -75,6 +75,7 @@ export const api = {
   getActivityByDay: () => invoke<{ date: string; minutes: number }[]>("get_activity_by_day"),
   getTaskCompletionsByDay: () => invoke<{ date: string; completed: number }[]>("get_task_completions_by_day"),
   getCategoryDistribution: () => invoke<{ category: string; count: number }[]>("get_category_distribution"),
+  getBlockIdle: (date: string) => invoke<BlockIdle[]>("get_block_idle", { date }),
   getActiveIdleRatio: () =>
     invoke<{ today_active: number; today_idle: number; week_active: number; week_idle: number }>("get_active_idle_ratio"),
   getAppUsage: (days: number) => invoke<{ app: string; minutes: number }[]>("get_app_usage", { days }),

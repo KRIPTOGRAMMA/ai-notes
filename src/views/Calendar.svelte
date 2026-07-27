@@ -212,6 +212,34 @@
     return map;
   });
 
+  // Простой в блоках (v0.9.30): task_id → минуты простоя. Грузится только
+  // для видимой недели и только в недельном режиме — в месячном блоки не
+  // показываются, запрашивать нечего.
+  //
+  // Прошлое и настоящее, а не будущее: у блока в будущем простоя нет по
+  // определению, поэтому нулевые значения ничего не значат и не показываются
+  // (см. фильтр idle_mins > 0 в разметке).
+  let blockIdle = $state(new Map<string, number>());
+
+  async function loadBlockIdle() {
+    if (viewMode !== "week") return;
+    const map = new Map<string, number>();
+    for (const d of weekDays) {
+      const rows = await api.getBlockIdle(d.key).catch(() => []);
+      for (const r of rows) {
+        if (r.idle_mins > 0) map.set(r.task_id, r.idle_mins);
+      }
+    }
+    blockIdle = map;
+  }
+
+  // Перезагружаем при смене недели и при переключении в недельный режим.
+  $effect(() => {
+    void viewMode;
+    void weekAnchor;
+    loadBlockIdle();
+  });
+
   // Рутины по дням недели: для каждого дня недели проверяем маску
   const routinesByDay = $derived.by(() => {
     const map = new Map<string, { title: string; start_mins: number; duration_mins: number }[]>();
@@ -389,6 +417,14 @@
                   <button class="block-body" onclick={() => onOpenTask(t.id)}>
                     <span class="block-time">{blockLabel(t)}</span>
                     <span class="block-title">{t.title}</span>
+                    <!-- Простой (v0.9.30): показывается только когда он есть.
+                         Ноль не рисуем — у будущих блоков он ноль по определению,
+                         и «0 мин простоя» выглядело бы как утверждение о факте. -->
+                    {#if blockIdle.get(t.id)}
+                      <span class="block-idle" title="Простой внутри блока по данным мониторинга">
+                        простой {blockIdle.get(t.id)} мин
+                      </span>
+                    {/if}
                   </button>
                   <button class="block-x" title="Снять блок" onclick={(e) => { e.stopPropagation(); unschedule(t.id); }}>✕</button>
                   <div class="resize-handle" role="presentation" onmousedown={(e) => startResize(e, t)}></div>
@@ -829,6 +865,17 @@
   .block-title {
     font-size: 11px;
     line-height: 1.25;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Простой (v0.9.30): приглушённый — это справка о факте, а не
+     предупреждение. Красным было бы упрёком за то, что пользователь
+     отошёл от компьютера. */
+  .block-idle {
+    font-size: 10px;
+    opacity: 0.75;
+    white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
