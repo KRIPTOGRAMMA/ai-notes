@@ -8,6 +8,7 @@
   import { applyTheme } from "../lib/theme";
   import ModelDownloader from "../lib/components/ModelDownloader.svelte";
   import Icon from "../lib/components/Icon.svelte";
+  import { HELP_TOPICS } from "../lib/help";
   import {
     KEYBIND_ACTIONS, type Keybinds,
     parseKeybinds, comboFor, comboFromEvent, formatCombo, findConflicts,
@@ -106,6 +107,7 @@
     { id: "notifications", label: "Уведомления" },
     { id: "data", label: "Данные" },
     { id: "hotkeys", label: "Хоткеи" },
+    { id: "help", label: "Справка" },
   ] as const;
   type TabId = (typeof TABS)[number]["id"];
   // Внешний вид(0), Режим работы(2) → Общее; ИИ-провайдер(1) → ИИ;
@@ -113,7 +115,9 @@
   // Авто-бэкап(6), Данные(7) → Данные; Хоткеи(8) → Хоткеи; Статусы(9) →
   // Задачи (добавлена последней по индексу, чтобы не перенумеровывать
   // существующие секции, но логически сгруппирована с Категориями).
-  const SECTION_TAB: TabId[] = ["general", "ai", "general", "tasks", "tasks", "notifications", "data", "data", "hotkeys", "tasks"];
+  // Справка(10) → Справка (v0.9.29 — добавлена последней по индексу,
+  // чтобы не перенумеровывать существующие секции).
+  const SECTION_TAB: TabId[] = ["general", "ai", "general", "tasks", "tasks", "notifications", "data", "data", "hotkeys", "tasks", "help"];
   let activeTab = $state<TabId>("general");
 
   // --- Поиск по настройкам (v0.8.5): простой substring-match по всему
@@ -123,6 +127,9 @@
   let searchQuery = $state("");
   let sectionEls: HTMLElement[] = $state([]);
   let sectionMatches = $state<boolean[]>([]);
+  // При активном поиске темы справки раскрыты: иначе совпадение лежит в
+  // свёрнутом <details> и пользователь видит тему без видимого текста.
+  let helpSearchOpen = $derived(searchQuery.trim() !== "");
 
   function recomputeSearch() {
     const q = searchQuery.trim().toLowerCase();
@@ -822,6 +829,29 @@
     </p>
   </section>
 
+  <!-- Справка (v0.9.29): содержимое — данными в lib/help.ts, здесь только
+       рендер. <details> вместо своего аккордеона: свёрнутый текст остаётся в
+       DOM, поэтому существующий поиск по настройкам (читает el.textContent)
+       находит его без доработок — совпавшие темы просто раскрываются. -->
+  <section class="card panel" class:hidden-by-search={sectionMatches[10] === false} class:hidden-by-tab={SECTION_TAB[10] !== activeTab} bind:this={sectionEls[10]}>
+    <h3 class="section-title">Справка</h3>
+    <p class="hint" style="margin-top:0;">
+      Что умеет приложение. Раскройте тему, чтобы прочитать; поиск по настройкам
+      ищет и здесь.
+    </p>
+    {#each HELP_TOPICS as topic (topic.id)}
+      <details class="help-topic" open={helpSearchOpen}>
+        <summary>{topic.title}</summary>
+        <dl class="help-list">
+          {#each topic.items as item (item.term)}
+            <dt>{item.term}</dt>
+            <dd>{item.desc}</dd>
+          {/each}
+        </dl>
+      </details>
+    {/each}
+  </section>
+
   <button class="btn-primary" onclick={save} disabled={saving}>
     {saving ? "Сохранение..." : saved ? "Сохранено ✓" : "Сохранить"}
   </button>
@@ -949,6 +979,49 @@
     font-size: 12px;
     color: var(--text-secondary);
     margin: 8px 0 0 0;
+  }
+
+  /* Справка (v0.9.29) */
+  .help-topic {
+    border-top: 1px solid var(--border);
+    padding: 8px 0;
+  }
+
+  .help-topic summary {
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 13px;
+    list-style: none;
+  }
+
+  /* Своя стрелка вместо дефолтного маркера — он рисуется по-разному
+     в разных движках (тот же принцип, что с иконками в Icon.svelte). */
+  .help-topic summary::marker,
+  .help-topic summary::-webkit-details-marker { display: none; }
+
+  .help-topic summary::before {
+    content: "▸";
+    display: inline-block;
+    width: 14px;
+    color: var(--text-secondary);
+  }
+
+  .help-topic[open] summary::before { content: "▾"; }
+
+  .help-list {
+    margin: 8px 0 4px 14px;
+    font-size: 12px;
+  }
+
+  .help-list dt {
+    font-weight: 600;
+    margin-top: 8px;
+  }
+
+  .help-list dd {
+    margin: 2px 0 0 0;
+    color: var(--text-secondary);
+    line-height: 1.45;
   }
 
   .rule-row {

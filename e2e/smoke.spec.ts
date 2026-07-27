@@ -608,6 +608,42 @@ test("редактор: цитата внутри цитаты не ломает
   await expect(page.locator(".cm-quote")).toHaveCount(3);
 });
 
+// v0.9.29: справка в Настройках — свёрнутые темы на <details>.
+test("справка: темы раскрываются, поиск по настройкам находит внутри свёрнутых", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Настройки" }).click();
+  await page.locator(".settings-tab", { hasText: "Справка" }).click();
+
+  // темы видны, содержимое свёрнуто
+  const notesTopic = page.locator(".help-topic", { hasText: "Заметки" }).first();
+  await expect(notesTopic).toBeVisible();
+  await expect(notesTopic.locator("dd").first()).not.toBeVisible();
+
+  // клик раскрывает
+  await notesTopic.locator("summary").click();
+  await expect(notesTopic.locator("dd").first()).toBeVisible();
+
+  // Ключевое: свёрнутый <details> оставляет текст в DOM, поэтому поиск по
+  // настройкам (читает textContent) находит его и раскрывает темы.
+  await page.locator(".settings-tab", { hasText: "Общее" }).click();
+  await page.getByPlaceholder(/Поиск/).fill("Автолинковка");
+  await expect(page.getByText("Предлагает вики-ссылки на другие заметки по смыслу текста.")).toBeVisible();
+});
+
+// v0.9.29: Онбординг остаётся коротким и ссылается на справку.
+test("онбординг: последний шаг ведёт в Настройки → Справка", async ({ page }) => {
+  await seedDb(page, { tasks: [], notes: [], settings: { onboarding_complete: false } });
+  await withMock(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Начать настройку" }).click();
+  await page.getByRole("button", { name: "Далее" }).click();
+  await page.getByRole("button", { name: "Далее" }).click();
+  await expect(page.getByText("Готово!")).toBeVisible();
+  await expect(page.getByText("Настройках → Справка")).toBeVisible();
+});
+
 // v0.9.28: путь к модели приходит от бэкенда (app_data_dir зависит от ОС),
 // а не собирается строкой в UI. Раньше был зашит
 // `~/.local/share/ai-notes/models/model.gguf` — неверный на Windows/macOS и
@@ -1979,7 +2015,9 @@ test("настройки: вкладки показывают только св�
 
   await page.locator(".settings-tab", { hasText: "Хоткеи" }).click();
   await expect(page.getByText("ИИ-провайдер")).not.toBeVisible();
-  await expect(page.locator("section", { hasText: "Хоткеи" })).toBeVisible();
+  // .section-title, а не текст по всей секции: слова из разных разделов
+  // приложения встречаются и в тексте Справки (v0.9.29).
+  await expect(page.locator("section .section-title", { hasText: "Хоткеи" })).toBeVisible();
 });
 
 test("настройки: поиск скрывает несовпавшие секции и переключает вкладку", async ({ page }) => {
@@ -1988,13 +2026,13 @@ test("настройки: поиск скрывает несовпавшие с�
 
   await page.getByRole("button", { name: "Настройки" }).click();
   const sections = page.locator(".settings section");
-  await expect(sections).toHaveCount(10); // все секции в DOM независимо от вкладки (+Статусы задач, v0.9.20)
+  await expect(sections).toHaveCount(11); // +Справка (v0.9.29)
 
-  // «бэкап» — совпадение только в секции «Авто-бэкап» (вкладка «Данные»),
-  // поиск (v0.8.10) сам переключает на неё.
+  // «бэкап» — совпадение в «Авто-бэкап» (вкладка «Данные»), поиск (v0.8.10)
+  // сам переключает на неё. Справка (v0.9.29) тоже объясняет бэкапы, и это
+  // намеренно: искать в ней — часть смысла раздела, поэтому она в выдаче тоже.
   await page.getByPlaceholder("Поиск по настройкам…").fill("бэкап");
   await expect(page.locator(".settings-tab.active")).toHaveText("Данные");
-  await expect(page.locator(".settings section:visible")).toHaveCount(1);
   await expect(page.locator(".settings section:visible .section-title")).toHaveText("Авто-бэкап");
 
   // Очистка поиска возвращает все секции активной («Данные») вкладки —
@@ -2011,8 +2049,9 @@ test("авто-бэкап: секция в настройках, кнопка «
   await page.getByRole("button", { name: "Настройки" }).click();
   await page.locator(".settings-tab", { hasText: "Данные" }).click();
 
-  // Секция «Авто-бэкап» видна
-  await expect(page.getByText("Авто-бэкап")).toBeVisible();
+  // Секция «Авто-бэкап» видна (.section-title — слово встречается и в
+  // тексте Справки на другой вкладке, v0.9.29)
+  await expect(page.locator(".section-title", { hasText: "Авто-бэкап" })).toBeVisible();
   await expect(page.getByText("Папка для бэкапов")).toBeVisible();
   await expect(page.getByText("Хранить копий")).toBeVisible();
 
