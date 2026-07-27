@@ -1090,6 +1090,39 @@ test("граф заметок: связанные заметки дают узл
   await expect(page.locator(".note-item.active", { hasText: "Идея A" })).toBeVisible();
 });
 
+
+// Перетаскивание узла: позиция указателя применяется раз в кадр, а рект
+// контейнера кэшируется на время драга (иначе getBoundingClientRect на
+// каждый pointermove — синхронный layout flush; WebKitGTK шлёт их ~170/сек).
+test("граф заметок: узел следует за курсором при перетаскивании", async ({ page }) => {
+  const now = new Date().toISOString();
+  await seedDb(page, {
+    tasks: [],
+    notes: [
+      { id: "n1", title: "Тянем", content: "см. [[Вторая]]", tags: [], linked_task_id: null, project_id: null, created_at: now, updated_at: now },
+      { id: "n2", title: "Вторая", content: "без ссылок", tags: [], linked_task_id: null, project_id: null, created_at: now, updated_at: now },
+    ],
+    settings: { onboarding_complete: true },
+  });
+  await withMock(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Граф" }).click();
+  await page.waitForTimeout(1500); // симуляция должна остыть, иначе узел уедет сам
+
+  const node = page.locator(".node").first();
+  const before = (await node.boundingBox())!;
+  await page.mouse.move(before.x + before.width / 2, before.y + before.height / 2);
+  await page.mouse.down();
+  for (let i = 1; i <= 20; i++) {
+    await page.mouse.move(before.x + before.width / 2 + i * 6, before.y + before.height / 2 + i * 4);
+  }
+  await page.mouse.up();
+  await page.waitForTimeout(400);
+
+  const after = (await node.boundingBox())!;
+  expect(Math.hypot(after.x - before.x, after.y - before.y)).toBeGreaterThan(30);
+});
+
 test("закрепление заметок: пин поднимает заметку наверх списка, переживает перезагрузку", async ({ page }) => {
   await withMock(page);
   await page.goto("/");

@@ -10,6 +10,7 @@
   import { noteStore } from "../lib/stores/notes.svelte";
   import { projectStore } from "../lib/stores/projects.svelte";
   import { extractWikiLinks } from "../lib/markdown";
+  import { Quadtree, boundsFor } from "../lib/quadtree";
   import type { Note } from "../lib/types";
 
   let { onOpenNote }: { onOpenNote: (id: string) => void } = $props();
@@ -110,6 +111,19 @@
   let rafId: number | null = null;
   function tick() {
     const pos = positions;
+
+    // Позиция перетаскиваемого узла применяется ровно один раз за кадр,
+    // а не на каждое событие указателя.
+    if (draggingId && pendingDrag) {
+      const dp = pos.get(draggingId);
+      if (dp) {
+        dp.x = pendingDrag.x;
+        dp.y = pendingDrag.y;
+        dp.vx = 0; dp.vy = 0;
+      }
+      pendingDrag = null;
+    }
+
     const REPULSION = 6000;
     const SPRING = 0.08;
     const SPRING_LEN = 110;
@@ -117,22 +131,20 @@
     const ISOLATED_CENTER_PULL = 0.003; // приглушённые узлы слабее тянутся к центру -> к краям
     const DAMPING = 0.6;
 
+    // Barnes-Hut (v0.9.23): раньше здесь был точный O(n²) перебор всех пар
+    // узлов на каждый кадр — на графах в несколько сотен заметок это душило
+    // CPU и заметно тормозило симуляцию. Квадродерево строится заново каждый
+    // кадр (позиции меняются), но сам расчёт отталкивания на узел падает до
+    // O(log n) вместо O(n) — итого O(n log n) на кадр вместо O(n²).
+    const bodies = [...pos.entries()].map(([id, p]) => ({ id, x: p.x, y: p.y, mass: 1 }));
+    const tree = new Quadtree(boundsFor(bodies), bodies);
+
     for (const n of nodes) {
       const p = pos.get(n.id);
       if (!p || draggingId === n.id) continue;
-      let fx = 0, fy = 0;
 
-      for (const other of nodes) {
-        if (other.id === n.id) continue;
-        const op = pos.get(other.id);
-        if (!op) continue;
-        const dx = p.x - op.x, dy = p.y - op.y;
-        const distSq = Math.max(dx * dx + dy * dy, 1);
-        const force = REPULSION / distSq;
-        const dist = Math.sqrt(distSq);
-        fx += (dx / dist) * force;
-        fy += (dy / dist) * force;
-      }
+      const { fx: rfx, fy: rfy } = tree.repulsion(p.x, p.y, n.id, REPULSION);
+      let fx = rfx, fy = rfy;
 
       const pull = n.degree > 0 ? CENTER_PULL : ISOLATED_CENTER_PULL;
       fx += (width / 2 - p.x) * pull;
@@ -169,7 +181,9 @@
     // порога, останавливаем RAF-цикл — иначе граф дёргается бесконечно (лишняя
     // нагрузка на CPU и невозможно надёжно кликнуть по узлу в e2e). Драг узла
     // или изменение состава графа снова запускают цикл (см. $effect ниже).
-    if (totalMotion > 0.05 * nodes.length) {
+    // Пока узел тянут, цикл не останавливаем: движение перетаскиваемого узла
+    // не учитывается в totalMotion, и граф «остыл» бы прямо под курсором.
+    if (draggingId !== null || totalMotion > 0.05 * nodes.length) {
       rafId = requestAnimationFrame(tick);
     } else {
       rafId = null;
@@ -197,23 +211,31 @@
     return () => ro.disconnect();
   });
 
+  // Рект контейнера кэшируется на время перетаскивания: getBoundingClientRect()
+  // на каждый pointermove — синхронный layout flush, а WebKitGTK шлёт эти
+  // события ~170/сек. Во время драга контейнер не двигается, читать его
+  // заново незачем.
+  let dragRect: DOMRect | null = null;
+  // Последняя позиция указателя, применяется один раз за кадр в tick():
+  // раньше каждый pointermove клонировал всю Map позиций ради реактивности,
+  // то есть ~170 клонов в секунду вместо 60.
+  let pendingDrag: { x: number; y: number } | null = null;
+
   function startDrag(id: string, e: PointerEvent) {
     draggingId = id;
+    dragRect = container.getBoundingClientRect();
     (e.target as Element).setPointerCapture(e.pointerId);
     wake(); // тянут узел за другими остывшими — снова нужно пересчитывать соседей
   }
   function onDrag(id: string, e: PointerEvent) {
-    if (draggingId !== id) return;
-    const rect = container.getBoundingClientRect();
-    const p = positions.get(id);
-    if (!p) return;
-    p.x = e.clientX - rect.left;
-    p.y = e.clientY - rect.top;
-    p.vx = 0; p.vy = 0;
-    positions = new Map(positions);
+    if (draggingId !== id || !dragRect) return;
+    pendingDrag = { x: e.clientX - dragRect.left, y: e.clientY - dragRect.top };
+    wake();
   }
   function endDrag() {
     draggingId = null;
+    dragRect = null;
+    pendingDrag = null;
   }
 
   let hoveredId: string | null = $state(null);
@@ -279,6 +301,11 @@
                   r={n.degree === 0 ? 5 : 6 + Math.min(n.degree, 8)}
                   fill={n.color ?? (n.degree === 0 ? "var(--text-secondary)" : "var(--accent)")}
                 />
+                <!-- Плашка-подложка под подписью вместо stroke-обводки текста
+                     (v0.9.23) — WebKitGTK перерисовывает stroke-контур текста
+                     заново на каждый кадр симуляции (SVG не умеет частичную
+                     перерисовку), это заметно дороже одного залитого rect. -->
+                <rect class="label-bg" x="7" y="-6" width={n.title.length * 6 + 6} height="12" rx="2" />
                 <text x="10" y="4">{n.title}</text>
               </g>
             {/if}
@@ -357,11 +384,14 @@
   .node text {
     font-size: 11px;
     fill: var(--text-primary);
-    paint-order: stroke;
-    stroke: var(--bg-secondary);
-    stroke-width: 3px;
     pointer-events: none;
     user-select: none;
+  }
+
+  .label-bg {
+    fill: var(--bg-secondary);
+    opacity: .85;
+    pointer-events: none;
   }
 
   .hint {
