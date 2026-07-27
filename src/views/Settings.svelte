@@ -94,6 +94,7 @@
   let error: string | null = $state(null);
   let trackingMode: "extended" | "basic" | null = $state(null);
   let windowTracking: string | null = $state(null);
+  let modelPath: string | null = $state(null);
 
   // --- Вкладки (v0.8.10): секции сгруппированы, чтобы не листать одну
   // длинную колонку. SECTION_TAB[i] — id вкладки для секции с индексом i
@@ -180,6 +181,9 @@
     }
     trackingMode = await api.getTrackingMode().catch(() => null);
     windowTracking = await api.getWindowTracking().catch(() => null);
+    // Реальный путь от бэкенда, а не собранная на фронте строка: каталог
+    // зависит от ОС (app_data_dir) и от identifier'а приложения (v0.9.28).
+    modelPath = await api.modelPath().catch(() => null);
     categoryStore.load();
     statusStore.load();
   });
@@ -502,7 +506,7 @@
     {:else if settings.ai_provider === "local"}
       <div style="margin-top:12px;">
         <p class="muted" style="font-size:12px;margin:0 0 10px 0;">
-          Локальная модель хранится в <code>~/.local/share/ai-notes/models/model.gguf</code>
+          Локальная модель хранится в <code>{modelPath ?? "…"}</code>
         </p>
         <ModelDownloader />
       </div>

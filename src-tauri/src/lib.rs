@@ -312,6 +312,7 @@ pub fn run() {
                         commands::backup::do_auto_backup,
                         commands::model::list_model_options,
                         commands::model::model_status,
+                        commands::model::model_path,
                         commands::model::download_model,
                         commands::subtasks::get_subtasks,
                         commands::subtasks::add_subtask,

@@ -91,6 +91,17 @@ pub(crate) fn local_model_available(app: &AppHandle) -> bool {
         .unwrap_or(false)
 }
 
+// Путь к файлу модели для показа в Настройках (v0.9.28). Раньше он был
+// зашит в UI строкой `~/.local/share/ai-notes/models/model.gguf` — неверной
+// на Windows/macOS и неверной даже на Linux (каталог называется по
+// identifier'у, com.ainotes.app, а не ai-notes). Отдаём то, что реально
+// использует models_dir, вместо того чтобы собирать строку по ОС на фронте:
+// подстановка по платформе разошлась бы с бэкендом при первом же изменении.
+#[tauri::command]
+pub async fn model_path(app: AppHandle) -> Result<String, String> {
+    Ok(models_dir(&app)?.join("model.gguf").display().to_string())
+}
+
 #[tauri::command]
 pub async fn model_status(app: AppHandle) -> Result<ModelStatus, String> {
     let path = models_dir(&app)?.join("model.gguf");

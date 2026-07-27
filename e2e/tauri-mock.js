@@ -621,6 +621,10 @@
       }), 0);
     },
     model_status: () => ({ exists: false, size_bytes: 0 }),
+    // v0.9.28: путь приходит от бэкенда (app_data_dir зависит от ОС), в моке
+    // отдаём линуксовый вид — тест проверяет, что показан ответ команды, а не
+    // зашитая в UI строка.
+    model_path: () => "/home/user/.local/share/com.ainotes.app/models/model.gguf",
     list_model_options: () => ([
       { id: "qwen2.5-0.5b", name: "Qwen2.5 0.5B Instruct", url: "https://example.com/qwen2.5-0.5b.gguf", size_bytes: 491000000, description: "Самая быстрая и лёгкая — базовое качество.", ram_gb: 2, recommended: false },
       { id: "qwen2.5-1.5b", name: "Qwen2.5 1.5B Instruct", url: "https://example.com/qwen2.5-1.5b.gguf", size_bytes: 1120000000, description: "Баланс скорости и качества.", ram_gb: 3, recommended: true },

@@ -112,10 +112,15 @@
         Запускать AI Notes при входе в систему
       </label>
       <p>Быстрая задача из любого места: <kbd>Ctrl Shift N</kbd></p>
-      <p class="muted" style="font-size:13px;">
-        На Hyprland/Sway глобальные хоткеи перехватывает композитор — добавь бинд, запускающий
-        <code>ai-notes --quick-task</code>.
-      </p>
+      <!-- Совет про композитор — только на Wayland (v0.9.28). Раньше он
+           показывался всем, включая Windows, где ни Hyprland/Sway, ни
+           бинд в конфиге композитора не имеют смысла. -->
+      {#if isWayland}
+        <p class="muted" style="font-size:13px;">
+          На Hyprland/Sway глобальные хоткеи перехватывает композитор — добавь бинд, запускающий
+          <code>ai-notes --quick-task</code>.
+        </p>
+      {/if}
     {:else}
       <h2>Готово!</h2>
       <ul>

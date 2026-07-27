@@ -608,6 +608,40 @@ test("редактор: цитата внутри цитаты не ломает
   await expect(page.locator(".cm-quote")).toHaveCount(3);
 });
 
+// v0.9.28: путь к модели приходит от бэкенда (app_data_dir зависит от ОС),
+// а не собирается строкой в UI. Раньше был зашит
+// `~/.local/share/ai-notes/models/model.gguf` — неверный на Windows/macOS и
+// неверный даже на Linux (каталог называется по identifier'у приложения).
+test("настройки: путь к локальной модели берётся из бэкенда, а не зашит в UI", async ({ page }) => {
+  await seedDb(page, { tasks: [], notes: [], settings: { onboarding_complete: true, ai_provider: "local" } });
+  await withMock(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Настройки" }).click();
+  // exact: «ИИ» подстрокой матчит и «Уведомления» — strict mode violation
+  await page.locator(".settings-tab").getByText("ИИ", { exact: true }).click();
+  await expect(page.getByText("/home/user/.local/share/com.ainotes.app/models/model.gguf")).toBeVisible();
+  // старая зашитая строка не должна остаться нигде
+  await expect(page.getByText("~/.local/share/ai-notes/models")).toHaveCount(0);
+});
+
+// v0.9.28: совет про композитор специфичен для Wayland — на Windows его быть
+// не должно (isWayland уже прокидывался в компонент, но не использовался).
+test("онбординг: совет про Hyprland/Sway показывается только на Wayland", async ({ page }) => {
+  await seedDb(page, { tasks: [], notes: [], settings: { onboarding_complete: false } });
+  await withMock(page);
+  await page.goto("/"); // мок отдаёт is_wayland: false — шаг Wayland пропускается
+
+  // проходим до шага автозагрузки (шаг Wayland пропущен — is_wayland: false)
+  await page.getByRole("button", { name: "Начать настройку" }).click();
+  await page.getByRole("button", { name: "Далее" }).click();
+  await expect(page.getByText("Автозагрузка и хоткеи")).toBeVisible();
+
+  // не-Wayland: совета про композитор нет, сам хоткей упомянут
+  await expect(page.getByText("Hyprland/Sway")).toHaveCount(0);
+  await expect(page.getByText("Быстрая задача из любого места")).toBeVisible();
+});
+
 // v0.9.27: кнопки на панели форматирования для тех же трёх конструкций.
 test("панель: кнопки цитаты, нумерованного списка и ссылки", async ({ page }) => {
   await withMock(page);

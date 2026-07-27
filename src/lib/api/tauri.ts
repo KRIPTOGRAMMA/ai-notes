@@ -119,5 +119,6 @@ export const api = {
   getProjectSeconds: (projectId: string, from: string) => invoke<number>("get_project_seconds", { projectId, from }),
   listModelOptions: () => invoke<ModelOption[]>("list_model_options"),
   modelStatus: () => invoke<{ exists: boolean; size_bytes: number }>("model_status"),
+  modelPath: () => invoke<string>("model_path"),
   downloadModel: (url: string) => invoke<void>("download_model", { url }),
 };
