@@ -1051,6 +1051,74 @@ test("цель проекта: прогресс в заголовке групп
   await expect(goalCard.locator(".goal-val")).toHaveText("1/1");
 });
 
+// v0.9.31: домены в трекинге. Приватностная фича — тест проверяет прежде
+// всего, что по умолчанию ничего не собирается и не показывается.
+test("домены: выключены по умолчанию, галочка сохраняется, историю можно забыть", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+  // windowTracking пишем ПОСЛЕ загрузки, а не через seedDb: init-скрипт
+  // seedDb выполняется заново на каждый reload и затирает всё, что мок
+  // успел сохранить — а этот тест как раз проверяет переживание reload.
+  await page.evaluate(() => {
+    const db = JSON.parse(localStorage.getItem("__mock_db")!);
+    db.windowTracking = "hyprland";
+    localStorage.setItem("__mock_db", JSON.stringify(db));
+  });
+  await page.reload();
+
+  await page.getByRole("button", { name: "Настройки" }).click();
+  // Мониторинг живёт на вкладке «Категории» (SECTION_TAB[3])
+  await page.locator(".settings-tab", { hasText: "Категории" }).click();
+  const toggle = page.getByText("Разбивать браузерное время по сайтам");
+  await expect(toggle).toBeVisible();
+  const cb = page.locator("label", { hasText: "Разбивать браузерное время" }).locator("input[type=checkbox]");
+  await expect(cb).not.toBeChecked(); // выкл по умолчанию
+
+  // Явно сказано, что заголовок не сохраняется — формулировка часть фичи
+  await expect(page.getByText(/только домен/i)).toBeVisible();
+
+  await cb.check();
+  await page.getByRole("button", { name: "Сохранить", exact: true }).click();
+  await page.reload();
+  await page.getByRole("button", { name: "Настройки" }).click();
+  await page.locator(".settings-tab", { hasText: "Категории" }).click();
+  await expect(page.locator("label", { hasText: "Разбивать браузерное время" })
+    .locator("input[type=checkbox]")).toBeChecked();
+
+  // Кнопка забывания собранного отвечает числом, а не молчит
+  await page.getByRole("button", { name: "Забыть собранные домены" }).click();
+  await expect(page.getByText(/Очищено записей/)).toBeVisible();
+});
+
+test("домены: блок «Сайты» на дашборде появляется только когда есть данные", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+  // Не через seedDb: его init-скрипт перезапускается на reload и вернул бы
+  // domainUsage обратно, а вторая половина теста как раз проверяет пустой случай.
+  await page.evaluate(() => {
+    const db = JSON.parse(localStorage.getItem("__mock_db")!);
+    db.windowTracking = "hyprland";
+    db.domainUsage = [{ domain: "github.com", minutes: 42 }];
+    localStorage.setItem("__mock_db", JSON.stringify(db));
+  });
+  await page.reload();
+  await page.getByRole("button", { name: "Дашборд" }).click();
+  // .section-title: слово «Сайты» встречается ещё и в тексте Справки (v0.9.29)
+  await expect(page.locator(".section-title", { hasText: "Сайты" })).toBeVisible();
+  await expect(page.getByText("github.com")).toBeVisible();
+
+  // Без данных блока нет вовсе — пустой заголовок «Сайты» читался бы как
+  // поломка, а не как выключенная функция.
+  await page.evaluate(() => {
+    const db = JSON.parse(localStorage.getItem("__mock_db")!);
+    db.domainUsage = [];
+    localStorage.setItem("__mock_db", JSON.stringify(db));
+  });
+  await page.reload();
+  await page.getByRole("button", { name: "Дашборд" }).click();
+  await expect(page.locator(".section-title", { hasText: "Сайты" })).toHaveCount(0);
+});
+
 // v0.9.30: простой внутри тайм-блока по данным мониторинга — «план vs факт».
 test("тайм-блок: простой из мониторинга виден на блоке, ноль не показывается", async ({ page }) => {
   const now = new Date();

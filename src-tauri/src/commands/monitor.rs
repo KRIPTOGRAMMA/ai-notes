@@ -212,6 +212,12 @@ pub struct AppMinutes {
 }
 
 #[derive(Debug, serde::Serialize, PartialEq)]
+pub struct DomainMinutes {
+    pub domain: String,
+    pub minutes: i64,
+}
+
+#[derive(Debug, serde::Serialize, PartialEq)]
 pub struct CategoryMinutes {
     pub category: String,
     pub minutes: i64,
@@ -315,6 +321,52 @@ pub async fn get_app_usage_impl(pool: &SqlitePool, days: i64) -> AppResult<Vec<A
     let mut apps = app_minutes_since(pool, days.max(1)).await?;
     apps.truncate(10);
     Ok(apps)
+}
+
+// Время по сайтам (v0.9.31). Пустой результат — нормальное состояние, а не
+// ошибка: пока track_domains выключен (по умолчанию), колонка domain пуста
+// у всех строк, и UI показывает объяснение вместо пустого графика.
+#[tauri::command]
+pub async fn get_domain_usage(pool: State<'_, SqlitePool>, days: i64) -> AppResult<Vec<DomainMinutes>> {
+    get_domain_usage_impl(pool.inner(), days).await
+}
+
+pub async fn get_domain_usage_impl(pool: &SqlitePool, days: i64) -> AppResult<Vec<DomainMinutes>> {
+    let rows = sqlx::query(
+        "SELECT domain, SUM(duration_secs) / 60 AS minutes
+         FROM activity_log
+         WHERE state = 'Active' AND domain IS NOT NULL AND domain != ''
+           AND timestamp >= datetime('now', ?)
+         GROUP BY domain
+         HAVING minutes > 0
+         ORDER BY minutes DESC
+         LIMIT 10"
+    )
+    .bind(format!("-{} days", days.max(1)))
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows.iter().map(|r| DomainMinutes {
+        domain: r.get("domain"),
+        minutes: r.get("minutes"),
+    }).collect())
+}
+
+// Забыть всю собранную статистику по доменам. Нужна рядом с галочкой:
+// выключение трекинга останавливает сбор, но само по себе не удаляет уже
+// накопленное — а пользователь, снимающий приватностную галочку, обычно
+// хочет именно этого. Отдельная явная кнопка, а не побочный эффект
+// выключения: тихое удаление данных пользователя — это тоже сюрприз.
+#[tauri::command]
+pub async fn clear_domain_history(pool: State<'_, SqlitePool>) -> AppResult<u64> {
+    clear_domain_history_impl(pool.inner()).await
+}
+
+pub async fn clear_domain_history_impl(pool: &SqlitePool) -> AppResult<u64> {
+    let r = sqlx::query("UPDATE activity_log SET domain = NULL WHERE domain IS NOT NULL")
+        .execute(pool)
+        .await?;
+    Ok(r.rows_affected())
 }
 
 #[tauri::command]
@@ -422,6 +474,59 @@ mod tests {
              VALUES (?, ?, 1, 0, ?)")
             .bind(ts).bind(state).bind(duration_secs)
             .execute(pool).await.unwrap();
+    }
+
+    // v0.9.31 — время по сайтам
+    async fn log_domain(pool: &SqlitePool, ts: &str, app: &str, domain: Option<&str>, secs: i64) {
+        sqlx::query(
+            "INSERT INTO activity_log (timestamp, state, app_focused, input_events, duration_secs, app, domain)
+             VALUES (?, 'Active', 1, 0, ?, ?, ?)")
+            .bind(ts).bind(secs).bind(app).bind(domain)
+            .execute(pool).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn domain_usage_groups_and_sorts_by_minutes() {
+        let pool = test_pool().await;
+        let now = chrono::Utc::now();
+        let ts = |m: i64| (now - chrono::Duration::minutes(m)).to_rfc3339();
+
+        log_domain(&pool, &ts(10), "firefox", Some("github.com"), 600).await;
+        log_domain(&pool, &ts(20), "firefox", Some("github.com"), 600).await;
+        log_domain(&pool, &ts(30), "firefox", Some("youtube.com"), 300).await;
+
+        let r = get_domain_usage_impl(&pool, 7).await.unwrap();
+        assert_eq!(r.len(), 2);
+        assert_eq!(r[0].domain, "github.com");
+        assert_eq!(r[0].minutes, 20);
+        assert_eq!(r[1].domain, "youtube.com");
+    }
+
+    // Пока track_domains выключен, domain у всех строк NULL — статистика
+    // пустая, и это нормальное состояние, а не ошибка.
+    #[tokio::test]
+    async fn domain_usage_empty_when_nothing_tracked() {
+        let pool = test_pool().await;
+        let now = chrono::Utc::now().to_rfc3339();
+        log_domain(&pool, &now, "firefox", None, 600).await;
+        log_domain(&pool, &now, "kitty", None, 600).await;
+
+        assert!(get_domain_usage_impl(&pool, 7).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn clear_domain_history_wipes_domains_but_keeps_activity() {
+        let pool = test_pool().await;
+        let now = chrono::Utc::now().to_rfc3339();
+        log_domain(&pool, &now, "firefox", Some("github.com"), 600).await;
+
+        let affected = clear_domain_history_impl(&pool).await.unwrap();
+        assert_eq!(affected, 1);
+        assert!(get_domain_usage_impl(&pool, 7).await.unwrap().is_empty());
+
+        // Само время активности не потеряно — стёрты только домены
+        let (active, _) = state_sums(&pool, "1=1").await.unwrap();
+        assert_eq!(active, 600);
     }
 
     // v0.9.30 — простой в тайм-блоках

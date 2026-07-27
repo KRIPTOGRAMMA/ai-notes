@@ -281,6 +281,8 @@ pub fn run() {
                         commands::monitor::get_category_distribution,
                         commands::monitor::get_active_idle_ratio,
                         commands::monitor::get_block_idle,
+                        commands::monitor::get_domain_usage,
+                        commands::monitor::clear_domain_history,
                         commands::ai::ai_rewrite,
                         commands::ai::ai_subtasks,
                         commands::ai::ai_classify,

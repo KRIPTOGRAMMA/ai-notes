@@ -157,13 +157,32 @@ pub fn start_activity_loop(
                 ActivityState::Idle => "Idle",
                 ActivityState::Active => "Active",
             };
-            let focused_app = match (&new_state, &window_provider) {
-                (ActivityState::Active, Some(p)) => p.current_window().map(|w| w.app),
+            let window = match (&new_state, &window_provider) {
+                (ActivityState::Active, Some(p)) => p.current_window(),
                 _ => None,
             };
+
+            // Домен (v0.9.31) — только при явно включённой настройке и только
+            // для браузеров. Заголовок живёт в этой функции и дальше не идёт:
+            // в БД уходит либо домен, либо NULL. Настройка читается каждый тик,
+            // а не кэшируется при старте, чтобы выключение действовало сразу,
+            // без перезапуска приложения — для приватностной галочки это
+            // важнее, чем сэкономленный запрос раз в минуту.
+            let domain = match &window {
+                Some(w) if crate::monitor::domain::is_browser(&w.app) => {
+                    if crate::commands::settings::get_bool_setting(&pool, "track_domains", false).await {
+                        crate::monitor::domain::domain_from_title(&w.title)
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            };
+            let focused_app = window.map(|w| w.app);
+
             let result = sqlx::query(
-                "INSERT INTO activity_log (timestamp, state, app_focused, input_events, duration_secs, app)
-                 VALUES (?, ?, ?, ?, ?, ?)"
+                "INSERT INTO activity_log (timestamp, state, app_focused, input_events, duration_secs, app, domain)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)"
             )
             .bind(now.to_rfc3339())
             .bind(state_str)
@@ -171,6 +190,7 @@ pub fn start_activity_loop(
             .bind(0i32)
             .bind(log_interval_secs as i64)
             .bind(focused_app)
+            .bind(domain)
             .execute(&pool)
             .await;
 

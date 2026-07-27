@@ -60,15 +60,20 @@
   let appUsage: { app: string; minutes: number }[] = $state([]);
   let appCategories: { category: string; minutes: number }[] = $state([]);
   let appPeriod: 1 | 7 = $state(1);
+  let domainUsage: { domain: string; minutes: number }[] = $state([]);
 
   async function loadAppUsage(days: 1 | 7) {
     appPeriod = days;
     try {
       appUsage = await api.getAppUsage(days);
       appCategories = await api.getAppCategoryTime(days);
+      // v0.9.31: пусто, пока track_domains выключен — это нормальное
+      // состояние, блок сайтов просто не показывается.
+      domainUsage = await api.getDomainUsage(days);
     } catch {
       appUsage = [];
       appCategories = [];
+      domainUsage = [];
     }
   }
 
@@ -532,6 +537,30 @@
       </section>
     {/if}
 
+    <!-- Сайты (v0.9.31): отдельная карточка, а не блок внутри «Приложений».
+         Иначе разбивка по сайтам зависела бы от того, записалось ли что-то
+         по приложениям — два независимых источника данных не должны
+         скрывать друг друга. Карточки нет вовсе, пока трекинг доменов
+         выключен: пустой заголовок «Сайты» читался бы как поломка, а не
+         как выключенная функция. -->
+    {#if domainUsage.length > 0}
+      {@const maxDomain = Math.max(...domainUsage.map(d => d.minutes), 1)}
+      <section class="card panel wide">
+        <h3 class="section-title">Сайты</h3>
+        <div class="rows">
+          {#each domainUsage as d (d.domain)}
+            <div class="bar-row">
+              <span class="bar-date" title={d.domain}>{d.domain}</span>
+              <div class="track tall">
+                <div class="fill" style="width:{Math.round((d.minutes / maxDomain) * 100)}%;"></div>
+              </div>
+              <span class="bar-val">{d.minutes} мин</span>
+            </div>
+          {/each}
+        </div>
+      </section>
+    {/if}
+
     <!-- Приложения (только если провайдер окон что-то записал) -->
     {#if appUsage.length > 0}
       {@const maxApp = Math.max(...appUsage.map(a => a.minutes), 1)}
@@ -567,6 +596,7 @@
             {/each}
           </ul>
         </div>
+
         <p class="muted" style="font-size:11px;margin:8px 0 0 0;">
           Категории — по правилам «класс окна → категория» в Настройках → Мониторинг.
         </p>

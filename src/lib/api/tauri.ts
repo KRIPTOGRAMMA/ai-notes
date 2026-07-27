@@ -78,6 +78,8 @@ export const api = {
   getBlockIdle: (date: string) => invoke<BlockIdle[]>("get_block_idle", { date }),
   getActiveIdleRatio: () =>
     invoke<{ today_active: number; today_idle: number; week_active: number; week_idle: number }>("get_active_idle_ratio"),
+  getDomainUsage: (days: number) => invoke<{ domain: string; minutes: number }[]>("get_domain_usage", { days }),
+  clearDomainHistory: () => invoke<number>("clear_domain_history"),
   getAppUsage: (days: number) => invoke<{ app: string; minutes: number }[]>("get_app_usage", { days }),
   getCompletionsForDay: (date: string) => invoke<DayCompletion[]>("get_completions_for_day", { date }),
   getHourlyActivity: (days: number) =>

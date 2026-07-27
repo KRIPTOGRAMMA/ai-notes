@@ -87,6 +87,7 @@
     show_subtasks_expanded: true,
     keybinds: "",
     focus_mode_auto: true,
+    track_domains: false,
     history_cleanup_months: 0,
   });
 
@@ -96,6 +97,13 @@
   let trackingMode: "extended" | "basic" | null = $state(null);
   let windowTracking: string | null = $state(null);
   let modelPath: string | null = $state(null);
+  // Число очищенных записей о доменах — показывается после нажатия, чтобы
+  // действие не выглядело как «ничего не произошло» (v0.9.31).
+  let domainCleared: number | null = $state(null);
+
+  async function clearDomains() {
+    domainCleared = await api.clearDomainHistory().catch(() => null);
+  }
 
   // --- Вкладки (v0.8.10): секции сгруппированы, чтобы не листать одну
   // длинную колонку. SECTION_TAB[i] — id вкладки для секции с индексом i
@@ -566,7 +574,30 @@
       </p>
     {/if}
 
+    <!-- Домены (v0.9.31): показывается там же, где работает трекинг окон —
+         без провайдера заголовок читать неоткуда, и галочка была бы мёртвой.
+         Формулировка намеренно прямая: пользователь должен понимать, что
+         именно начнёт происходить, а не увидеть безобидное «улучшить
+         статистику». -->
     {#if windowTracking}
+      <label class="option" style="margin-top:12px;align-items:flex-start;">
+        <input type="checkbox" bind:checked={settings.track_domains} />
+        <span>
+          Разбивать браузерное время по сайтам
+          <br /><small class="hint" style="margin:0;">
+            Требует чтения заголовков окон браузера. В базу сохраняется
+            <b>только домен</b> (github.com), сам заголовок — название вкладки,
+            поисковый запрос — не сохраняется никогда. Выключено по умолчанию.
+          </small>
+        </span>
+      </label>
+      {#if domainCleared !== null}
+        <p class="hint">Очищено записей: {domainCleared}</p>
+      {/if}
+      <button class="btn-sm" style="margin-top:6px;" onclick={clearDomains}>
+        Забыть собранные домены
+      </button>
+
       <div class="sub-label" style="margin-top:12px;">Категории приложений (класс окна → категория)</div>
       {#each appRules as rule, i}
         <div class="rule-row">

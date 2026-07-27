@@ -45,6 +45,7 @@
     show_subtasks_expanded: true,
     keybinds: "",
     focus_mode_auto: true,
+    track_domains: false,
     history_cleanup_months: 0,
   };
 
@@ -557,6 +558,15 @@
     // v0.9.30: мониторинга в e2e нет, поэтому простой берётся из сида
     // (db.blockIdle: { "YYYY-MM-DD": [{task_id, idle_mins, ...}] }).
     get_block_idle: ({ date }) => (db.blockIdle ?? {})[date] ?? [],
+    // v0.9.31: домены — из сида (db.domainUsage), пусто по умолчанию, как и
+    // в реальности при выключенном track_domains.
+    get_domain_usage: () => db.domainUsage ?? [],
+    clear_domain_history: () => {
+      const n = (db.domainUsage ?? []).length;
+      db.domainUsage = [];
+      persist();
+      return n;
+    },
     get_app_usage: () => [],
     get_app_category_time: () => [],
     dashboard_insight: () => {},
