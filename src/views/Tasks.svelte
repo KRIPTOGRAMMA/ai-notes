@@ -246,6 +246,18 @@
     api.getActiveSession().then(s => { trackingId = s?.task_id ?? null; }).catch(() => {});
   });
 
+  // Завершение по ✓ в строке. Трекинг надо остановить здесь явно: этот путь
+  // идёт мимо moveToStatus (там та же остановка на переходе из InProgress),
+  // и без неё таймер продолжал тикать по уже выполненной задаче.
+  async function completeRow(task: Task) {
+    if (trackingId === task.id) {
+      await api.stopTaskTracking();
+      trackingId = null;
+    }
+    await taskStore.complete(task.id);
+    projectStore.load();
+  }
+
   async function toggleTracking(taskId: string) {
     if (trackingId === taskId) {
       await api.stopTaskTracking();
@@ -796,7 +808,7 @@
   >
     <button
       class="task-check"
-      onclick={async () => { await taskStore.complete(task.id); projectStore.load(); }}
+      onclick={() => completeRow(task)}
       title="Выполнить"
       aria-label="Выполнить задачу"
     ></button>

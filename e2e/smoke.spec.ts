@@ -105,6 +105,74 @@ test("задача: создание, редактирование, выполн
   await expect(page.locator(".task-list.trash", { hasText: "переименованная задача" })).toBeVisible();
 });
 
+// v0.9.24: завершение родителя каскадом закрывает его чеклист — раньше
+// в истории лежала Done-задача с невыполненными подзадачами.
+test("завершение задачи проставляет done всем её подзадачам", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+
+  await createTask(page, "уборка");
+  await expect(page.getByText("уборка")).toBeVisible();
+
+  await page.locator(".chip-sub").click();
+  const draft = page.getByPlaceholder("+ подзадача (Enter)");
+  await draft.fill("пропылесосить");
+  await draft.press("Enter");
+  await page.locator(".check-input").last().fill("вынести мусор");
+  await page.locator(".check-input").last().press("Enter");
+  // ни одна не отмечена вручную
+  await expect(page.locator(".chip-sub")).toHaveText(/0\/2/);
+
+  await page.locator(".task-check").click();
+  await expect(page.locator(".task-main", { hasText: "уборка" })).toHaveCount(0);
+
+  // в истории чеклист закрыт целиком, хотя вручную не отмечали ничего
+  await page.getByRole("button", { name: "История" }).click();
+  await page.locator(".history .task-main", { hasText: "уборка" }).click();
+  const modal = page.locator(".modal");
+  await expect(modal.locator(".check-row")).toHaveCount(2);
+  await expect(modal.locator(".check-row").nth(0).locator("input")).toBeChecked();
+  await expect(modal.locator(".check-row").nth(1).locator("input")).toBeChecked();
+});
+
+// v0.9.24: баг из боевой БД — повторяющаяся задача в статусе InProgress
+// после клика по ✓ оставалась InProgress на том же месте: визуально ничего
+// не происходило, закрыть прогон было невозможно.
+test("повторяющаяся задача в работе: ✓ закрывает прогон и возвращает в Todo", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+
+  await createTask(page, "зарядка");
+  await page.locator(".task-main", { hasText: "зарядка" }).click();
+  const modal = page.locator(".modal");
+  await modal.getByLabel("Повтор").selectOption("Daily");
+  await modal.getByRole("button", { name: "Сохранить", exact: true }).click();
+
+  // задача в работе — трекинг запущен, статус InProgress
+  await page.getByTitle("Начать трекинг").first().click();
+  await expect(page.getByTitle("Остановить трекинг").first()).toBeVisible();
+
+  // статус виден только на Доске: в Списке его не рендерят — именно поэтому
+  // баг и выглядел как «клик по ✓ вообще ничего не делает».
+  await page.locator(".seg button", { hasText: "Доска" }).click();
+  await expect(page.locator(".column", { hasText: "В работе" })
+    .locator(".board-card", { hasText: "зарядка" })).toHaveCount(1);
+  await page.locator(".seg button", { hasText: "Список" }).click();
+
+  await page.locator(".task-check").first().click();
+
+  // прогон закрыт: задача осталась в активных (повтор не уходит в историю),
+  // вернулась в Todo, таймер остановлен (раньше он продолжал тикать)
+  await expect(page.locator(".task-main", { hasText: "зарядка" })).toBeVisible();
+  await expect(page.getByTitle("Начать трекинг").first()).toBeVisible();
+
+  await page.locator(".seg button", { hasText: "Доска" }).click();
+  await expect(page.locator(".column", { hasText: "Todo" })
+    .locator(".board-card", { hasText: "зарядка" })).toHaveCount(1);
+  await expect(page.locator(".column", { hasText: "В работе" })
+    .locator(".board-card", { hasText: "зарядка" })).toHaveCount(0);
+});
+
 test("повтор по дням недели: выбор в модалке сохраняется и отображается индикатором", async ({ page }) => {
   await withMock(page);
   await page.goto("/");
@@ -257,8 +325,10 @@ test("история: клик по строке открывает read-only д
   const modal = page.locator(".modal");
   await expect(modal.getByText("поход в горы")).toBeVisible();
   await expect(modal.locator(".check-row")).toHaveCount(2);
+  // v0.9.24: завершение родителя каскадом закрывает весь чеклист — оба
+  // пункта отмечены, хотя вручную был отмечен только первый.
   await expect(modal.locator(".check-row").nth(0).locator("input")).toBeChecked();
-  await expect(modal.locator(".check-row").nth(1).locator("input")).not.toBeChecked();
+  await expect(modal.locator(".check-row").nth(1).locator("input")).toBeChecked();
   await expect(modal.getByText("Завершена")).toBeVisible();
 
   await modal.getByRole("button", { name: "Закрыть" }).click();

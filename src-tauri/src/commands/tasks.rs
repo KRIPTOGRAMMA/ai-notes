@@ -321,11 +321,19 @@ pub async fn complete_task_impl(pool: &SqlitePool, id: String) -> Result<Task, S
   // больше не уведомит об этой задаче (баг: флаги раньше не сбрасывались).
   let mut reset_notifications = false;
 
+  // Каскад на подзадачи. Для разовой задачи «выполнено» означает, что весь
+  // её чеклист закрыт — иначе в истории лежит Done-задача с невыполненными
+  // пунктами. Для повторяющейся всё наоборот: она не закрывается, а едет на
+  // следующий дедлайн, и чеклист — это план СЛЕДУЮЩЕГО прогона, поэтому его
+  // надо сбросить, а не проставить (иначе повтор приходит уже «выполненным»).
+  let subtasks_done: bool;
+
   match task.recurrence.next_occurrence(now) {
     None => {
       task.status = "Done".to_string();
       task.hidden = true;
       task.completed_at = Some(now);
+      subtasks_done = true;
     }
     Some(next_deadline) => {
       // Сдвиг scheduled_at на ту же дельту, что и дедлайн — для Weekdays это
@@ -336,11 +344,31 @@ pub async fn complete_task_impl(pool: &SqlitePool, id: String) -> Result<Task, S
       if let Some(scheduled) = &task.scheduled_at {
         task.scheduled_at = Some(*scheduled + delta);
       }
+      // Прогон закончен — задача возвращается в Todo. Без этого повторяющаяся
+      // задача, оставленная в InProgress (или в пользовательском статусе),
+      // после «выполнить» остаётся в том же статусе на том же месте списка:
+      // визуально клик по ✓ не делает ничего, задачу невозможно закрыть.
+      // Прогон закончен — задача возвращается в Todo. Без этого повторяющаяся
+      // задача, оставленная в InProgress (или в пользовательском статусе),
+      // после «выполнить» остаётся в том же статусе на том же месте списка:
+      // визуально клик по ✓ не делает ничего, задачу невозможно закрыть.
+      task.status = "Todo".to_string();
       reset_notifications = true;
+      subtasks_done = false;
     }
   }
 
   task.updated_at = now;
+
+  sqlx::query("UPDATE subtasks SET done = ? WHERE task_id = ?")
+    .bind(subtasks_done)
+    .bind(&id)
+    .execute(pool)
+    .await
+    .map_err(|e| e.to_string())?;
+  // into_task() подзадачи не грузит — читаем их после апдейта, чтобы
+  // возвращаемая задача отражала новое состояние чеклиста, а не пустой список.
+  task.subtasks = crate::commands::subtasks::get_subtasks_impl(pool, &id).await?;
 
   sqlx::query(
     "UPDATE tasks SET status=?, hidden=?, deadline=?, completed_at=?, updated_at=?, scheduled_at=?,
@@ -595,6 +623,71 @@ mod tests {
         assert_eq!(done.status, "Done");
         assert!(done.hidden);
         assert!(done.completed_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn complete_non_recurring_marks_subtasks_done() {
+        use crate::commands::subtasks::{add_subtask_impl, get_subtasks_impl, toggle_subtask_impl};
+        let pool = test_pool().await;
+        let t = create_task_impl(&pool, new_task("с чеклистом")).await.unwrap();
+        let a = add_subtask_impl(&pool, &t.id, "первый").await.unwrap();
+        add_subtask_impl(&pool, &t.id, "второй").await.unwrap();
+        // Один уже отмечен вручную — каскад не должен его снять
+        toggle_subtask_impl(&pool, &a.id).await.unwrap();
+
+        // Чужая задача рядом: каскад не должен задеть её подзадачи
+        let other = create_task_impl(&pool, new_task("соседняя")).await.unwrap();
+        add_subtask_impl(&pool, &other.id, "чужая").await.unwrap();
+
+        let done = complete_task_impl(&pool, t.id.clone()).await.unwrap();
+
+        assert!(get_subtasks_impl(&pool, &t.id).await.unwrap().iter().all(|s| s.done));
+        // Возвращаемая задача отражает новое состояние, а не пустой список
+        assert_eq!(done.subtasks.len(), 2);
+        assert!(done.subtasks.iter().all(|s| s.done));
+        assert!(!get_subtasks_impl(&pool, &other.id).await.unwrap()[0].done);
+    }
+
+    // Реальный баг из боевой БД (v0.9.24): повторяющаяся задача в статусе
+    // InProgress после «выполнить» оставалась InProgress — клик по ✓ визуально
+    // не делал ничего, задачу невозможно было закрыть.
+    #[tokio::test]
+    async fn complete_recurring_returns_to_todo_from_any_status() {
+        let pool = test_pool().await;
+        let mut ct = new_task("ежедневная в работе");
+        ct.recurrence = Some(Recurrence::Custom(1, RecurrenceUnit::Days));
+        let t = create_task_impl(&pool, ct).await.unwrap();
+        sqlx::query("UPDATE tasks SET status = 'InProgress' WHERE id = ?")
+            .bind(&t.id).execute(&pool).await.unwrap();
+
+        let done = complete_task_impl(&pool, t.id.clone()).await.unwrap();
+
+        assert_eq!(done.status, "Todo");
+        assert!(!done.hidden);
+        // и в БД, а не только в возвращённом объекте
+        let status: String = sqlx::query_scalar("SELECT status FROM tasks WHERE id = ?")
+            .bind(&t.id).fetch_one(&pool).await.unwrap();
+        assert_eq!(status, "Todo");
+    }
+
+    #[tokio::test]
+    async fn complete_recurring_resets_subtasks_for_next_run() {
+        use crate::commands::subtasks::{add_subtask_impl, get_subtasks_impl, toggle_subtask_impl};
+        let pool = test_pool().await;
+        let mut ct = new_task("ежедневная с чеклистом");
+        ct.recurrence = Some(Recurrence::Custom(1, RecurrenceUnit::Days));
+        let t = create_task_impl(&pool, ct).await.unwrap();
+        let a = add_subtask_impl(&pool, &t.id, "пункт").await.unwrap();
+        toggle_subtask_impl(&pool, &a.id).await.unwrap();
+        assert!(get_subtasks_impl(&pool, &t.id).await.unwrap()[0].done);
+
+        let done = complete_task_impl(&pool, t.id.clone()).await.unwrap();
+
+        // Задача уехала на следующий прогон — чеклист должен быть чистым,
+        // иначе повтор приходит уже «выполненным».
+        assert_eq!(done.status, "Todo");
+        assert!(get_subtasks_impl(&pool, &t.id).await.unwrap().iter().all(|s| !s.done));
+        assert!(done.subtasks.iter().all(|s| !s.done));
     }
 
     #[tokio::test]
@@ -910,3 +1003,4 @@ mod tests {
         assert!(history_cleanup_due(&pool).await, "прошло больше 24ч — пора снова");
     }
 }
+

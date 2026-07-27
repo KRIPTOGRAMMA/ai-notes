@@ -200,11 +200,23 @@
     complete_task: ({ id }) => {
       const t = findTask(id);
       if (!t) throw `Задача не найдена: ${id}`;
-      // как в Rust (recurrence None): Done + hidden — задача уходит в историю
-      t.status = "Done";
-      t.hidden = true;
-      t.completed_at = now();
+      // Как в Rust: ветка зависит от повтора (v0.9.24 — раньше мок считал
+      // любую задачу разовой и не воспроизводил баг с повторами).
+      const repeats = t.recurrence && t.recurrence !== "None";
       t.updated_at = now();
+      if (repeats) {
+        // Повтор не закрывается, а едет на следующий дедлайн и возвращается
+        // в Todo из любого статуса; чеклист — план следующего прогона, сброс.
+        t.status = "Todo";
+        t.hidden = false;
+        t.deadline = new Date(Date.now() + 864e5).toISOString();
+        for (const s of t.subtasks) s.done = false;
+      } else {
+        t.status = "Done";
+        t.hidden = true;
+        t.completed_at = now();
+        for (const s of t.subtasks) s.done = true;
+      }
       persist();
       return { ...t };
     },
