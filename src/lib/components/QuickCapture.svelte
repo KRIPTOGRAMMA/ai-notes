@@ -6,7 +6,7 @@
   import { categoryStore } from "../stores/categories.svelte";
   import { parseClipboardNote } from "../clipboardNote";
   import { applyCachedTheme } from "../theme";
-  import type { PinnedItem } from "../types";
+  import type { PinnedItem, Subtask } from "../types";
   import "../../app.css";
 
   // "pinned" (v0.9.33) — полноценный третий режим, в отличие от "clipboard":
@@ -20,6 +20,14 @@
   let pinnedTitle = $state("");
   let pinnedText = $state("");
   let saved = $state(false);
+  // v0.9.34: чек-лист закреплённой задачи. В отличие от TaskModal, где правки
+  // копятся и уезжают diff'ом по «Сохранить», здесь каждый клик уходит в БД
+  // сразу — слот открывают, чтобы отметить сделанное и закрыть, и потерять
+  // галочку на Escape было бы обиднее, чем в форме редактирования.
+  let subs = $state<Subtask[]>([]);
+  let newSub = $state("");
+  let subsBusy = $state(false);
+  const subsDone = $derived(subs.filter((s) => s.done).length);
   // v0.9.26: подсказка «текст взят из буфера» — только для режима clipboard,
   // снимается при первой же правке, чтобы не висеть над отредактированным
   // текстом. Сам "clipboard" в Mode не входит: это не третья вкладка, а
@@ -55,6 +63,8 @@
       pinned = await api.getPinnedItem().catch(() => null);
       pinnedTitle = pinned?.title ?? "";
       pinnedText = pinned?.text ?? "";
+      subs = pinned?.subtasks ?? [];
+      newSub = "";
       return;
     }
     if (m !== "clipboard") {
@@ -89,8 +99,10 @@
     noteTitle = ""; noteContent = "";
     errorMsg = null;
     fromClipboard = false;
-    // Сам слот (pinned) не сбрасываем: reset чистит черновики создания, а
-    // закреплённое — не черновик, оно живёт в БД и переживает закрытие окна.
+    // Сам слот (pinned) и его чек-лист не сбрасываем: reset чистит черновики
+    // создания, а закреплённое — не черновик, оно живёт в БД и переживает
+    // закрытие окна. Чистится только недописанная строка новой подзадачи.
+    newSub = "";
     saved = false;
   }
 
@@ -166,6 +178,58 @@
     }
   }
 
+  // Операции чек-листа сохраняются мгновенно. Общая для всех трёх схема:
+  // сначала запрос, потом правка локального списка — при ошибке на экране
+  // остаётся то, что реально лежит в БД, а не оптимистично отрисованное.
+  // Перечитывать слот целиком после каждого клика не нужно: заголовок и текст
+  // могут быть отредактированы прямо сейчас, и перечитывание затёрло бы правку.
+  async function toggleSub(s: Subtask) {
+    if (subsBusy) return;
+    subsBusy = true;
+    errorMsg = null;
+    try {
+      await api.toggleSubtask(s.id);
+      subs = subs.map((x) => (x.id === s.id ? { ...x, done: !x.done } : x));
+      await emit("task-updated");
+    } catch (e) {
+      errorMsg = typeof e === "string" ? e : (e as Error)?.message ?? "Не удалось отметить подзадачу";
+    } finally {
+      subsBusy = false;
+    }
+  }
+
+  async function addSub() {
+    const title = newSub.trim();
+    if (!title || !pinned || pinned.kind !== "task" || subsBusy) return;
+    subsBusy = true;
+    errorMsg = null;
+    try {
+      const created = await api.addSubtask(pinned.id, title);
+      subs = [...subs, created];
+      newSub = "";
+      await emit("task-updated");
+    } catch (e) {
+      errorMsg = typeof e === "string" ? e : (e as Error)?.message ?? "Не удалось добавить подзадачу";
+    } finally {
+      subsBusy = false;
+    }
+  }
+
+  async function removeSub(s: Subtask) {
+    if (subsBusy) return;
+    subsBusy = true;
+    errorMsg = null;
+    try {
+      await api.deleteSubtask(s.id);
+      subs = subs.filter((x) => x.id !== s.id);
+      await emit("task-updated");
+    } catch (e) {
+      errorMsg = typeof e === "string" ? e : (e as Error)?.message ?? "Не удалось удалить подзадачу";
+    } finally {
+      subsBusy = false;
+    }
+  }
+
   function submit() {
     if (mode === "pinned") savePinned();
     else if (mode === "task") createTask();
@@ -218,14 +282,40 @@
   {#if mode === "pinned"}
     {#if pinned}
       <div class="pin-head">
-        <span class="pin-badge">📌 {pinned.kind === "task" ? "Задача" : "Заметка"}</span>
+        <span class="pin-badge">⚡ {pinned.kind === "task" ? "Задача" : "Заметка"}</span>
         {#if saved}<span class="pin-saved">Сохранено</span>{/if}
       </div>
       <!-- svelte-ignore a11y_autofocus -->
       <input class="pin-title" bind:value={pinnedTitle} placeholder="Заголовок..."
         oninput={() => saved = false} />
       <textarea class="pin-text" bind:value={pinnedText} placeholder="Текст... (Ctrl+Enter — сохранить)"
-        rows="6" autofocus oninput={() => saved = false}></textarea>
+        rows={pinned.kind === "task" ? 3 : 6} autofocus oninput={() => saved = false}></textarea>
+
+      <!-- Чек-лист — только у задачи: у заметки подзадач не бывает. Правки
+           здесь уходят в БД сразу, поэтому кнопка «Сохранить» ниже их не
+           касается — она про заголовок и текст. -->
+      {#if pinned.kind === "task"}
+        <div class="subs">
+          <div class="subs-head">
+            <span class="subs-label">Подзадачи</span>
+            {#if subs.length}<span class="subs-count">{subsDone} / {subs.length}</span>{/if}
+          </div>
+          {#each subs as s (s.id)}
+            <div class="sub-row" class:done={s.done}>
+              <input type="checkbox" checked={s.done} disabled={subsBusy}
+                onchange={() => toggleSub(s)} aria-label={s.title} />
+              <span class="sub-title">{s.title}</span>
+              <button class="sub-del" onclick={() => removeSub(s)} disabled={subsBusy}
+                title="Удалить подзадачу" aria-label="Удалить подзадачу {s.title}">✕</button>
+            </div>
+          {/each}
+          <input class="sub-new" bind:value={newSub} placeholder="+ подзадача (Enter)"
+            disabled={subsBusy}
+            onkeydown={(e) => {
+              if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); addSub(); }
+            }} />
+        </div>
+      {/if}
 
       <div class="buttons">
         <button class="btn-ghost" onclick={cancel}>Закрыть</button>
@@ -237,10 +327,10 @@
       <!-- Пустой слот — не ошибка: пользователь ещё ничего не закреплял, либо
            закреплённое удалено. Объясняем, как закрепить, вместо пустого окна. -->
       <div class="pin-empty">
-        <p class="pin-empty-title">📌 Слот пуст</p>
+        <p class="pin-empty-title">⚡ Слот пуст</p>
         <p class="pin-empty-hint">
-          Закрепите задачу или заметку кнопкой 📌 в списке — этот хоткей будет
-          открывать её сразу на правку.
+          Закрепите задачу или заметку кнопкой-молнией в списке — этот хоткей
+          будет открывать её сразу на правку.
         </p>
       </div>
       <div class="buttons">
@@ -366,6 +456,78 @@
     resize: none;
     font-size: 13px;
     border-left: 2px solid var(--accent);
+  }
+  /* v0.9.34: чек-лист в слоте. Отделён от текста заголовком с счётчиком —
+     без него две группы полей сливаются в одну простыню. */
+  .subs {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-height: 0;
+    overflow-y: auto;
+  }
+  .subs-head {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 2px;
+  }
+  .subs-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted, #888);
+  }
+  .subs-count {
+    font-size: 11px;
+    color: var(--text-muted, #888);
+    margin-left: auto;
+  }
+  .sub-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+  }
+  .sub-row input[type="checkbox"] {
+    flex-shrink: 0;
+    margin: 0;
+    cursor: pointer;
+  }
+  .sub-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .sub-row.done .sub-title {
+    text-decoration: line-through;
+    color: var(--text-muted, #888);
+  }
+  /* Крестик проявляется по наведению на строку: в списке из пяти подзадач
+     пять постоянных крестиков читаются как основное действие, хотя удаление
+     здесь — редкое. */
+  .sub-del {
+    flex-shrink: 0;
+    padding: 0 4px;
+    border: none;
+    background: transparent;
+    color: var(--text-muted, #888);
+    cursor: pointer;
+    opacity: 0;
+    font-size: 12px;
+    line-height: 1;
+  }
+  .sub-row:hover .sub-del,
+  .sub-del:focus-visible {
+    opacity: 1;
+  }
+  .sub-del:hover {
+    color: var(--danger);
+  }
+  .sub-new {
+    font-size: 13px;
+    margin-top: 2px;
   }
   .pin-empty {
     flex: 1;

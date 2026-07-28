@@ -146,10 +146,11 @@
       if ((kind !== "task" && kind !== "note") || !id) return null;
       if (kind === "task") {
         const t = db.tasks.find((t) => t.id === id && !t.deleted_at);
-        return t ? { kind, id, title: t.title, text: t.description ?? "" } : null;
+        // v0.9.34: чек-лист едет вместе со слотом; у заметки он всегда пуст.
+        return t ? { kind, id, title: t.title, text: t.description ?? "", subtasks: t.subtasks ?? [] } : null;
       }
       const n = db.notes.find((n) => n.id === id);
-      return n ? { kind, id, title: n.title, text: n.content ?? "" } : null;
+      return n ? { kind, id, title: n.title, text: n.content ?? "", subtasks: [] } : null;
     },
     set_pinned_item: ({ kind, id }) => {
       const valid = (kind === "task" || kind === "note") && id;

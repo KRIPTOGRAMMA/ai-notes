@@ -7,18 +7,25 @@
 // которое уже есть.
 use crate::error::AppResult;
 use crate::commands::settings::{get_setting, set_setting};
+use crate::commands::subtasks::get_subtasks_impl;
+use crate::core::task::Subtask;
 use serde::Serialize;
 use sqlx::SqlitePool;
 use tauri::State;
 
 // Что лежит в слоте. `text` — description для задачи и content для заметки:
 // окно правит только текст, поэтому одно поле вместо двух разных.
+//
+// v0.9.34: у задачи вместе с текстом едет её чек-лист. У заметки он всегда
+// пуст — подзадачи есть только у задач, отдельного поля-заглушки заводить
+// не за чем: пустой Vec читается одинаково и там, и там.
 #[derive(Debug, Serialize, PartialEq)]
 pub struct PinnedItem {
     pub kind: String, // "task" | "note"
     pub id: String,
     pub title: String,
     pub text: String,
+    pub subtasks: Vec<Subtask>,
 }
 
 // Нормализация вида. Чужая строка — не ошибка, а пустой слот: значение может
@@ -63,11 +70,27 @@ pub async fn get_pinned_impl(pool: &SqlitePool) -> AppResult<Option<PinnedItem>>
             .await?
     };
 
-    Ok(row.map(|(title, text)| PinnedItem {
+    let (title, text) = match row {
+        Some(r) => r,
+        None => return Ok(None),
+    };
+
+    // Чек-лист берётся тем же запросом, что и везде в приложении
+    // (`get_subtasks_impl`), а не своим SELECT: порядок подзадач задаётся в
+    // одном месте, иначе слот однажды показал бы их не в том порядке, что
+    // список задач.
+    let subtasks = if kind == "task" {
+        get_subtasks_impl(pool, &id).await?
+    } else {
+        vec![]
+    };
+
+    Ok(Some(PinnedItem {
         kind,
         id,
         title,
         text: text.unwrap_or_default(),
+        subtasks,
     }))
 }
 
@@ -180,6 +203,64 @@ mod tests {
         assert_eq!(got.id, task.id);
         assert_eq!(got.title, "Дописать главу");
         assert_eq!(got.text, "план на вечер");
+        // Задача без чек-листа — пустой список, а не отсутствие поля.
+        assert!(got.subtasks.is_empty());
+    }
+
+    // v0.9.34: чек-лист приезжает вместе со слотом — иначе окно правки знало бы
+    // о задаче меньше, чем список задач, и подзадачи пришлось бы догружать
+    // вторым запросом уже после отрисовки.
+    #[tokio::test]
+    async fn pinned_task_carries_its_subtasks_in_order() {
+        let pool = test_pool().await;
+        let task = crate::commands::tasks::create_task_impl(&pool, new_task("Отчёт", "текст"))
+            .await
+            .unwrap();
+        crate::commands::subtasks::add_subtask_impl(&pool, &task.id, "собрать цифры")
+            .await
+            .unwrap();
+        let second =
+            crate::commands::subtasks::add_subtask_impl(&pool, &task.id, "отправить")
+                .await
+                .unwrap();
+        crate::commands::subtasks::toggle_subtask_impl(&pool, &second.id)
+            .await
+            .unwrap();
+
+        // Чужая задача со своим чек-листом — её подзадачи не должны протечь в слот.
+        let other = crate::commands::tasks::create_task_impl(&pool, new_task("Другая", ""))
+            .await
+            .unwrap();
+        crate::commands::subtasks::add_subtask_impl(&pool, &other.id, "не сюда")
+            .await
+            .unwrap();
+
+        set_pinned_impl(&pool, Some("task".into()), Some(task.id.clone()))
+            .await
+            .unwrap();
+
+        let got = get_pinned_impl(&pool).await.unwrap().unwrap();
+        let titles: Vec<&str> = got.subtasks.iter().map(|s| s.title.as_str()).collect();
+        assert_eq!(titles, vec!["собрать цифры", "отправить"]);
+        assert!(!got.subtasks[0].done);
+        assert!(got.subtasks[1].done);
+    }
+
+    // У заметки подзадач не бывает: поле есть, но всегда пустое. Проверяется,
+    // чтобы фронт мог рисовать чек-лист по одному и тому же полю без ветвления
+    // на «а есть ли оно вообще».
+    #[tokio::test]
+    async fn pinned_note_has_no_subtasks() {
+        let pool = test_pool().await;
+        let note = crate::commands::notes::create_note_impl(&pool, new_note("Заметка", "текст"))
+            .await
+            .unwrap();
+        set_pinned_impl(&pool, Some("note".into()), Some(note.id.clone()))
+            .await
+            .unwrap();
+
+        let got = get_pinned_impl(&pool).await.unwrap().unwrap();
+        assert!(got.subtasks.is_empty());
     }
 
     // Задача в Корзине не должна открываться хоткеем: пользователь её выбросил.

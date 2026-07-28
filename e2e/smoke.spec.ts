@@ -2760,7 +2760,7 @@ test("быстрый слот: открывает закреплённую за�
   await page.goto("/quick-task.html");
 
   // видно, что правится именно задача, а не создаётся новая
-  await expect(page.locator(".pin-badge")).toHaveText("📌 Задача");
+  await expect(page.locator(".pin-badge")).toHaveText("⚡ Задача");
   await expect(page.locator(".pin-title")).toHaveValue("Дописать главу");
   await expect(page.locator(".pin-text")).toHaveValue("план на вечер");
   // вкладок «Задача/Заметка» здесь нет — это не форма создания
@@ -2841,4 +2841,87 @@ test("быстрый слот: молния в заметках не путае�
   await row.getByTitle("Убрать из быстрого слота").click();
   const after = await page.evaluate(() => JSON.parse(localStorage.getItem("__mock_db")!));
   expect(after.pinnedId).toBe("");
+});
+
+// v0.9.34: чек-лист в слоте. Главное отличие от TaskModal — правки уходят в
+// БД сразу по клику, а не по «Сохранить»: слот открывают, чтобы отметить
+// сделанное и закрыть, и галочка не должна теряться на Escape.
+test("быстрый слот: чек-лист задачи виден, отметка уходит в БД сразу, без «Сохранить»", async ({ page }) => {
+  await seedDb(page, {
+    tasks: [{
+      id: "t1", title: "Отчёт за квартал", description: "текст",
+      status: "Todo", priority: "Medium", category: "Work", deadline: null,
+      tags: [], recurrence: null, hidden: false, sort_order: 1,
+      subtasks: [
+        { id: "s1", task_id: "t1", title: "собрать цифры", done: true, position: 0 },
+        { id: "s2", task_id: "t1", title: "отправить", done: false, position: 1 },
+      ],
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    }],
+    notes: [], projects: [],
+    quickMode: "pinned", pinnedKind: "task", pinnedId: "t1",
+  });
+  await withMock(page);
+  await page.goto("/quick-task.html");
+
+  await expect(page.locator(".sub-row")).toHaveCount(2);
+  await expect(page.locator(".subs-count")).toHaveText("1 / 2");
+  // выполненная подзадача отличается визуально, а не только чекбоксом
+  await expect(page.locator(".sub-row").first()).toHaveClass(/done/);
+
+  // отметка — без нажатия «Сохранить»
+  await page.locator(".sub-row").nth(1).locator("input[type=checkbox]").check();
+  await expect(page.locator(".subs-count")).toHaveText("2 / 2");
+
+  const done = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("__mock_db")!).tasks[0].subtasks.map((s: any) => s.done));
+  expect(done).toEqual([true, true]);
+});
+
+test("быстрый слот: подзадача добавляется по Enter и удаляется крестиком", async ({ page }) => {
+  await seedDb(page, {
+    tasks: [{
+      id: "t1", title: "Отчёт", description: "",
+      status: "Todo", priority: "Medium", category: "Work", deadline: null,
+      tags: [], recurrence: null, hidden: false, sort_order: 1,
+      subtasks: [{ id: "s1", task_id: "t1", title: "старая", done: false, position: 0 }],
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    }],
+    notes: [], projects: [],
+    quickMode: "pinned", pinnedKind: "task", pinnedId: "t1",
+  });
+  await withMock(page);
+  await page.goto("/quick-task.html");
+
+  // Enter в поле подзадачи добавляет строку, а НЕ сохраняет слот целиком
+  await page.locator(".sub-new").fill("сверить с бухгалтерией");
+  await page.locator(".sub-new").press("Enter");
+  await expect(page.locator(".sub-row")).toHaveCount(2);
+  await expect(page.locator(".sub-new")).toHaveValue("");
+  await expect(page.locator(".pin-saved")).toHaveCount(0);
+
+  await page.locator(".sub-row").first().locator(".sub-del").click();
+  await expect(page.locator(".sub-row")).toHaveCount(1);
+
+  const titles = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("__mock_db")!).tasks[0].subtasks.map((s: any) => s.title));
+  expect(titles).toEqual(["сверить с бухгалтерией"]);
+});
+
+// Чек-лист есть только у задач — у заметки его быть не должно ни в каком виде.
+test("быстрый слот: у закреплённой заметки чек-листа нет", async ({ page }) => {
+  await seedDb(page, {
+    tasks: [], projects: [],
+    notes: [{
+      id: "n1", title: "Черновик", content: "текст", tags: [], pinned: false,
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    }],
+    quickMode: "pinned", pinnedKind: "note", pinnedId: "n1",
+  });
+  await withMock(page);
+  await page.goto("/quick-task.html");
+
+  await expect(page.locator(".pin-badge")).toHaveText("⚡ Заметка");
+  await expect(page.locator(".subs")).toHaveCount(0);
+  await expect(page.locator(".sub-new")).toHaveCount(0);
 });
