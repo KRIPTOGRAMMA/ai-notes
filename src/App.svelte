@@ -36,6 +36,8 @@
   let showOnboarding = $state(false);
   let isWayland = $state(false);
   let keybinds: Keybinds = $state({});
+  // Идёт запись новой комбинации в Настройках — хоткеи временно не выполняются.
+  let keybindRecording = $state(false);
 
   // Тема: сначала из кеша (анти-мигание), затем — источник истины из БД.
   applyCachedTheme();
@@ -57,6 +59,15 @@
       keybinds = parseKeybinds((e as CustomEvent<string>).detail ?? "");
     };
     window.addEventListener("keybinds-saved", onKeybindsSaved);
+    // v0.9.35: пока в Настройках записывают комбинацию, приложение не должно
+    // выполнять её как хоткей. Иначе запись Ctrl+K открывала бы командную
+    // палитру поверх поля записи и уводила фокус — комбинацию, совпадающую с
+    // существующим хоткеем, стало бы невозможно даже ввести, чтобы увидеть
+    // сообщение о конфликте.
+    const onRecording = (e: Event) => {
+      keybindRecording = (e as CustomEvent<boolean>).detail === true;
+    };
+    window.addEventListener("keybind-recording", onRecording);
     try {
       isWayland = await api.isWayland();
       loadedSettings = await api.getSettings();
@@ -127,26 +138,14 @@
   onmousemove={pingActivity}
   onkeydown={(e) => {
     pingActivity();
+    if (keybindRecording) return;
     if (!e.ctrlKey) return;
-    // Ctrl+Shift+N/M — быстрая задача/заметка: не переназначаемы в v0.8.9,
-    // держатся в синхроне с OS-уровневым global-shortcut (см. lib.rs).
-    if (e.shiftKey && e.code === "KeyN") {
-      e.preventDefault();
-      api.openQuickCapture("task").catch(() => {});
-      return;
-    }
-    if (e.shiftKey && e.code === "KeyM") {
-      e.preventDefault();
-      api.openQuickCapture("note").catch(() => {});
-      return;
-    }
-    // Ctrl+Shift+B — заметка из буфера обмена (v0.9.26), там же в lib.rs.
-    // Не V — он занят «вставить без форматирования» почти везде.
-    if (e.shiftKey && e.code === "KeyB") {
-      e.preventDefault();
-      api.openQuickCapture("clipboard").catch(() => {});
-      return;
-    }
+    // v0.9.35: дубликаты глобальных комбинаций отсюда убраны. Раньше здесь
+    // лежали захардкоженные Ctrl+Shift+N/M/B — вторая копия значений, которые
+    // теперь переназначаются в Настройках (и Ctrl+Shift+J из v0.9.33 сюда
+    // так и не доехал — ровно та ошибка, которую копия и порождает).
+    // Глобальные хоткеи регистрирует ОС (см. register_global_hotkeys в
+    // lib.rs); внутри окна они срабатывают через тот же системный механизм.
     if (comboMatches(comboFor(keybinds, "palette"), e)) {
       e.preventDefault();
       showSearch = true;

@@ -47,6 +47,21 @@ fn get_window_tracking(state: tauri::State<'_, WindowTracking>) -> Option<&'stat
     state.0
 }
 
+// v0.9.35: применить сохранённые глобальные хоткеи без перезапуска.
+// Возвращает список комбинаций, которые не удалось зарегистрировать (заняты
+// системой или не разобрались) — фронт показывает их пользователю: молчаливо
+// не сработавший глобальный хоткей выглядит как поломка приложения.
+#[tauri::command]
+async fn apply_global_hotkeys(
+    app: tauri::AppHandle,
+    pool: tauri::State<'_, sqlx::SqlitePool>,
+) -> crate::error::AppResult<Vec<String>> {
+    let value = commands::settings::get_setting(pool.inner(), "global_keybinds")
+        .await
+        .unwrap_or_default();
+    Ok(register_global_hotkeys(&app, &value))
+}
+
 fn normalize_quick_mode(mode: &str) -> &'static str {
     match mode {
         "note" => "note",
@@ -59,6 +74,46 @@ fn normalize_quick_mode(mode: &str) -> &'static str {
         "pinned" => "pinned",
         _ => "task",
     }
+}
+
+// v0.9.35: (пере)регистрация глобальных хоткеев по текущим настройкам.
+//
+// Вызывается при старте и после сохранения настроек, поэтому первым делом
+// снимает всё ранее зарегистрированное: иначе старая комбинация продолжила бы
+// работать до перезапуска, и пользователь получил бы две живые одновременно.
+//
+// Каждая комбинация регистрируется отдельным вызовом, а не пачкой: занятая
+// системой комбинация роняет только себя, остальные три остаются рабочими.
+// Пачкой (`on_shortcuts`) одна ошибка отменила бы все.
+fn register_global_hotkeys(app: &tauri::AppHandle, global_keybinds: &str) -> Vec<String> {
+    use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
+
+    let _ = app.global_shortcut().unregister_all();
+
+    let overrides = commands::hotkeys::parse_overrides(global_keybinds);
+    let mut failed = Vec::new();
+
+    for (combo, mode) in commands::hotkeys::resolve_bindings(&overrides) {
+        let shortcut = match combo.parse::<Shortcut>() {
+            Ok(s) => s,
+            Err(_) => {
+                failed.push(combo);
+                continue;
+            }
+        };
+        let mode = mode.to_string();
+        let res = app.global_shortcut().on_shortcut(shortcut, move |app, _, event| {
+            if event.state == ShortcutState::Pressed {
+                show_quick_capture(app, &mode);
+            }
+        });
+        if res.is_err() {
+            // Чаще всего — комбинация уже занята другим приложением или
+            // композитором. Не ошибка старта: сообщаем и живём дальше.
+            failed.push(combo);
+        }
+    }
+    failed
 }
 
 // Единый путь открытия окна быстрого ввода: фиксируем режим, оповещаем окно
@@ -262,6 +317,9 @@ pub fn run() {
                         commands::statuses::create_status,
                         commands::statuses::update_status,
                         commands::statuses::delete_status,
+                        apply_global_hotkeys,
+                        commands::hotkeys::list_global_actions,
+                        commands::hotkeys::validate_global_combo,
                         commands::pinned::get_pinned_item,
                         commands::pinned::set_pinned_item,
                         commands::pomodoro::get_pomodoro_state,
@@ -487,42 +545,10 @@ pub fn run() {
                         show_quick_capture(&app.app_handle(), mode);
                     }
 
-                    // Глобальные хоткеи: Ctrl+Shift+N — задача, Ctrl+Shift+M — заметка,
-                    // Ctrl+Shift+B — заметка из буфера обмена (v0.9.26),
-                    // Ctrl+Shift+J — правка закреплённой задачи/заметки (v0.9.33).
-                    // Не V: Ctrl+Shift+V почти везде занят «вставить без
-                    // форматирования», перехват сломал бы его в терминале и
-                    // браузере. B — от «буфер».
-                    use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
-                    let task_shortcut = "Ctrl+Shift+N".parse::<Shortcut>().unwrap();
-                    let note_shortcut = "Ctrl+Shift+M".parse::<Shortcut>().unwrap();
-                    let clip_shortcut = "Ctrl+Shift+B".parse::<Shortcut>().unwrap();
-                    // v0.9.33: J — от «jump», к закреплённому. Свободна: N/M/B
-                    // уже заняты своими режимами, а J нигде в системе не
-                    // перехватывается так же массово, как V.
-                    let pinned_shortcut = "Ctrl+Shift+J".parse::<Shortcut>().unwrap();
-                    let note_id = note_shortcut.id();
-                    let clip_id = clip_shortcut.id();
-                    let pinned_id = pinned_shortcut.id();
-
-                    app.global_shortcut().on_shortcuts(
-                        [task_shortcut, note_shortcut, clip_shortcut, pinned_shortcut],
-                        move |app, shortcut, event| {
-                            if event.state == ShortcutState::Pressed {
-                                let id = shortcut.id();
-                                let mode = if id == pinned_id {
-                                    "pinned"
-                                } else if id == clip_id {
-                                    "clipboard"
-                                } else if id == note_id {
-                                    "note"
-                                } else {
-                                    "task"
-                                };
-                                show_quick_capture(app, mode);
-                            }
-                        }
-                    )?;
+                    // v0.9.35: регистрация глобальных хоткеев переехала ниже, за инициализацию
+                    // пула БД — комбинации стали переназначаемыми и читаются из
+                    // настроек, а на этой стадии setup пула ещё нет. Дефолты и
+                    // список действий — в commands/hotkeys.rs.
 
                     Ok(())
                 })
@@ -564,6 +590,13 @@ pub fn run() {
             // Пресет паузы хранится отдельно (quiet_preset) — таймерная пауза
             // после перезапуска восстанавливает и галочку, и подпись с остатком.
             update_mode_checks(&app.app_handle(), &settings.work_mode);
+
+            // Глобальные хоткеи — здесь, а не в setup: комбинации лежат в
+            // настройках, а пул появляется только сейчас (v0.9.35).
+            let failed = register_global_hotkeys(&app.app_handle(), &settings.global_keybinds);
+            if !failed.is_empty() {
+                eprintln!("[hotkeys] не удалось зарегистрировать: {}", failed.join(", "));
+            }
             let quiet_preset = commands::settings::get_setting(&pool, "quiet_preset")
                 .await
                 .unwrap_or_default();

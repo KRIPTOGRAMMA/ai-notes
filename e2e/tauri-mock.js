@@ -44,6 +44,7 @@
     morning_digest_time: "",
     show_subtasks_expanded: true,
     keybinds: "",
+    global_keybinds: "",
     focus_mode_auto: true,
     track_domains: false,
     // v0.9.32: в e2e язык прибит к русскому намеренно. Тесты ищут элементы
@@ -152,6 +153,23 @@
       const n = db.notes.find((n) => n.id === id);
       return n ? { kind, id, title: n.title, text: n.content ?? "", subtasks: [] } : null;
     },
+    // v0.9.35: глобальные хоткеи. Список действий зеркалит commands/hotkeys.rs
+    // (он же источник правды для регистрации в ОС).
+    list_global_actions: () => [
+      { id: "quick_task", label: "Быстрая задача", default_combo: "Ctrl+Shift+KeyN" },
+      { id: "quick_note", label: "Быстрая заметка", default_combo: "Ctrl+Shift+KeyM" },
+      { id: "quick_clip", label: "Заметка из буфера", default_combo: "Ctrl+Shift+KeyB" },
+      { id: "quick_pinned", label: "Быстрый слот", default_combo: "Ctrl+Shift+KeyJ" },
+    ],
+    // Зеркалит validate_combo: пусто и одиночная клавиша без модификатора —
+    // отказ (иначе хоткей перехватил бы букву во всей системе).
+    validate_global_combo: ({ combo }) => {
+      const c = (combo ?? "").trim();
+      if (!c) throw "Пустая комбинация";
+      if (!c.includes("+")) throw "Нужен хотя бы один модификатор (Ctrl, Shift, Alt)";
+    },
+    // В моке регистрировать нечего: ОС нет. Пустой список = всё применилось.
+    apply_global_hotkeys: () => [],
     set_pinned_item: ({ kind, id }) => {
       const valid = (kind === "task" || kind === "note") && id;
       db.pinnedKind = valid ? kind : "";

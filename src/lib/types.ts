@@ -211,10 +211,21 @@ export interface AppSettings {
   morning_digest_time: string; // "HH:MM", пусто = выкл
   show_subtasks_expanded: boolean; // подзадачи в списке видны без клика (v0.8.3)
   keybinds: string; // JSON {action_id: combo} (v0.8.9); отсутствие ключа = дефолт действия
+  // v0.9.35: то же для глобальных хоткеев быстрого ввода. Отдельным ключом:
+  // у них другой механизм (регистрация в ОС) и комбинация может не примениться.
+  global_keybinds: string;
   focus_mode_auto: boolean; // авто-пауза уведомлений на время помодоро-работы/тайм-блока (v0.9.12)
   track_domains: boolean; // разбивка браузерного времени по сайтам; выкл по умолчанию (v0.9.31)
   language: string; // "ru" | "en"; пусто — определить по системной локали (v0.9.32)
   history_cleanup_months: number; // выполненные старше N мес. → авто-Корзина; 0 — выкл (v0.9.19)
+}
+
+// v0.9.35: действие, запускаемое глобальным хоткеем. Список отдаёт бэкенд
+// (list_global_actions) — он же их регистрирует, и разъехаться копии не должны.
+export interface GlobalAction {
+  id: string;
+  label: string;
+  default_combo: string;
 }
 
 export interface AppCategoryRule {

@@ -2925,3 +2925,121 @@ test("быстрый слот: у закреплённой заметки чек
   await expect(page.locator(".subs")).toHaveCount(0);
   await expect(page.locator(".sub-new")).toHaveCount(0);
 });
+
+// v0.9.35: глобальные хоткеи стали переназначаемыми. До этой версии вкладка
+// «Хоткеи» показывала только локальные и текстом сообщала, что глобальные
+// менять нельзя.
+test("настройки: глобальные хоткеи переназначаются и сохраняются", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Настройки" }).click();
+  await page.locator(".settings-tab", { hasText: "Хоткеи" }).click();
+  // Не hasText: "Хоткеи" — так же называется тема в Справке (v0.9.29).
+  const section = page.locator("section").filter({ has: page.locator("h3.section-title", { hasText: "Хоткеи" }) });
+
+  // Обе группы на одной вкладке, глобальные — первыми
+  await expect(section.locator(".keybind-group").first()).toContainText("Глобальные");
+  const slotRow = section.locator(".keybind-row", { hasText: "Быстрый слот" });
+  await expect(slotRow.locator(".keybind-combo")).toHaveText("Ctrl+Shift+J");
+
+  await slotRow.locator(".keybind-combo").click();
+  await page.keyboard.press("Control+Alt+P");
+  await expect(slotRow.locator(".keybind-combo")).toHaveText("Ctrl+Alt+P");
+
+  await page.getByRole("button", { name: "Сохранить", exact: true }).click();
+
+  const saved = await page.evaluate(() =>
+    JSON.parse(JSON.parse(localStorage.getItem("__mock_db")!).settings.global_keybinds));
+  expect(saved.quick_pinned).toBe("Ctrl+Alt+KeyP");
+
+  // переживает перезагрузку
+  await page.reload();
+  await page.getByRole("button", { name: "Настройки" }).click();
+  await page.locator(".settings-tab", { hasText: "Хоткеи" }).click();
+  await expect(
+    page.locator("section", { hasText: "Хоткеи" })
+      .locator(".keybind-row", { hasText: "Быстрый слот" })
+      .locator(".keybind-combo")
+  ).toHaveText("Ctrl+Alt+P");
+});
+
+// Глобальный хоткей перехватывает клавиши раньше окна, поэтому совпадение с
+// локальным молча убило бы локальный. Проверяем оба направления конфликта.
+test("настройки: глобальный хоткей не даёт занять комбинацию другого действия", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Настройки" }).click();
+  await page.locator(".settings-tab", { hasText: "Хоткеи" }).click();
+  // Не hasText: "Хоткеи" — так же называется тема в Справке (v0.9.29).
+  const section = page.locator("section").filter({ has: page.locator("h3.section-title", { hasText: "Хоткеи" }) });
+  const slotRow = section.locator(".keybind-row", { hasText: "Быстрый слот" });
+
+  // конфликт с другим ГЛОБАЛЬНЫМ действием
+  await slotRow.locator(".keybind-combo").click();
+  await page.keyboard.press("Control+Shift+N");
+  await expect(section).toContainText("Уже занято: Быстрая задача");
+  // поле осталось в режиме записи — можно сразу ввести другую комбинацию
+  await expect(slotRow.locator("input.keybind-combo.recording")).toBeVisible();
+
+  await page.keyboard.press("Escape");
+
+  // конфликт с ЛОКАЛЬНЫМ хоткеем (Ctrl+K — командная палитра)
+  await slotRow.locator(".keybind-combo").click();
+  await page.keyboard.press("Control+K");
+  await expect(section).toContainText("Занято хоткеем в приложении");
+  // проверка комбинации асинхронная (её делает бэкенд) — дожидаемся, что поле
+  // всё ещё пишет, прежде чем выходить из записи
+  await expect(slotRow.locator("input.keybind-combo.recording")).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  // комбинация не изменилась
+  await expect(slotRow.locator(".keybind-combo")).toHaveText("Ctrl+Shift+J");
+});
+
+// Одинокая клавиша без модификатора перехватила бы букву во всей системе —
+// проверку делает бэкенд (global-hotkey), а не свои правила во фронте.
+test("настройки: глобальный хоткей требует модификатор", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Настройки" }).click();
+  await page.locator(".settings-tab", { hasText: "Хоткеи" }).click();
+  // Не hasText: "Хоткеи" — так же называется тема в Справке (v0.9.29).
+  const section = page.locator("section").filter({ has: page.locator("h3.section-title", { hasText: "Хоткеи" }) });
+  const taskRow = section.locator(".keybind-row", { hasText: "Быстрая задача" });
+
+  await taskRow.locator(".keybind-combo").click();
+  await page.keyboard.press("KeyQ");
+  await expect(section).toContainText("Нужен хотя бы один модификатор");
+
+  await page.keyboard.press("Escape");
+  await expect(taskRow.locator(".keybind-combo")).toHaveText("Ctrl+Shift+N");
+});
+
+// Баг, найденный при работе над v0.9.35: пока идёт запись комбинации,
+// App.svelte выполнял её как хоткей — запись Ctrl+K открывала командную
+// палитру поверх поля и уводила фокус, из-за чего занятую комбинацию нельзя
+// было даже ввести, чтобы увидеть сообщение о конфликте.
+test("настройки: во время записи хоткея приложение не выполняет комбинацию", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Настройки" }).click();
+  await page.locator(".settings-tab", { hasText: "Хоткеи" }).click();
+  const section = page.locator("section").filter({ has: page.locator("h3.section-title", { hasText: "Хоткеи" }) });
+  const dailyRow = section.locator(".keybind-row", { hasText: "Заметка дня" });
+
+  await dailyRow.locator(".keybind-combo").click();
+  await page.keyboard.press("Control+K");
+
+  // палитра не открылась и фокус остался в поле записи
+  await expect(page.locator(".search-input")).toHaveCount(0);
+  await expect(dailyRow.locator("input.keybind-combo.recording")).toBeFocused();
+
+  // Escape выходит из записи, комбинация не изменилась (конфликт с палитрой
+  // показан, но ничего не сохранено).
+  await page.keyboard.press("Escape");
+  await expect(dailyRow.locator("button.keybind-combo")).toHaveText("Ctrl+D");
+});

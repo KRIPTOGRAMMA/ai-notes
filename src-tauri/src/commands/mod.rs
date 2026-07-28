@@ -19,3 +19,4 @@ pub mod smart_lists;
 pub mod notifications;
 pub mod statuses;
 pub mod pinned;
+pub mod hotkeys;

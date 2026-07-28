@@ -4,7 +4,7 @@
   import { api } from "../lib/api/tauri";
   import { categoryStore } from "../lib/stores/categories.svelte";
   import { statusStore } from "../lib/stores/statuses.svelte";
-  import type { AppSettings, AppCategoryRule, AppLimit } from "../lib/types";
+  import type { AppSettings, AppCategoryRule, AppLimit, GlobalAction } from "../lib/types";
   import { applyTheme } from "../lib/theme";
   import ModelDownloader from "../lib/components/ModelDownloader.svelte";
   import Icon from "../lib/components/Icon.svelte";
@@ -88,6 +88,7 @@
     morning_digest_time: "",
     show_subtasks_expanded: true,
     keybinds: "",
+    global_keybinds: "",
     focus_mode_auto: true,
     track_domains: false,
     language: "",
@@ -198,9 +199,12 @@
         parseLimits(settings.app_limits).map(l => [l.category, l.daily_mins])
       );
       keybinds = parseKeybinds(settings.keybinds);
+      globalBinds = parseKeybinds(settings.global_keybinds);
     } catch (e) {
       error = String(e);
     }
+    // Список глобальных действий — с бэкенда: он их и регистрирует.
+    globalActions = await api.listGlobalActions().catch(() => []);
     trackingMode = await api.getTrackingMode().catch(() => null);
     windowTracking = await api.getWindowTracking().catch(() => null);
     // Реальный путь от бэкенда, а не собранная на фронте строка: каталог
@@ -217,15 +221,23 @@
   let recordingActionId: string | null = $state(null);
   let keybindConflict: { actionId: string; withLabel: string } | null = $state(null);
 
+  // v0.9.35: пока идёт запись, App.svelte не выполняет хоткеи — иначе запись
+  // комбинации, уже занятой локальным действием (Ctrl+K), выполняла бы это
+  // действие и уводила фокус из поля записи.
+  function setRecordingFlag(on: boolean) {
+    window.dispatchEvent(new CustomEvent("keybind-recording", { detail: on }));
+  }
+
   function startRecording(actionId: string) {
     recordingActionId = actionId;
     keybindConflict = null;
+    setRecordingFlag(true);
   }
 
   function onKeybindCapture(e: KeyboardEvent) {
     if (!recordingActionId) return;
     e.preventDefault();
-    if (e.key === "Escape") { recordingActionId = null; return; }
+    if (e.key === "Escape") { recordingActionId = null; setRecordingFlag(false); return; }
     const combo = comboFromEvent(e);
     if (!combo) return; // нажат только модификатор — ждём основную клавишу
 
@@ -238,11 +250,90 @@
     keybinds = { ...keybinds, [recordingActionId]: combo };
     recordingActionId = null;
     keybindConflict = null;
+    setRecordingFlag(false);
   }
 
   function resetKeybind(actionId: string) {
     const { [actionId]: _drop, ...rest } = keybinds;
     keybinds = rest;
+  }
+
+  // --- Глобальные хоткеи (v0.9.35) ---
+  //
+  // Формат комбинации тот же, что у webview-хоткеев ("Ctrl+Shift+KeyN"):
+  // специально проверено, что парсер global-hotkey понимает и такой вид, и
+  // "Ctrl+Shift+N" — конвертер между форматами не нужен, а запись комбинации
+  // в UI одна и та же для обеих групп.
+  //
+  // Отличий от локальных три: список действий приходит с бэкенда (он же их
+  // регистрирует), комбинацию проверяет бэкенд, а после сохранения нужна
+  // перерегистрация — иначе новая комбинация заработает только после
+  // перезапуска приложения.
+  let globalActions: GlobalAction[] = $state([]);
+  let globalBinds: Keybinds = $state({});
+  let recordingGlobalId: string | null = $state(null);
+  let globalError: { actionId: string; text: string } | null = $state(null);
+  // Комбинации, которые ОС отказалась отдать (заняты другим приложением или
+  // композитором). Показываются отдельно: это не ошибка ввода, а факт среды.
+  let globalFailed: string[] = $state([]);
+
+  function globalComboFor(actionId: string): string {
+    const a = globalActions.find(x => x.id === actionId);
+    return globalBinds[actionId] ?? a?.default_combo ?? "";
+  }
+
+  function startRecordingGlobal(actionId: string) {
+    recordingGlobalId = actionId;
+    globalError = null;
+    setRecordingFlag(true);
+  }
+
+  async function onGlobalCapture(e: KeyboardEvent) {
+    if (!recordingGlobalId) return;
+    e.preventDefault();
+    if (e.key === "Escape") { recordingGlobalId = null; setRecordingFlag(false); return; }
+    const combo = comboFromEvent(e);
+    if (!combo) return; // только модификатор — ждём основную клавишу
+
+    const actionId = recordingGlobalId;
+
+    // Конфликт внутри группы: две глобальные команды на одной комбинации ОС
+    // не различит.
+    const dupe = globalActions.find(a => a.id !== actionId && globalComboFor(a.id) === combo);
+    if (dupe) {
+      globalError = { actionId, text: `Уже занято: ${dupe.label}` };
+      return;
+    }
+    // Конфликт с локальным хоткеем: глобальный перехватывает клавиши раньше,
+    // поэтому локальный просто перестал бы работать — молча и необъяснимо.
+    const localDupe = KEYBIND_ACTIONS.find(a => comboFor(keybinds, a.id) === combo);
+    if (localDupe) {
+      globalError = { actionId, text: `Занято хоткеем в приложении: ${localDupe.label}` };
+      return;
+    }
+    // Последнее слово — за настоящим парсером комбинаций, а не за нашими
+    // правилами: регистрировать будет именно он.
+    try {
+      await api.validateGlobalCombo(combo);
+    } catch (err) {
+      // Пока ждали ответ, пользователь мог выйти из записи (Escape) или
+      // начать записывать другое действие — тогда ответ уже неактуален и
+      // показывать по нему ошибку нельзя: она вернула бы поле в режим записи.
+      if (recordingGlobalId !== actionId) return;
+      globalError = { actionId, text: typeof err === "string" ? err : "Комбинация не подходит" };
+      return;
+    }
+    if (recordingGlobalId !== actionId) return;
+
+    globalBinds = { ...globalBinds, [actionId]: combo };
+    recordingGlobalId = null;
+    globalError = null;
+    setRecordingFlag(false);
+  }
+
+  function resetGlobalKeybind(actionId: string) {
+    const { [actionId]: _drop, ...rest } = globalBinds;
+    globalBinds = rest;
   }
 
   // --- Категории задач (CRUD сохраняется сразу, без кнопки «Сохранить») ---
@@ -280,7 +371,11 @@
           .map(([category, daily_mins]) => ({ category, daily_mins }))
       );
       settings.keybinds = JSON.stringify(keybinds);
+      settings.global_keybinds = JSON.stringify(globalBinds);
       await api.saveSettings(settings);
+      // Перерегистрация в ОС: без неё новая комбинация заработала бы только
+      // после перезапуска, а старая продолжала бы срабатывать.
+      globalFailed = await api.applyGlobalHotkeys().catch(() => []);
       applyTheme(settings.theme_mode, settings);
       // App.svelte держит свою копию хоткеев для keydown-обработчика —
       // без этого события переназначение применялось бы только после reload.
@@ -796,11 +891,58 @@
 
   <section class="card panel" class:hidden-by-search={sectionMatches[8] === false} class:hidden-by-tab={SECTION_TAB[8] !== activeTab} bind:this={sectionEls[8]}>
     <h3 class="section-title">Хоткеи</h3>
-    <p class="hint" style="margin-top:0;">
-      Только хоткеи внутри окна приложения. <code>Ctrl+Shift+N</code>/<code>Ctrl+Shift+M</code>/<code>Ctrl+Shift+B</code>
-      (быстрая задача / заметка / заметка из буфера обмена) переназначению не подлежат —
-      они завязаны на системный хоткей.
+
+    <!-- v0.9.35: глобальные — отдельной группой над локальными. Порядок не
+         косметика: они перехватывают клавиши раньше всего остального, поэтому
+         конфликт с ними объясняет, почему «перестал работать» локальный. -->
+    <h4 class="keybind-group">Глобальные — работают, даже когда окно закрыто</h4>
+    <div class="keybind-list">
+      {#each globalActions as action (action.id)}
+        <div class="keybind-row">
+          <span class="keybind-label">{action.label}</span>
+          {#if recordingGlobalId === action.id}
+            <!-- svelte-ignore a11y_autofocus -->
+            <input
+              class="keybind-combo recording"
+              type="text"
+              readonly
+              value="Нажмите комбинацию… (Esc — отмена)"
+              onkeydown={onGlobalCapture}
+              autofocus
+            />
+          {:else}
+            <button type="button" class="keybind-combo" onclick={() => startRecordingGlobal(action.id)}>
+              {formatCombo(globalComboFor(action.id))}
+            </button>
+          {/if}
+          {#if globalBinds[action.id] && globalBinds[action.id] !== action.default_combo}
+            <button type="button" class="btn-icon" title="Сбросить к дефолту" onclick={() => resetGlobalKeybind(action.id)}>↺</button>
+          {/if}
+        </div>
+        {#if globalError?.actionId === action.id}
+          <p class="hint" style="color:var(--danger, #d33);margin:0 0 4px 0;">
+            {globalError.text}
+          </p>
+        {/if}
+      {/each}
+    </div>
+    {#if globalFailed.length > 0}
+      <!-- Не ошибка ввода, а факт среды: комбинацию уже держит кто-то другой.
+           Молчать нельзя — хоткей просто не сработает, и это выглядит как
+           поломка приложения. -->
+      <p class="hint" style="color:var(--danger, #d33);">
+        Система не отдала эти комбинации (заняты другим приложением):
+        {globalFailed.map(formatCombo).join(", ")}. Выберите другие.
+      </p>
+    {/if}
+    <p class="hint">
+      На Wayland (Hyprland, Sway) глобальные хоткеи перехватывает композитор —
+      там их задают в его конфиге, биндом на запуск приложения с
+      <code>--quick-task</code>, <code>--quick-note</code>,
+      <code>--quick-clip</code> или <code>--quick-pinned</code>.
     </p>
+
+    <h4 class="keybind-group">В приложении</h4>
     <div class="keybind-list">
       {#each KEYBIND_ACTIONS as action (action.id)}
         <div class="keybind-row">
@@ -1098,6 +1240,19 @@
     display: flex;
     flex-direction: column;
     gap: 4px;
+  }
+
+  /* v0.9.35: заголовок группы внутри секции — глобальные и локальные хоткеи
+     живут на одной вкладке, но это разные механизмы, и их нельзя читать
+     одним сплошным списком. */
+  .keybind-group {
+    margin: 12px 0 6px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted, #888);
+  }
+  .keybind-group:first-of-type {
+    margin-top: 0;
   }
 
   .keybind-row {

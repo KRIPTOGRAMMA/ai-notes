@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Task, Subtask, CreateTaskPayload, UpdateTaskPayload, Note, CreateNotePayload, UpdateNotePayload, AppSettings, Project, UpdateProjectPayload, CategoryInfo, StatusInfo, NoteSnippet, TaskSnippet, GoalSnapshot, Routine, RoutineBlock, ActiveSession, NoteRevision, ChecklistTemplate, DayCompletion, ModelOption, SmartList, SmartListFilter, NotificationEntry, QuickMode, BlockIdle, PinnedItem } from "../types";
+import type { Task, Subtask, CreateTaskPayload, UpdateTaskPayload, Note, CreateNotePayload, UpdateNotePayload, AppSettings, Project, UpdateProjectPayload, CategoryInfo, StatusInfo, NoteSnippet, TaskSnippet, GoalSnapshot, Routine, RoutineBlock, ActiveSession, NoteRevision, ChecklistTemplate, DayCompletion, ModelOption, SmartList, SmartListFilter, NotificationEntry, QuickMode, BlockIdle, PinnedItem, GlobalAction } from "../types";
 
 export const api = {
   getTasks: () => invoke<Task[]>("get_tasks"),
@@ -100,6 +100,14 @@ export const api = {
   summarizeDay: () => invoke<void>("summarize_day"),
   summarizeWeek: () => invoke<void>("summarize_week"),
   getSettings: () => invoke<AppSettings>("get_settings"),
+  // v0.9.35: глобальные хоткеи. Список действий отдаёт бэкенд — он же их
+  // регистрирует, второй копии в TS быть не должно.
+  listGlobalActions: () => invoke<GlobalAction[]>("list_global_actions"),
+  // Проверка комбинации делается global-hotkey, а не своими правилами в TS.
+  validateGlobalCombo: (combo: string) => invoke<void>("validate_global_combo", { combo }),
+  // Применяет сохранённые комбинации без перезапуска; возвращает те, что не
+  // удалось зарегистрировать (заняты системой).
+  applyGlobalHotkeys: () => invoke<string[]>("apply_global_hotkeys"),
   saveSettings: (settings: AppSettings) => invoke<void>("save_settings", { settings }),
   isWayland: () => invoke<boolean>("is_wayland"),
   getTrackingMode: () => invoke<"extended" | "basic">("get_tracking_mode"),

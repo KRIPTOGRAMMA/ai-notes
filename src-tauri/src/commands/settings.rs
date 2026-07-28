@@ -83,6 +83,12 @@ pub struct AppSettings {
     pub show_subtasks_expanded: bool, // v0.8.3: подзадачи в списке видны без клика
     #[serde(default)]
     pub keybinds: String,             // v0.8.9: JSON {action_id: combo}; отсутствие ключа = дефолт действия
+    // v0.9.35: то же самое для ГЛОБАЛЬНЫХ хоткеев быстрого ввода. Отдельным
+    // ключом, а не вместе с keybinds: у них разный механизм (регистрация в ОС
+    // против обработчика в webview) и разная цена ошибки — глобальная
+    // комбинация может оказаться занятой системой, локальная нет.
+    #[serde(default)]
+    pub global_keybinds: String,
     #[serde(default = "default_true")]
     pub focus_mode_auto: bool,        // v0.9.12: авто-пауза уведомлений на время помодоро-работы/тайм-блока
     // v0.9.31: разбивка браузерного времени по сайтам. ВЫКЛ по умолчанию —
@@ -141,6 +147,7 @@ impl Default for AppSettings {
             morning_digest_time: String::new(),
             show_subtasks_expanded: true,
             keybinds: String::new(),
+            global_keybinds: String::new(),
             focus_mode_auto: true,
             track_domains: false,
             language: String::new(),
@@ -256,6 +263,7 @@ pub async fn load_settings_raw(pool: &SqlitePool) -> AppResult<AppSettings> {
     if let Some(v) = get_setting(pool, "morning_digest_time").await { s.morning_digest_time = v; }
     if let Some(v) = get_setting(pool, "show_subtasks_expanded").await { s.show_subtasks_expanded = v != "false"; }
     if let Some(v) = get_setting(pool, "keybinds").await { s.keybinds = v; }
+    if let Some(v) = get_setting(pool, "global_keybinds").await { s.global_keybinds = v; }
     s.focus_mode_auto = get_bool_setting(pool, "focus_mode_auto", true).await;
     s.track_domains = get_bool_setting(pool, "track_domains", false).await;
     s.language = get_setting(pool, "language").await.unwrap_or_default();
@@ -343,6 +351,7 @@ pub async fn save_settings(
     set_setting(pool.inner(), "morning_digest_time", &settings.morning_digest_time).await?;
     set_setting(pool.inner(), "show_subtasks_expanded", if settings.show_subtasks_expanded { "true" } else { "false" }).await?;
     set_setting(pool.inner(), "keybinds", &settings.keybinds).await?;
+    set_setting(pool.inner(), "global_keybinds", &settings.global_keybinds).await?;
     set_setting(pool.inner(), "focus_mode_auto", if settings.focus_mode_auto { "true" } else { "false" }).await?;
     set_setting(pool.inner(), "track_domains", if settings.track_domains { "true" } else { "false" }).await?;
     set_setting(pool.inner(), "language", &settings.language).await?;
