@@ -10,7 +10,8 @@
     "strict": true,
     "moduleResolution": "bundler",
     "target": "ESNext",
-    "module": "ESNext"
+    "module": "ESNext",
+    "types": ["vite/client"]
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules"]

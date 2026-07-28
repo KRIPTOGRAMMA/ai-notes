@@ -3,6 +3,7 @@
   import { api } from "../api/tauri";
   import type { TaskSnippet, NoteSnippet } from "../types";
 
+  import { t } from "../i18n.svelte";
   interface PaletteCommand {
     label: string;
     hint?: string;
@@ -101,7 +102,7 @@
       bind:this={inputEl}
       bind:value={query}
       oninput={runSearch}
-      placeholder="Поиск задач и заметок..."
+      placeholder={t("Поиск задач и заметок...")}
     />
 
     <div class="results">
@@ -121,9 +122,9 @@
               onclick={() => execute(i)}
               onmouseenter={() => activeIndex = i}
             >
-              <div class="result-title">{cmd.label}</div>
+              <div class="result-title">{t(cmd.label)}</div>
               {#if cmd.hint}
-                <div class="result-sub">{cmd.hint}</div>
+                <div class="result-sub">{t(cmd.hint)}</div>
               {/if}
             </button>
           {:else if item.type === "task"}

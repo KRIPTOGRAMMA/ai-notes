@@ -5,6 +5,7 @@
   import { projectStore } from "../lib/stores/projects.svelte";
   import { categoryStore } from "../lib/stores/categories.svelte";
   import type { AppSettings, DayCompletion } from "../lib/types";
+  import { t } from "../lib/i18n.svelte";
 
   let { onOpenTask }: { onOpenTask: (id: string) => void } = $props();
 
@@ -319,7 +320,7 @@
 </script>
 
 <div class="dash">
-  <h2 class="page-title" style="margin-bottom:14px;">Дашборд</h2>
+  <h2 class="page-title" style="margin-bottom:14px;">{t("Дашборд")}</h2>
 
   {#if error}
     <div class="alert">{error}</div>
@@ -328,13 +329,13 @@
   <div class="grid">
     <!-- Донат по категориям -->
     <section class="card panel">
-      <h3 class="section-title">Выполнено по категориям</h3>
+      <h3 class="section-title">{t("Выполнено по категориям")}</h3>
 
       {#if donutData.length === 0}
-        <div class="empty">Нет выполненных задач</div>
+        <div class="empty">{t("Нет выполненных задач")}</div>
       {:else}
         <div class="donut-row">
-          <svg viewBox="0 0 120 120" width="132" height="132" role="img" aria-label="Выполненные задачи по категориям">
+          <svg viewBox="0 0 120 120" width="132" height="132" role="img" aria-label={t("Выполненные задачи по категориям")}>
             <g transform="rotate(-90 60 60)">
               {#each donutSegments as seg (seg.category)}
                 <circle
@@ -350,7 +351,7 @@
               {/each}
             </g>
             <text x="60" y="57" text-anchor="middle" class="donut-total">{donutTotal}</text>
-            <text x="60" y="74" text-anchor="middle" class="donut-caption">всего</text>
+            <text x="60" y="74" text-anchor="middle" class="donut-caption">{t("всего")}</text>
           </svg>
 
           <ul class="legend">
@@ -368,21 +369,21 @@
 
     <!-- Актив/простой -->
     <section class="card panel">
-      <h3 class="section-title">Активное время</h3>
+      <h3 class="section-title">{t("Активное время")}</h3>
 
       {#if ratio}
         {#each [
-          { label: "Сегодня", value: pct(ratio.today_active, ratio.today_idle), active: ratio.today_active },
-          { label: "Неделя", value: pct(ratio.week_active, ratio.week_idle), active: ratio.week_active },
+          { label: t("Сегодня"), value: pct(ratio.today_active, ratio.today_idle), active: ratio.today_active },
+          { label: t("Неделя"), value: pct(ratio.week_active, ratio.week_idle), active: ratio.week_active },
         ] as row (row.label)}
           <div class="ratio-row">
             <div class="ratio-head">
               <span>{row.label}</span>
               <span class="muted">
                 {#if row.value === null}
-                  нет данных
+                  {t("нет данных")}
                 {:else}
-                  {row.value}% актив · {Math.round(row.active / 60)} мин
+                  {t("{pct}% актив · {mins} мин", { pct: row.value, mins: Math.round(row.active / 60) })}
                 {/if}
               </span>
             </div>
@@ -392,16 +393,16 @@
           </div>
         {/each}
       {:else}
-        <div class="empty">Нет данных</div>
+        <div class="empty">{t("Нет данных")}</div>
       {/if}
     </section>
 
     <!-- ИИ-инсайт -->
     <section class="card panel">
-      <h3 class="section-title">ИИ-инсайт</h3>
+      <h3 class="section-title">{t("ИИ-инсайт")}</h3>
 
       {#if settings && settings.ai_provider === "none"}
-        <p class="muted" style="margin:0;">ИИ отключён — включите провайдера в Настройках, чтобы получать инсайты.</p>
+        <p class="muted" style="margin:0;">{t("ИИ отключён — включите провайдера в Настройках, чтобы получать инсайты.")}</p>
       {:else}
         <div class="ai-row">
           <button onclick={refreshInsight} disabled={insightPending}>
@@ -413,7 +414,7 @@
             {:else if insightText}
               {insightText}
             {:else if !insightPending}
-              <span class="muted">Нажмите «Обновить», чтобы получить короткий разбор вашей продуктивности.</span>
+              <span class="muted">{t("Нажмите «Обновить», чтобы получить короткий разбор вашей продуктивности.")}</span>
             {/if}
           </div>
         </div>
@@ -423,24 +424,24 @@
     <!-- Помодоро: статистика и стрики -->
     {#if pomodoroStats}
       <section class="card panel">
-        <h3 class="section-title">Помодоро</h3>
+        <h3 class="section-title">{t("Помодоро")}</h3>
         <ul class="goals">
           <li class="goal-item">
             <div class="goal-row">
-              <span class="goal-metric">сегодня</span>
+              <span class="goal-metric">{t("сегодня")}</span>
               <span class="goal-val muted">{pomodoroStats.today}</span>
             </div>
             <div class="goal-row">
-              <span class="goal-metric">за неделю</span>
+              <span class="goal-metric">{t("за неделю")}</span>
               <span class="goal-val muted">{pomodoroStats.week}</span>
             </div>
             <div class="goal-row">
-              <span class="goal-metric">стрик задач</span>
-              <span class="goal-val muted">{pomodoroStats.task_streak} дн.</span>
+              <span class="goal-metric">{t("стрик задач")}</span>
+              <span class="goal-val muted">{t("{n} дн.", { n: pomodoroStats.task_streak })}</span>
             </div>
             <div class="goal-row">
-              <span class="goal-metric">стрик помидоров</span>
-              <span class="goal-val muted">{pomodoroStats.pomodoro_streak} дн.</span>
+              <span class="goal-metric">{t("стрик помидоров")}</span>
+              <span class="goal-val muted">{t("{n} дн.", { n: pomodoroStats.pomodoro_streak })}</span>
             </div>
           </li>
         </ul>
@@ -449,18 +450,18 @@
 
     <!-- Резюме дня/недели -->
     <section class="card panel">
-      <h3 class="section-title">Резюме</h3>
+      <h3 class="section-title">{t("Резюме")}</h3>
 
       {#if settings && settings.ai_provider === "none"}
-        <p class="muted" style="margin:0;">ИИ отключён — резюме недоступно.</p>
+        <p class="muted" style="margin:0;">{t("ИИ отключён — резюме недоступно.")}</p>
       {:else}
         <div class="ai-row">
           <div class="btn-group">
             <button onclick={() => refreshSummary("day")} disabled={summaryPending !== null}>
-              {summaryPending === "day" ? "Думаю…" : "День"}
+              {summaryPending === "day" ? t("Думаю…") : t("День")}
             </button>
             <button onclick={() => refreshSummary("week")} disabled={summaryPending !== null}>
-              {summaryPending === "week" ? "Думаю…" : "Неделя"}
+              {summaryPending === "week" ? t("Думаю…") : t("Неделя")}
             </button>
           </div>
           <div class="ai-text">
@@ -472,7 +473,7 @@
               </span>
               {summaryText}
             {:else if summaryPending === null}
-              <span class="muted">Резюме дня или недели: что сделано и сколько времени было активным.</span>
+              <span class="muted">{t("Резюме дня или недели: что сделано и сколько времени было активным.")}</span>
             {/if}
           </div>
         </div>
@@ -482,7 +483,7 @@
     <!-- Цели проектов (только если у кого-то задана цель) -->
     {#if goalProjects.length > 0}
       <section class="card panel">
-        <h3 class="section-title">Цели проектов</h3>
+        <h3 class="section-title">{t("Цели проектов")}</h3>
         <ul class="goals">
           {#each goalProjects as p (p.id)}
             <li class="goal-item">
@@ -492,7 +493,7 @@
               </div>
               {#if p.goal_tasks != null}
                 <div class="goal-row">
-                  <span class="goal-metric">задачи</span>
+                  <span class="goal-metric">{t("задачи")}</span>
                   <div class="track">
                     <div class="fill" class:done={p.goal_done_tasks >= p.goal_tasks}
                       style="width:{goalPct(p.goal_done_tasks, p.goal_tasks)}%;"></div>
@@ -502,7 +503,7 @@
               {/if}
               {#if p.goal_mins != null}
                 <div class="goal-row">
-                  <span class="goal-metric">минуты</span>
+                  <span class="goal-metric">{t("минуты")}</span>
                   <div class="track">
                     <div class="fill" class:done={p.goal_done_mins >= p.goal_mins}
                       style="width:{goalPct(p.goal_done_mins, p.goal_mins)}%;"></div>
@@ -514,14 +515,14 @@
           {/each}
         </ul>
         <p class="muted" style="font-size:11px;margin:8px 0 0 0;">
-          Минуты — по трекингу задач проекта за период.
+          {t("Минуты — по трекингу задач проекта за период.")}
         </p>
       </section>
     {/if}
 
     {#if projectTime.length > 0}
       <section class="card panel">
-        <h3 class="section-title">Время по проектам (7 дней)</h3>
+        <h3 class="section-title">{t("Время по проектам (7 дней)")}</h3>
         <ul class="goals">
           {#each projectTime as pt}
             <li class="goal-item">
@@ -546,7 +547,7 @@
     {#if domainUsage.length > 0}
       {@const maxDomain = Math.max(...domainUsage.map(d => d.minutes), 1)}
       <section class="card panel wide">
-        <h3 class="section-title">Сайты</h3>
+        <h3 class="section-title">{t("Сайты")}</h3>
         <div class="rows">
           {#each domainUsage as d (d.domain)}
             <div class="bar-row">
@@ -566,10 +567,10 @@
       {@const maxApp = Math.max(...appUsage.map(a => a.minutes), 1)}
       <section class="card panel wide">
         <div class="apps-head">
-          <h3 class="section-title" style="margin:0;">Приложения</h3>
+          <h3 class="section-title" style="margin:0;">{t("Приложения")}</h3>
           <div class="btn-group">
-            <button class:active-toggle={appPeriod === 1} onclick={() => loadAppUsage(1)}>Сегодня</button>
-            <button class:active-toggle={appPeriod === 7} onclick={() => loadAppUsage(7)}>Неделя</button>
+            <button class:active-toggle={appPeriod === 1} onclick={() => loadAppUsage(1)}>{t("Сегодня")}</button>
+            <button class:active-toggle={appPeriod === 7} onclick={() => loadAppUsage(7)}>{t("Неделя")}</button>
           </div>
         </div>
 
@@ -598,17 +599,17 @@
         </div>
 
         <p class="muted" style="font-size:11px;margin:8px 0 0 0;">
-          Категории — по правилам «класс окна → категория» в Настройках → Мониторинг.
+          {t("Категории — по правилам «класс окна → категория» в Настройках → Мониторинг.")}
         </p>
       </section>
     {/if}
 
     <!-- Активность по дням -->
     <section class="card panel wide">
-      <h3 class="section-title">Активность по дням (мин)</h3>
+      <h3 class="section-title">{t("Активность по дням (мин)")}</h3>
 
       {#if activityDays.length === 0}
-        <div class="empty">Нет данных</div>
+        <div class="empty">{t("Нет данных")}</div>
       {:else}
         {@const max = maxMinutes(activityDays)}
         <div class="rows">
@@ -627,10 +628,10 @@
 
     <!-- Год в квадратиках: выполненные задачи -->
     <section class="card panel wide">
-      <h3 class="section-title">Выполненные задачи за год</h3>
+      <h3 class="section-title">{t("Выполненные задачи за год")}</h3>
 
       {#if taskCompletions.length === 0}
-        <div class="empty">Нет данных</div>
+        <div class="empty">{t("Нет данных")}</div>
       {:else}
         <div class="cal-wrap" onmouseleave={() => calTip = null} role="presentation">
           <div class="cal-grid">
@@ -666,10 +667,10 @@
 
     <!-- Heatmap: в какие часы реально работается -->
     <section class="card panel wide">
-      <h3 class="section-title">Активность по часам (8 недель)</h3>
+      <h3 class="section-title">{t("Активность по часам (8 недель)")}</h3>
 
       {#if hourly.length === 0}
-        <div class="empty">Нет данных</div>
+        <div class="empty">{t("Нет данных")}</div>
       {:else}
         <div class="heat">
           {#each WEEKDAY_LABELS as label, row (label)}
@@ -700,7 +701,7 @@
     <div class="modal dialog cal-popup">
       <h2 class="dialog-title">{fmtDay(calPopup.date)} — {calPopup.count > 0 ? `выполнено: ${calPopup.count}` : "пусто"}</h2>
       {#if calPopup.completions.length === 0}
-        <div class="empty">Нет выполненных задач в этот день</div>
+        <div class="empty">{t("Нет выполненных задач в этот день")}</div>
       {:else}
         <ul class="cal-popup-list">
           {#each calPopup.completions as c (c.id)}
@@ -711,7 +712,7 @@
         </ul>
       {/if}
       <div class="actions">
-        <button class="btn-ghost" onclick={() => calPopup = null}>Закрыть</button>
+        <button class="btn-ghost" onclick={() => calPopup = null}>{t("Закрыть")}</button>
       </div>
     </div>
   </div>

@@ -142,7 +142,11 @@ pub fn start_pomodoro(
                 // Пауза уведомлений: таймер идёт, но молча. Проверяем только в момент
                 // отправки — не дёргаем БД каждый секундный тик.
                 if !crate::notifier::mute::muted_now(&pool, &mode).await {
-                    send_notification(&app, &pool, "pomodoro", "Study", &format!("Помодоро запущено: {} минут работы", work_secs / 60)).await;
+                    {
+                        let lang = crate::i18n::current_lang(&pool).await;
+                        let body = crate::i18n::tr_args("Помодоро запущено: {n} минут работы", lang, &[("n", (work_secs / 60).to_string())]);
+                        send_notification(&app, &pool, "pomodoro", "Study", &body).await;
+                    }
                 }
                 continue;
             } else if !in_study && manual {
@@ -162,11 +166,19 @@ pub fn start_pomodoro(
                     log_completed_work(&pool).await;
                     working = false;
                     remaining = break_secs;
-                    if !muted { send_notification(&app, &pool, "pomodoro", "Study", &format!("Перерыв {} минут — отдохни", break_secs / 60)).await; }
+                    if !muted {
+                        let lang = crate::i18n::current_lang(&pool).await;
+                        let body = crate::i18n::tr_args("Перерыв {n} минут — отдохни", lang, &[("n", (break_secs / 60).to_string())]);
+                        send_notification(&app, &pool, "pomodoro", "Study", &body).await;
+                    }
                 } else {
                     working = true;
                     remaining = work_secs;
-                    if !muted { send_notification(&app, &pool, "pomodoro", "Study", &format!("Перерыв окончен: {} минут работы", work_secs / 60)).await; }
+                    if !muted {
+                        let lang = crate::i18n::current_lang(&pool).await;
+                        let body = crate::i18n::tr_args("Перерыв окончен: {n} минут работы", lang, &[("n", (work_secs / 60).to_string())]);
+                        send_notification(&app, &pool, "pomodoro", "Study", &body).await;
+                    }
                 }
                 let until = chrono::Utc::now() + chrono::Duration::seconds(remaining as i64);
                 persist_state(&pool, if working { "work" } else { "break" }, until).await;

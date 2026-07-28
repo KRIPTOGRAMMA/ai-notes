@@ -220,13 +220,18 @@ async fn notify_return(app: &tauri::AppHandle, pool: &SqlitePool, away_mins: i64
         None
     };
 
+    let lang = crate::i18n::current_lang(pool).await;
+    let mins = away_mins.to_string();
     let body = match in_progress {
-        Some(title) => {
-            format!("Вы отсутствовали {} мин. Продолжим задачу «{}» или сделаем перерыв?", away_mins, title)
-        }
+        Some(title) => crate::i18n::tr_args(
+            "Вы отсутствовали {n} мин. Продолжим задачу «{task}» или сделаем перерыв?",
+            lang, &[("n", mins), ("task", title)]),
         None => match nearest_task(pool, &["Todo", "InProgress"]).await {
-            Some(title) => format!("Вы отсутствовали {} мин. Ближайшая задача: {}", away_mins, title),
-            None => format!("Вы отсутствовали {} мин. С возвращением!", away_mins),
+            Some(title) => crate::i18n::tr_args(
+                "Вы отсутствовали {n} мин. Ближайшая задача: {task}",
+                lang, &[("n", mins), ("task", title)]),
+            None => crate::i18n::tr_args(
+                "Вы отсутствовали {n} мин. С возвращением!", lang, &[("n", mins)]),
         },
     };
 

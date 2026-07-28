@@ -3043,3 +3043,116 @@ test("настройки: во время записи хоткея прилож
   await page.keyboard.press("Escape");
   await expect(dailyRow.locator("button.keybind-combo")).toHaveText("Ctrl+D");
 });
+
+// v0.9.36: Задачи и Заметки переведены целиком. Тест задаёт язык явно —
+// остальные ~100 тестов по-прежнему работают на прибитом к моку русском.
+test("язык: экраны Задачи и Заметки переведены целиком", async ({ page }) => {
+  await seedDb(page, {
+    tasks: [], projects: [],
+    notes: [{
+      id: "n1", title: "Draft", content: "text", tags: [], pinned: false,
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    }],
+  });
+  await withMock(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Настройки" }).click();
+  await page.locator("label", { hasText: "Язык" }).locator("select").selectOption("en");
+
+  // --- Задачи ---
+  await page.getByRole("button", { name: "Tasks", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Tasks" })).toBeVisible();
+  await expect(page.getByPlaceholder("Search tasks…")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Projects" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "+ New", exact: true })).toBeVisible();
+  // пустое состояние и подсказки под ним — тоже переведены
+  await expect(page.locator(".empty")).toContainText("No active tasks.");
+  // сегменты Активные/История/Корзина
+  await expect(page.locator(".seg button", { hasText: "History" })).toBeVisible();
+  await expect(page.locator(".seg button", { hasText: "Trash" })).toBeVisible();
+  // ни одной кириллической строки на экране не осталось
+  const tasksText = await page.locator(".page").first().innerText();
+  expect(tasksText).not.toMatch(/[а-яА-ЯёЁ]/);
+
+  // --- Заметки ---
+  await page.getByRole("button", { name: "Notes", exact: true }).click();
+  await expect(page.getByRole("button", { name: "+ New note" })).toBeVisible();
+  await expect(page.getByPlaceholder("Search...")).toBeVisible();
+  await expect(page.locator(".empty")).toContainText("Select a note");
+  // Заметки — своя разметка без .page, поэтому берём область контента целиком
+  const notesText = await page.locator("main, .notes-view, .content").first().innerText();
+  expect(notesText).not.toMatch(/[а-яА-ЯёЁ]/);
+});
+
+// v0.9.37: Календарь, Дашборд и модалка задачи. Тот же приём, что в v0.9.36 —
+// ищем не конкретные строки, а любой кириллический символ: именно он ловит
+// то, что собирается кодом и глазами при беглой проверке не видно.
+test("язык: Календарь, Дашборд и модалка задачи переведены целиком", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+
+  // Задача создаётся через UI, до переключения языка: так же, как в остальных
+  // тестах — seedDb здесь дал бы строку без полей, которые ждёт список.
+  await createTask(page, "Report");
+
+  await page.getByRole("button", { name: "Настройки" }).click();
+  await page.locator("label", { hasText: "Язык" }).locator("select").selectOption("en");
+
+  // --- Календарь ---
+  await page.getByRole("button", { name: "Calendar", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Week" })).toBeVisible();
+  const calText = await page.locator("main, .page, .content").first().innerText();
+  expect(calText).not.toMatch(/[а-яА-ЯёЁ]/);
+
+  // --- Дашборд ---
+  await page.getByRole("button", { name: "Dashboard", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
+  const dashText = await page.locator("main, .page, .content").first().innerText();
+  expect(dashText).not.toMatch(/[а-яА-ЯёЁ]/);
+
+  // --- Модалка задачи ---
+  await page.getByRole("button", { name: "Tasks", exact: true }).click();
+  await page.locator(".task-main").first().click();
+  await expect(page.locator(".modal")).toBeVisible();
+  // Категории и статусы намеренно исключены: это НЕ строки интерфейса, а
+  // строки в БД (миграции 0015/0029), которые пользователь переименовывает и
+  // дополняет своими. Переводить их значило бы затирать его собственные
+  // названия, поэтому здесь проверяется только разметка модалки.
+  const modalText = await page.locator(".modal").innerText();
+  const withoutUserData = modalText
+    .split("\n")
+    .filter(line => !/^(Работа|Учёба|Дом|Здоровье|Другое|Todo|В работе|Готово|Архив)$/.test(line.trim()))
+    .join("\n");
+  expect(withoutUserData).not.toMatch(/[а-яА-ЯёЁ]/);
+});
+
+// v0.9.38: последние экраны фронта — «Сегодня», палитра и центр уведомлений.
+// Тот же приём: ищем любой кириллический символ, а не конкретные строки.
+test("язык: экран «Сегодня», палитра и уведомления переведены целиком", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Настройки" }).click();
+  await page.locator("label", { hasText: "Язык" }).locator("select").selectOption("en");
+
+  // --- Сегодня ---
+  await page.getByRole("button", { name: "Today", exact: true }).click();
+  await expect(page.locator(".today-header h2")).toContainText("Today");
+  const todayText = await page.locator("main, .page, .content").first().innerText();
+  expect(todayText).not.toMatch(/[а-яА-ЯёЁ]/);
+
+  // --- Командная палитра ---
+  await page.keyboard.press("Control+k");
+  await expect(page.getByPlaceholder("Search tasks and notes...")).toBeVisible();
+  const paletteText = await page.locator(".overlay, .backdrop").first().innerText();
+  expect(paletteText).not.toMatch(/[а-яА-ЯёЁ]/);
+  await page.keyboard.press("Escape");
+
+  // --- Центр уведомлений ---
+  await page.locator(".bell-item").click();
+  const panel = page.locator(".notif-panel");
+  if (await panel.count()) {
+    expect(await panel.innerText()).not.toMatch(/[а-яА-ЯёЁ]/);
+  }
+});

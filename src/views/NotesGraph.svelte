@@ -13,6 +13,7 @@
   import { Quadtree, boundsFor } from "../lib/quadtree";
   import type { Note } from "../lib/types";
 
+  import { t } from "../lib/i18n.svelte";
   let { onOpenNote }: { onOpenNote: (id: string) => void } = $props();
 
   type GNode = {
@@ -252,12 +253,12 @@
 
 <div class="graph-view">
   <div class="graph-header">
-    <h2>Граф заметок</h2>
+    <h2>{t("Граф заметок")}</h2>
     <span class="muted">{nodes.length} заметок · {edges.length} связей</span>
   </div>
 
   {#if nodes.length === 0}
-    <p class="empty muted">Пока нет заметок — граф появится, когда будут заметки со связями [[как эта]].</p>
+    <p class="empty muted">{t("Пока нет заметок — граф появится, когда будут заметки со связями [[как эта]].")}</p>
   {:else}
     <div class="canvas" bind:this={container}>
       <svg {width} {height}>
@@ -313,7 +314,7 @@
         </g>
       </svg>
     </div>
-    <p class="hint muted">Перетаскивайте узлы, двойной клик — открыть заметку. Приглушённые узлы без связей.</p>
+    <p class="hint muted">{t("Перетаскивайте узлы, двойной клик — открыть заметку. Приглушённые узлы без связей.")}</p>
   {/if}
 </div>
 

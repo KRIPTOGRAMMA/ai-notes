@@ -6,6 +6,8 @@
   import Icon from "../lib/components/Icon.svelte";
   import type { Task } from "../lib/types";
 
+  // `t` здесь занято локальной переменной, перевод импортируется как `tr`.
+  import { t as tr, i18n } from "../lib/i18n.svelte";
   let { onOpenTask }: { onOpenTask: (id: string) => void } = $props();
 
   const HOUR_H = 48; // px на час — компактнее недельной сетки Календаря, но хватает на 2 строки блока
@@ -109,11 +111,11 @@
 <div class="today-view">
   <header class="today-header">
     <h2>
-      Сегодня
-      <span class="muted today-date">{now.toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" })}</span>
+      {tr("Сегодня")}
+      <span class="muted today-date">{now.toLocaleDateString(i18n.lang === "en" ? "en-US" : "ru-RU", { weekday: "long", day: "numeric", month: "long" })}</span>
     </h2>
     {#if dayProgress.total > 0}
-      <div class="day-progress" title="{dayProgress.done} из {dayProgress.total} выполнено">
+      <div class="day-progress" title={tr("{done} из {total} выполнено", { done: dayProgress.done, total: dayProgress.total })}>
         <div class="day-progress-track"><div class="day-progress-fill" style="width:{dayProgress.pct}%"></div></div>
         <span class="muted">{dayProgress.done}/{dayProgress.total}</span>
       </div>
@@ -122,9 +124,9 @@
 
   <div class="today-body">
     <section class="today-col today-timeline-col">
-      <h3 class="col-title"><Icon name="calendar" size={13} /> Блоки на сегодня</h3>
+      <h3 class="col-title"><Icon name="calendar" size={13} /> {tr("Блоки на сегодня")}</h3>
       {#if todayBlocks.length === 0}
-        <p class="muted empty-hint">На сегодня блоков не запланировано.</p>
+        <p class="muted empty-hint">{tr("На сегодня блоков не запланировано.")}</p>
       {:else}
         <div class="timeline" style="height:{(DAY_END_H - DAY_START_H) * HOUR_H}px">
           {#each hours as h}
@@ -157,9 +159,9 @@
       </div>
 
       <div class="side-card">
-        <h3 class="col-title"><Icon name="flag" size={13} /> Дедлайны сегодня и просрочка</h3>
+        <h3 class="col-title"><Icon name="flag" size={13} /> {tr("Дедлайны сегодня и просрочка")}</h3>
         {#if dueTasks.length === 0}
-          <p class="muted empty-hint">Ничего срочного.</p>
+          <p class="muted empty-hint">{tr("Ничего срочного.")}</p>
         {:else}
           <ul class="due-list">
             {#each dueTasks as t (t.id)}
@@ -168,8 +170,8 @@
                 <button
                   class="task-check"
                   onclick={() => completeTask(t.id)}
-                  title="Выполнить"
-                  aria-label="Выполнить задачу"
+                  title={tr("Выполнить")}
+                  aria-label={tr("Выполнить задачу")}
                 ></button>
                 <button class="due-main" onclick={() => onOpenTask(t.id)}>
                   <span class="prio-dot" style="--prio: var(--prio-{t.priority.toLowerCase()});"></span>

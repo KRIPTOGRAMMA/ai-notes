@@ -3,6 +3,7 @@
   import { categoryStore } from "../stores/categories.svelte";
   import { projectStore } from "../stores/projects.svelte";
 
+  import { t } from "../i18n.svelte";
   type Props = {
     task: Task;
     onClose: () => void;
@@ -36,14 +37,14 @@
 
     {#if task.description}
       <div class="field">
-        <span class="label">Описание</span>
+        <span class="label">{t("Описание")}</span>
         <div class="desc-text">{task.description}</div>
       </div>
     {/if}
 
     {#if task.subtasks.length > 0}
       <div class="field">
-        <span class="label">Подзадачи</span>
+        <span class="label">{t("Подзадачи")}</span>
         <div class="checklist">
           {#each task.subtasks as sub (sub.id)}
             <div class="check-row">
@@ -57,12 +58,12 @@
 
     <div class="pair">
       <div class="field">
-        <span class="label">Категория</span>
+        <span class="label">{t("Категория")}</span>
         <span class="chip chip-cat" style="--cat: {categoryStore.color(task.category)}">{categoryStore.name(task.category)}</span>
       </div>
       {#if projectName}
         <div class="field">
-          <span class="label">Проект</span>
+          <span class="label">{t("Проект")}</span>
           <span class="muted">{projectName}</span>
         </div>
       {/if}
@@ -70,7 +71,7 @@
 
     {#if task.tags.length > 0}
       <div class="field">
-        <span class="label">Теги</span>
+        <span class="label">{t("Теги")}</span>
         <div class="tag-row">
           {#each task.tags as tag}
             <span class="chip chip-tag">#{tag}</span>
@@ -81,17 +82,17 @@
 
     <div class="pair">
       <div class="field">
-        <span class="label">Создана</span>
+        <span class="label">{t("Создана")}</span>
         <span class="muted" style="font-size:13px;">{formatDate(task.created_at)}</span>
       </div>
       <div class="field">
-        <span class="label">Завершена</span>
+        <span class="label">{t("Завершена")}</span>
         <span class="muted" style="font-size:13px;">{formatDate(task.completed_at)}</span>
       </div>
     </div>
 
     <div class="actions">
-      <button class="btn-primary" onclick={onClose}>Закрыть</button>
+      <button class="btn-primary" onclick={onClose}>{t("Закрыть")}</button>
     </div>
   </div>
 </div>

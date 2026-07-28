@@ -28,6 +28,8 @@
   import { api } from "../api/tauri";
   import { IMAGE_RE, imageMarkdown, extImageExt, parseTableAt, serializeTable, emptyTable, type ParsedTable, type TableAlign } from "../markdown";
 
+  // `t` здесь занято локальной переменной, перевод импортируется как `tr`.
+  import { t as tr } from "../i18n.svelte";
   let {
     value = $bindable(""),
     placeholder: placeholderText = "",

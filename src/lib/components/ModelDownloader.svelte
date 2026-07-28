@@ -4,6 +4,7 @@
   import { api } from "../api/tauri";
   import type { ModelOption } from "../types";
 
+  import { t } from "../i18n.svelte";
   let options: ModelOption[] = $state([]);
   let selectedId: string = $state("");
   let customUrl = $state("");
@@ -64,7 +65,7 @@
   {#if exists}
     <div class="status ok">✓ Модель загружена ({mb(sizeBytes)} МБ)</div>
   {:else}
-    <div class="status">Модель не найдена</div>
+    <div class="status">{t("Модель не найдена")}</div>
   {/if}
 
   <div class="option-list">
@@ -80,7 +81,7 @@
         <div class="option-body">
           <div class="option-title">
             {opt.name}
-            {#if opt.recommended}<span class="chip-recommended">рекомендуется</span>{/if}
+            {#if opt.recommended}<span class="chip-recommended">{t("рекомендуется")}</span>{/if}
           </div>
           <div class="option-meta">~{gb(opt.size_bytes)} ГБ · от {opt.ram_gb} ГБ ОЗУ</div>
           <div class="option-desc">{opt.description}</div>
@@ -97,7 +98,7 @@
         onchange={() => { usingCustomUrl = true; }}
       />
       <div class="option-body">
-        <div class="option-title">Свой URL (GGUF)</div>
+        <div class="option-title">{t("Свой URL (GGUF)")}</div>
         <input
           type="text"
           bind:value={customUrl}

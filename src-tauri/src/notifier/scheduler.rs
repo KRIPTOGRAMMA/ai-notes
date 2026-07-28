@@ -29,8 +29,9 @@ async fn check_deadlines(app: &tauri::AppHandle, pool: &SqlitePool, muted: bool)
     let warn_mins = get_u64_setting(pool, "deadline_warn_minutes", 60).await as i64;
     let at_hours = now + chrono::Duration::hours(warn_hours);
     let at_mins = now + chrono::Duration::minutes(warn_mins);
-    let msg_hours = format!("Дедлайн через {} ч", warn_hours);
-    let msg_mins = format!("Дедлайн через {} мин", warn_mins);
+    let lang = crate::i18n::current_lang(pool).await;
+    let msg_hours = crate::i18n::tr_args("Дедлайн через {n} ч", lang, &[("n", warn_hours.to_string())]);
+    let msg_mins = crate::i18n::tr_args("Дедлайн через {n} мин", lang, &[("n", warn_mins.to_string())]);
     // Раннее предупреждение — то, что дальше от «сейчас». Не полагаемся на то,
     // что «часы» всегда больше «минут»: пользователь мог задать 1ч и 90мин.
     let (early_at, early_msg, late_at, late_msg) = if at_hours >= at_mins {
@@ -74,7 +75,7 @@ async fn check_deadlines(app: &tauri::AppHandle, pool: &SqlitePool, muted: bool)
         }
 
         if !notified_deadline && deadline <= now {
-            if !muted { send_notification(app, pool, "deadline", &title, "Дедлайн наступил!").await; }
+            if !muted { send_notification(app, pool, "deadline", &title, &crate::i18n::tr("Дедлайн наступил!", lang)).await; }
             let _ = sqlx::query("UPDATE tasks SET notified_deadline = 1 WHERE id = ?")
                 .bind(&id).execute(pool).await;
         }
@@ -150,7 +151,9 @@ async fn check_blocks(app: &tauri::AppHandle, pool: &SqlitePool, muted: bool) {
     let focus_auto = crate::commands::settings::get_bool_setting(pool, "focus_mode_auto", true).await;
     for block in blocks_due(pool, now, BLOCK_GRACE_MINS).await {
         if !muted {
-            send_notification(app, pool, "block", &block.title, &format!("Начался блок (до {})", block.end_local)).await;
+            let lang = crate::i18n::current_lang(pool).await;
+            let body = crate::i18n::tr_args("Начался блок (до {time})", lang, &[("time", block.end_local.clone())]);
+            send_notification(app, pool, "block", &block.title, &body).await;
         }
         if focus_auto {
             crate::notifier::mute::extend_quiet_until(pool, block.end_utc).await;
@@ -319,7 +322,8 @@ async fn check_morning_digest(app: &tauri::AppHandle, pool: &SqlitePool, muted: 
         body = "На сегодня ничего не запланировано.".into();
     }
     if !muted {
-        send_notification(app, pool, "digest", "Утренняя сводка", body.trim()).await;
+        let lang = crate::i18n::current_lang(pool).await;
+        send_notification(app, pool, "digest", &crate::i18n::tr("Утренняя сводка", lang), body.trim()).await;
     }
     crate::commands::settings::set_setting(pool, "morning_digest_last", &local_today.format("%Y-%m-%d").to_string()).await.ok();
 }
@@ -429,7 +433,10 @@ async fn check_app_limits(app: &tauri::AppHandle, pool: &SqlitePool, muted: bool
 
     for d in &due {
         if !muted {
-            send_notification(app, pool, "app_limit", &d.category, &format!("{}: {} мин из {} сегодня", d.category, d.minutes, d.limit)).await;
+            let lang = crate::i18n::current_lang(pool).await;
+            let body = crate::i18n::tr_args("{cat}: {mins} мин из {limit} сегодня", lang,
+                &[("cat", d.category.clone()), ("mins", d.minutes.to_string()), ("limit", d.limit.to_string())]);
+            send_notification(app, pool, "app_limit", &d.category, &body).await;
         }
         // Помечаем и в mute — иначе после снятия глушилки прилетит пачка.
         notified.insert(d.category.clone(), today.clone());

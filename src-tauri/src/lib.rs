@@ -6,6 +6,7 @@ mod notifier;
 mod monitor;
 mod ai;
 mod status;
+mod i18n;
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -19,6 +20,9 @@ use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
 // режим показываем префиксом "✓ " прямо в тексте пункта.
 pub type ModeItems = Arc<Mutex<Vec<MenuItem<tauri::Wry>>>>;
 pub type QuietItems = Arc<Mutex<Vec<CheckMenuItem<tauri::Wry>>>>;
+// v0.9.39: пункты с фиксированным текстом — их надо переподписать, когда
+// после загрузки настроек выяснится выбранный язык. Ключ — id пункта.
+pub type LabeledItems = Arc<Mutex<Vec<(&'static str, MenuItem<tauri::Wry>)>>>;
 // Начальный режим окна быстрого ввода: "task" | "note". Живёт как managed-state,
 // чтобы QuickCapture мог прочитать его при монтировании (гонка emit-до-mount).
 pub type QuickMode = Arc<Mutex<String>>;
@@ -239,15 +243,31 @@ fn quiet_base_label(id: &str) -> &'static str {
 
 // Подписи пунктов паузы: активный таймерный пресет показывает остаток
 // («1 час — осталось 42 мин»), остальные — базовую подпись.
-fn update_quiet_labels(app: &tauri::AppHandle, active_id: &str, remaining_mins: Option<i64>) {
+// Переподписывает пункты трея с фиксированным текстом под выбранный язык.
+// Подменю («Режим», «Пауза уведомлений», «Помодоро») переподписать нельзя —
+// Submenu не отдаёт set_text в этой версии Tauri, поэтому их названия
+// остаются на языке локали ОС; это записано в PLANS.md как известное
+// ограничение, а не забытый пропуск.
+fn relabel_tray(app: &tauri::AppHandle, lang: crate::i18n::Lang) {
+    if let Some(items) = app.try_state::<LabeledItems>() {
+        let items = items.lock().unwrap();
+        for (key, item) in items.iter() {
+            let _ = item.set_text(crate::i18n::tr(key, lang));
+        }
+    }
+}
+
+fn update_quiet_labels(app: &tauri::AppHandle, active_id: &str, remaining_mins: Option<i64>, lang: crate::i18n::Lang) {
     if let Some(items) = app.try_state::<QuietItems>() {
         let items = items.lock().unwrap();
         for item in items.iter() {
             let id = item.id().as_ref();
-            let base = quiet_base_label(id);
+            let base = crate::i18n::tr(quiet_base_label(id), lang);
             let text = match remaining_mins {
-                Some(m) if id == active_id => format!("{base} — осталось {m} мин"),
-                _ => base.to_string(),
+                Some(m) if id == active_id => crate::i18n::tr_args(
+                    "{base} — осталось {n} мин", lang,
+                    &[("base", base.clone()), ("n", m.to_string())]),
+                _ => base.clone(),
             };
             let _ = item.set_text(text);
         }
@@ -438,6 +458,14 @@ pub fn run() {
                     let quit = MenuItem::with_id(app, "quit", "Выход", true, None::<&str>)?;
                     let menu = Menu::with_items(app, &[&open, &mode_menu, &quiet_menu, &pomo_menu, &quit])?;
 
+                    let labeled: LabeledItems = Arc::new(Mutex::new(vec![
+                        ("Открыть", open.clone()),
+                        ("Помодоро: пауза/продолжить", pomo_pause.clone()),
+                        ("Помодоро: пропустить фазу", pomo_skip.clone()),
+                        ("Выход", quit.clone()),
+                    ]));
+                    app.manage(labeled);
+
                     let mode_items: ModeItems = Arc::new(Mutex::new(vec![mode_light, mode_focus, mode_study]));
                     app.manage(mode_items);
                     let quiet_items: QuietItems =
@@ -470,7 +498,8 @@ pub fn run() {
                                     _ => return,
                                 };
                                 update_quiet_checks(app, id);
-                                update_quiet_labels(app, id, quiet_remaining_mins(&value, chrono::Utc::now()));
+                                update_quiet_labels(app, id, quiet_remaining_mins(&value, chrono::Utc::now()),
+                                    crate::i18n::lang_from_setting(""));
                                 let pool = app.state::<sqlx::SqlitePool>().inner().clone();
                                 let preset = id.to_string();
                                 tauri::async_runtime::spawn(async move {
@@ -603,10 +632,17 @@ pub fn run() {
             let now = chrono::Utc::now();
             let quiet_id = quiet_check_id(&settings.quiet_until, &quiet_preset, now);
             update_quiet_checks(&app.app_handle(), quiet_id);
+            // v0.9.39: язык трея. Меню строится в setup, где пула ещё нет,
+            // поэтому там оно собирается по локали ОС; здесь настройки уже
+            // прочитаны — подписи перестраиваются под выбранный язык. Между
+            // этими двумя точками трей ещё не показан пользователю.
+            let tray_lang = crate::i18n::lang_from_setting(&settings.language);
+            relabel_tray(&app.app_handle(), tray_lang);
             update_quiet_labels(
                 &app.app_handle(),
                 quiet_id,
                 quiet_remaining_mins(&settings.quiet_until, now),
+                tray_lang,
             );
 
             // Вотчер паузы: когда quiet_until проходит, снимаем галочку с пресета
@@ -631,7 +667,8 @@ pub fn run() {
                             update_quiet_checks(&app_handle, id);
                         }
                         last_id = id;
-                        update_quiet_labels(&app_handle, id, quiet_remaining_mins(&value, now));
+                        let lang = crate::i18n::current_lang(&pool_watch).await;
+                        update_quiet_labels(&app_handle, id, quiet_remaining_mins(&value, now), lang);
                     }
                 });
             }

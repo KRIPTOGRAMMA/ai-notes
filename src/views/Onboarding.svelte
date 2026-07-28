@@ -4,6 +4,7 @@
   import type { AppSettings } from "../lib/types";
   import ModelDownloader from "../lib/components/ModelDownloader.svelte";
 
+  import { t } from "../lib/i18n.svelte";
   interface Props {
     settings: AppSettings;
     isWayland: boolean;
@@ -66,17 +67,17 @@
     {/if}
 
     {#if step === 1}
-      <h2>Добро пожаловать в AI Notes</h2>
-      <p>Задачи, заметки и мониторинг активности — всё локально, приватно и с опциональным ИИ.</p>
-      <p class="muted">Пара минут настройки — и можно работать.</p>
+      <h2>{t("Добро пожаловать в AI Notes")}</h2>
+      <p>{t("Задачи, заметки и мониторинг активности — всё локально, приватно и с опциональным ИИ.")}</p>
+      <p class="muted">{t("Пара минут настройки — и можно работать.")}</p>
     {:else if step === 2}
-      <h2>ИИ-помощник</h2>
-      <p>ИИ переписывает задачи в SMART-формат, генерирует подзадачи и классифицирует их.</p>
+      <h2>{t("ИИ-помощник")}</h2>
+      <p>{t("ИИ переписывает задачи в SMART-формат, генерирует подзадачи и классифицирует их.")}</p>
       <div class="options">
         <label class="option">
           <input type="radio" name="ai" value="local" bind:group={aiChoice} />
-          <span><b>Локальная модель</b><br/>
-            <small class="muted">Приватно, работает оффлайн. GGUF-модель можно скачать прямо здесь.</small></span>
+          <span><b>{t("Локальная модель")}</b><br/>
+            <small class="muted">{t("Приватно, работает оффлайн. GGUF-модель можно скачать прямо здесь.")}</small></span>
         </label>
         {#if aiChoice === "local"}
           <div style="margin:4px 0 4px 26px;">
@@ -85,61 +86,57 @@
         {/if}
         <label class="option">
           <input type="radio" name="ai" value="cloud" bind:group={aiChoice} />
-          <span><b>Облачный API</b><br/>
-            <small class="muted">OpenAI или Anthropic — API-ключ вводится в Настройках</small></span>
+          <span><b>{t("Облачный API")}</b><br/>
+            <small class="muted">{t("OpenAI или Anthropic — API-ключ вводится в Настройках")}</small></span>
         </label>
         <label class="option">
           <input type="radio" name="ai" value="none" bind:group={aiChoice} />
-          <span><b>Без ИИ</b><br/>
-            <small class="muted">Можно включить позже в Настройках</small></span>
+          <span><b>{t("Без ИИ")}</b><br/>
+            <small class="muted">{t("Можно включить позже в Настройках")}</small></span>
         </label>
       </div>
     {:else if step === 3}
-      <h2>Мониторинг на Wayland</h2>
+      <h2>{t("Мониторинг на Wayland")}</h2>
       <p>
-        Активность отслеживается системно: композитор сам сообщает о простое и возврате
-        (протокол <code>ext-idle-notify</code>). Настраивать ничего не нужно, содержимое
-        ввода приложению не видно — только факт активности.
+        {t("Активность отслеживается системно: композитор сам сообщает о простое и возврате (протокол")} <code>ext-idle-notify</code>{t("). Настраивать ничего не нужно, содержимое ввода приложению не видно — только факт активности.")}
       </p>
       <p class="muted" style="font-size:13px;">
-        Если композитор не поддерживает протокол, трекинг работает только при окне
-        в фокусе. Текущий режим виден в Настройках → Мониторинг.
+        {t("Если композитор не поддерживает протокол, трекинг работает только при окне в фокусе. Текущий режим виден в Настройках → Мониторинг.")}
       </p>
     {:else if step === 4}
-      <h2>Автозагрузка и хоткеи</h2>
+      <h2>{t("Автозагрузка и хоткеи")}</h2>
       <label class="option" style="margin-bottom:12px;align-items:center;">
         <input type="checkbox" bind:checked={autostart} />
-        Запускать AI Notes при входе в систему
+        {t("Запускать AI Notes при входе в систему")}
       </label>
-      <p>Быстрая задача из любого места: <kbd>Ctrl Shift N</kbd></p>
+      <p>{t("Быстрая задача из любого места:")} <kbd>Ctrl Shift N</kbd></p>
       <!-- Совет про композитор — только на Wayland (v0.9.28). Раньше он
            показывался всем, включая Windows, где ни Hyprland/Sway, ни
            бинд в конфиге композитора не имеют смысла. -->
       {#if isWayland}
         <p class="muted" style="font-size:13px;">
-          На Hyprland/Sway глобальные хоткеи перехватывает композитор — добавь бинд, запускающий
+          {t("На Hyprland/Sway глобальные хоткеи перехватывает композитор — добавь бинд, запускающий")}
           <code>ai-notes --quick-task</code>.
         </p>
       {/if}
     {:else}
-      <h2>Готово!</h2>
+      <h2>{t("Готово!")}</h2>
       <ul>
-        <li><b>Задачи</b> — создание через кнопку или <kbd>Ctrl Shift N</kbd></li>
-        <li><b>Дашборд</b> — активность и выполненные задачи по дням</li>
-        <li><b>Трей</b> — быстрое переключение режима (Focus — без уведомлений, Study — помодоро)</li>
+        <li><b>{t("Задачи")}</b> {t("— создание через кнопку или")} <kbd>Ctrl Shift N</kbd></li>
+        <li><b>{t("Дашборд")}</b> {t("— активность и выполненные задачи по дням")}</li>
+        <li><b>{t("Трей")}</b> {t("— быстрое переключение режима (Focus — без уведомлений, Study — помодоро)")}</li>
       </ul>
       <!-- Онбординг намеренно остаётся коротким (v0.9.29): полный обзор
            возможностей живёт одним местом — Настройки → Справка. Дублировать
            его здесь означало бы два текста, расходящихся при первой правке. -->
       <p class="muted" style="font-size:13px;margin-top:10px;">
-        Остальное — в <b>Настройках → Справка</b>: там собрано, что умеют
-        заметки, задачи, быстрый ввод, ИИ и мониторинг.
+        {t("Остальное — в")} <b>{t("Настройках → Справка")}</b>{t(": там собрано, что умеют заметки, задачи, быстрый ввод, ИИ и мониторинг.")}
       </p>
     {/if}
 
     <div class="actions">
       {#if stepIdx > 0}
-        <button class="btn-ghost" onclick={back}>Назад</button>
+        <button class="btn-ghost" onclick={back}>{t("Назад")}</button>
       {/if}
       <span style="flex:1;"></span>
       {#if stepIdx < steps.length - 1}

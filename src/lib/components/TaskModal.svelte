@@ -6,6 +6,7 @@
   import { categoryStore } from "../stores/categories.svelte";
   import { statusStore } from "../stores/statuses.svelte";
   import { taskStore } from "../stores/tasks.svelte";
+  import { t } from "../i18n.svelte";
 
   type Props = {
     task?: Task | null;
@@ -279,25 +280,25 @@
 
 <div role="dialog" aria-modal="true" class="overlay backdrop" onclick={handleBackdropClick}>
   <div class="modal dialog">
-    <h2 class="dialog-title">{isEdit ? "Редактировать задачу" : "Новая задача"}</h2>
+    <h2 class="dialog-title">{isEdit ? t("Редактировать задачу") : t("Новая задача")}</h2>
 
     {#if error}
       <div class="alert" style="margin:0;">{error}</div>
     {/if}
 
     <label class="field">
-      <span class="label">Название *</span>
+      <span class="label">{t("Название *")}</span>
       <!-- svelte-ignore a11y_autofocus -->
-      <input bind:value={title} placeholder="Название задачи" autofocus />
+      <input bind:value={title} placeholder={t("Название задачи")} autofocus />
     </label>
 
     <label class="field">
-      <span class="label">Описание</span>
-      <textarea bind:value={description} placeholder="Описание (необязательно)" rows="3" style="resize:vertical;"></textarea>
+      <span class="label">{t("Описание")}</span>
+      <textarea bind:value={description} placeholder={t("Описание (необязательно)")} rows="3" style="resize:vertical;"></textarea>
     </label>
 
     <div class="field">
-      <span class="label">Подзадачи</span>
+      <span class="label">{t("Подзадачи")}</span>
       <div class="checklist">
         {#each subs as s, i}
           <div class="check-row">
@@ -313,24 +314,24 @@
         {/each}
       </div>
       <div class="template-row">
-        <button type="button" class="btn-sm" onclick={toggleTemplatePicker}>Из шаблона…</button>
+        <button type="button" class="btn-sm" onclick={toggleTemplatePicker}>{t("Из шаблона…")}</button>
         <button type="button" class="btn-sm" onclick={toggleSaveTemplate}
           disabled={!subs.some(s => s.title.trim())}
           title={subs.some(s => s.title.trim()) ? "" : "Сначала добавьте подзадачи"}>
-          Сохранить как шаблон
+          {t("Сохранить как шаблон")}
         </button>
       </div>
 
       {#if templatePickerOpen}
         <div class="template-panel">
           {#if checklistTemplates.length === 0}
-            <span class="muted" style="font-size:12px;">Нет сохранённых шаблонов</span>
+            <span class="muted" style="font-size:12px;">{t("Нет сохранённых шаблонов")}</span>
           {:else}
             {#each checklistTemplates as tpl (tpl.id)}
               <div class="template-line">
                 <span style="flex:1;">{tpl.name} <span class="muted">({tpl.items.length})</span></span>
-                <button type="button" class="btn-sm" onclick={() => applyTemplate(tpl)}>Применить</button>
-                <button type="button" class="btn-icon btn-danger" title="Удалить шаблон" onclick={() => removeTemplate(tpl.id)}>✕</button>
+                <button type="button" class="btn-sm" onclick={() => applyTemplate(tpl)}>{t("Применить")}</button>
+                <button type="button" class="btn-icon btn-danger" title={t("Удалить шаблон")} onclick={() => removeTemplate(tpl.id)}>✕</button>
               </div>
             {/each}
           {/if}
@@ -341,13 +342,13 @@
         <div class="template-panel template-line">
           <input
             type="text"
-            placeholder="Название шаблона"
+            placeholder={t("Название шаблона")}
             bind:value={newTemplateName}
             onkeydown={(e) => { if (e.key === 'Enter') saveCurrentAsTemplate(); }}
             class="sub-input"
           />
           <button type="button" class="btn-sm btn-primary" onclick={saveCurrentAsTemplate} disabled={!newTemplateName.trim()}>
-            Сохранить
+            {t("Сохранить")}
           </button>
         </div>
       {/if}
@@ -355,16 +356,16 @@
 
     <div class="pair">
       <label class="field">
-        <span class="label">Приоритет</span>
+        <span class="label">{t("Приоритет")}</span>
         <select bind:value={priority}>
-          <option value="Low">Низкий</option>
-          <option value="Medium">Средний</option>
-          <option value="High">Высокий</option>
-          <option value="Critical">Критический</option>
+          <option value="Low">{t("Низкий")}</option>
+          <option value="Medium">{t("Средний")}</option>
+          <option value="High">{t("Высокий")}</option>
+          <option value="Critical">{t("Критический")}</option>
         </select>
       </label>
       <label class="field">
-        <span class="label">Категория</span>
+        <span class="label">{t("Категория")}</span>
         <select bind:value={category}>
           {#each categoryStore.categories as c (c.id)}
             <option value={c.id}>{c.name}</option>
@@ -375,14 +376,14 @@
 
     {#if isEdit && totalTaskMins > 0}
       <div class="field">
-        <span class="label">Время всего</span>
+        <span class="label">{t("Время всего")}</span>
         <span class="muted" style="font-size:13px;">{totalTaskMins} мин</span>
       </div>
     {/if}
 
     {#if isEdit}
       <label class="field">
-        <span class="label">Статус</span>
+        <span class="label">{t("Статус")}</span>
         <select bind:value={status}>
           {#each statusStore.statuses as s (s.id)}
             <option value={s.id}>{s.name}</option>
@@ -392,34 +393,34 @@
     {/if}
 
     <div class="field recurrence-block">
-      <span class="label">Дедлайн и повтор</span>
+      <span class="label">{t("Дедлайн и повтор")}</span>
       <div class="pair">
         <label class="field">
-          <span class="sublabel">{recurrenceKey === "None" ? "Дедлайн" : "Первое срабатывание"}</span>
+          <span class="sublabel">{recurrenceKey === "None" ? t("Дедлайн") : t("Первое срабатывание")}</span>
           <input type="datetime-local" bind:value={deadline} />
         </label>
         <label class="field">
-          <span class="sublabel">Повтор</span>
+          <span class="sublabel">{t("Повтор")}</span>
           <select bind:value={recurrenceKey}>
-            <option value="None">Без повтора</option>
-            <option value="Hourly">Каждый час</option>
-            <option value="Daily">Каждый день</option>
-            <option value="Weekly">Каждую неделю</option>
-            <option value="Custom">Свой интервал</option>
-            <option value="Weekdays">По дням недели</option>
+            <option value="None">{t("Без повтора")}</option>
+            <option value="Hourly">{t("Каждый час")}</option>
+            <option value="Daily">{t("Каждый день")}</option>
+            <option value="Weekly">{t("Каждую неделю")}</option>
+            <option value="Custom">{t("Свой интервал")}</option>
+            <option value="Weekdays">{t("По дням недели")}</option>
           </select>
         </label>
       </div>
 
       {#if recurrenceKey === "Custom"}
         <div class="custom-row">
-          <span>Каждые</span>
+          <span>{t("Каждые")}</span>
           <input type="number" bind:value={customN} min="1" style="width:64px;" />
           <select bind:value={customUnit}>
-            <option value="Minutes">минут</option>
-            <option value="Hours">часов</option>
-            <option value="Days">дней</option>
-            <option value="Weeks">недель</option>
+            <option value="Minutes">{t("минут")}</option>
+            <option value="Hours">{t("часов")}</option>
+            <option value="Days">{t("дней")}</option>
+            <option value="Weeks">{t("недель")}</option>
           </select>
         </div>
       {/if}
@@ -436,20 +437,20 @@
       {/if}
 
       {#if recurrenceKey !== "None"}
-        <span class="hint">При выполнении задача не закрывается — дедлайн сам сдвинется на следующий срок, задача останется активной.</span>
+        <span class="hint">{t("При выполнении задача не закрывается — дедлайн сам сдвинется на следующий срок, задача останется активной.")}</span>
       {/if}
     </div>
 
     <label class="field">
-      <span class="label">Теги (через запятую)</span>
-      <input bind:value={tagsInput} placeholder="работа, важное, срочное" />
+      <span class="label">{t("Теги (через запятую)")}</span>
+      <input bind:value={tagsInput} placeholder={t("работа, важное, срочное")} />
     </label>
 
     {#if projectStore.active.length > 0 || projectId}
       <label class="field">
-        <span class="label">Проект</span>
+        <span class="label">{t("Проект")}</span>
         <select bind:value={projectId}>
-          <option value="">Без проекта</option>
+          <option value="">{t("Без проекта")}</option>
           {#each projectStore.active as p (p.id)}
             <option value={p.id}>{p.name}</option>
           {/each}
@@ -462,10 +463,10 @@
     {/if}
 
     <div class="actions">
-      <span class="muted" style="font-size:11px;margin-right:auto;"><kbd>Ctrl Enter</kbd> сохранить · <kbd>Esc</kbd> закрыть</span>
-      <button class="btn-ghost" onclick={onClose}>Отмена</button>
+      <span class="muted" style="font-size:11px;margin-right:auto;"><kbd>Ctrl Enter</kbd> {t("сохранить ·")} <kbd>Esc</kbd> {t("закрыть")}</span>
+      <button class="btn-ghost" onclick={onClose}>{t("Отмена")}</button>
       <button class="btn-primary" onclick={handleSave} disabled={saving || !title.trim()}>
-        {saving ? "Сохранение..." : isEdit ? "Сохранить" : "Создать"}
+        {saving ? t("Сохранение...") : isEdit ? t("Сохранить") : t("Создать")}
       </button>
     </div>
   </div>

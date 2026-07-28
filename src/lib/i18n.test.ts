@@ -82,3 +82,63 @@ describe("словарь EN", () => {
     expect(LANGS.map(l => l.id).sort()).toEqual(["en", "ru"]);
   });
 });
+
+// v0.9.36: главный риск постепенного наполнения словаря — обернуть строку в
+// t() и забыть добавить перевод. Тогда английский интерфейс молча покажет
+// русскую строку: механизм так и задуман (деградация лучше пустоты), но для
+// УЖЕ размеченных файлов это баг, а не незаконченный перевод.
+//
+// Поэтому проверяется не «весь UI переведён», а более узкое и честное: в
+// файлах, которые мы объявили переведёнными, каждый ключ есть в словаре.
+// Список файлов растёт по мере локализации — новый файл добавляется сюда же.
+describe("покрытие словаря по размеченным файлам", () => {
+  // Файлы читаются через import.meta.glob (Vite, `as: "raw"`), а не через
+  // node:fs: @types/node в проекте нет, и тянуть его ради одного теста
+  // несоразмерно — glob типизирован самим Vite и работает в jsdom-окружении.
+  const SOURCES = import.meta.glob("/src/**/*.svelte", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
+
+  // Список растёт по мере локализации: сюда добавляется файл, который мы
+  // объявили переведённым целиком.
+  const LOCALIZED = [
+    "/src/App.svelte",
+    "/src/views/Settings.svelte",
+    "/src/views/Tasks.svelte",
+    "/src/views/Notes.svelte",
+    "/src/views/Calendar.svelte",
+    "/src/views/Dashboard.svelte",
+    "/src/lib/components/TaskModal.svelte",
+    "/src/lib/components/QuickCapture.svelte",
+    "/src/views/Today.svelte",
+    "/src/views/Onboarding.svelte",
+    "/src/lib/components/LiveMarkdownEditor.svelte",
+    "/src/lib/components/RoutinesModal.svelte",
+    "/src/lib/components/PomodoroWidget.svelte",
+    "/src/lib/components/SearchOverlay.svelte",
+    "/src/lib/components/NotificationPanel.svelte",
+    "/src/lib/components/TrackingWidget.svelte",
+    "/src/lib/components/ModelDownloader.svelte",
+    "/src/views/NotesGraph.svelte",
+    "/src/lib/components/TaskHistoryDetail.svelte",
+  ];
+
+  it("все объявленные файлы найдены — путь не устарел", () => {
+    for (const f of LOCALIZED) {
+      expect(SOURCES[f], `не найден файл ${f}`).toBeTypeOf("string");
+    }
+  });
+
+  it("каждый t(\"...\") из размеченных файлов есть в словаре EN", () => {
+    const missing: string[] = [];
+    for (const file of LOCALIZED) {
+      const src = SOURCES[file] ?? "";
+      // `tr(` — Calendar.svelte: там `t` занято переменной задачи в {#each},
+      // и перевод импортирован как `tr`. Без этой ветки тест молча считал бы
+      // файл переведённым, не проверив ни одного его ключа.
+      // (?<![\w.]) — чтобы не поймать split("...") / import("...")
+      for (const m of src.matchAll(/(?<![\w.])tr?\("([^"]+)"/g)) {
+        if (!(m[1] in EN)) missing.push(`${file}: ${m[1]}`);
+      }
+    }
+    expect(missing).toEqual([]);
+  });
+});

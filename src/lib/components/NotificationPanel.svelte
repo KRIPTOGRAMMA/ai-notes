@@ -4,6 +4,7 @@
   import Icon from "./Icon.svelte";
   import type { NotificationEntry } from "../types";
 
+  import { t } from "../i18n.svelte";
   let { onClose, onOpenNote }: { onClose: () => void; onOpenNote?: (id: string) => void } = $props();
 
   let entries: NotificationEntry[] = $state([]);
@@ -62,17 +63,17 @@
 >
   <div class="notif-panel card" role="dialog" aria-modal="true">
     <div class="notif-head">
-      <span class="notif-title">Уведомления</span>
+      <span class="notif-title">{t("Уведомления")}</span>
       {#if entries.length > 0}
-        <button class="btn-sm" onclick={clearAll}>Очистить</button>
+        <button class="btn-sm" onclick={clearAll}>{t("Очистить")}</button>
       {/if}
-      <button class="btn-icon" title="Закрыть" onclick={onClose}>✕</button>
+      <button class="btn-icon" title={t("Закрыть")} onclick={onClose}>✕</button>
     </div>
 
     {#if loading}
-      <div class="notif-empty muted">Загрузка…</div>
+      <div class="notif-empty muted">{t("Загрузка…")}</div>
     {:else if entries.length === 0}
-      <div class="notif-empty muted">Уведомлений пока не было</div>
+      <div class="notif-empty muted">{t("Уведомлений пока не было")}</div>
     {:else}
       <ul class="notif-list">
         {#each entries as e (e.id)}
@@ -80,7 +81,7 @@
           <li class="notif-row" class:clickable>
             <span class="notif-icon"><Icon name={KIND_ICONS[e.kind] ?? "bell"} size={13} /></span>
             {#if clickable}
-              <button class="notif-body notif-body-btn" onclick={() => openEntry(e)} title="Открыть заметку">
+              <button class="notif-body notif-body-btn" onclick={() => openEntry(e)} title={t("Открыть заметку")}>
                 <div class="notif-row-title">{e.title}</div>
                 <div class="notif-row-text">{e.body}</div>
               </button>

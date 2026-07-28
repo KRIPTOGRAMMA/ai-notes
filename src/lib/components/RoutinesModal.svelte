@@ -3,6 +3,8 @@
   import { onMount } from "svelte";
   import Icon from "./Icon.svelte";
 
+  // `t` здесь занято локальной переменной, перевод импортируется как `tr`.
+  import { t as tr } from "../i18n.svelte";
   let { onClose }: { onClose: () => void } = $props();
 
   const DAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
@@ -70,7 +72,7 @@
 <div class="backdrop" role="presentation" onclick={onClose} onkeydown={(e) => e.key === "Escape" && onClose()}>
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <div class="dialog card" role="dialog" onclick={(e) => e.stopPropagation()}>
-    <h3 class="dialog-title">Рутины</h3>
+    <h3 class="dialog-title">{tr("Рутины")}</h3>
 
     <div class="list">
       {#each routineStore.routines as r (r.id)}
@@ -86,8 +88,8 @@
             <button class="btn-icon" onclick={() => routineStore.update(r.id, { active: !r.active })} title={r.active ? "Выключить" : "Включить"}>
               {r.active ? "✓" : "○"}
             </button>
-            <button class="btn-icon" onclick={() => openEdit(r)} title="Редактировать"><Icon name="pencil" /></button>
-            <button class="btn-icon" onclick={() => routineStore.remove(r.id)} title="Удалить">✕</button>
+            <button class="btn-icon" onclick={() => openEdit(r)} title={tr("Редактировать")}><Icon name="pencil" /></button>
+            <button class="btn-icon" onclick={() => routineStore.remove(r.id)} title={tr("Удалить")}>✕</button>
           </div>
         </div>
       {/each}
@@ -95,7 +97,7 @@
 
     {#if editingId !== undefined}
       <div class="edit-form">
-        <input bind:value={editTitle} placeholder="Название рутины" />
+        <input bind:value={editTitle} placeholder={tr("Название рутины")} />
         <div class="day-picker">
           {#each DAYS as d, i}
             <label class="day-chip">
@@ -105,19 +107,19 @@
           {/each}
         </div>
         <div class="time-row">
-          <label>Начало <input type="time" bind:value={editStart} /></label>
-          <label>Длительность (мин) <input type="number" bind:value={editDuration} min="15" style="width:70px;" /></label>
+          <label>{tr("Начало")} <input type="time" bind:value={editStart} /></label>
+          <label>{tr("Длительность (мин)")} <input type="number" bind:value={editDuration} min="15" style="width:70px;" /></label>
         </div>
         <div class="actions">
-          <button class="btn-ghost" onclick={() => editingId = undefined}>Отмена</button>
+          <button class="btn-ghost" onclick={() => editingId = undefined}>{tr("Отмена")}</button>
           <button class="btn-primary" onclick={save}>{editingId ? "Сохранить" : "Добавить"}</button>
         </div>
       </div>
     {:else}
-      <button class="btn-sm" style="margin-top:8px;" onclick={openNew}>+ Добавить рутину</button>
+      <button class="btn-sm" style="margin-top:8px;" onclick={openNew}>{tr("+ Добавить рутину")}</button>
     {/if}
 
-    <button class="btn-ghost" style="margin-top:8px;align-self:flex-end;" onclick={onClose}>Закрыть</button>
+    <button class="btn-ghost" style="margin-top:8px;align-self:flex-end;" onclick={onClose}>{tr("Закрыть")}</button>
   </div>
 </div>
 

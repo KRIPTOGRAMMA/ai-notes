@@ -4,6 +4,7 @@
   import Icon from "./Icon.svelte";
   import type { ActiveSession } from "../types";
 
+  import { t } from "../i18n.svelte";
   let session: ActiveSession | null = $state(null);
   let now = $state(new Date());
 
@@ -47,7 +48,7 @@
     <span class="track-label"><Icon name="play" size={12} /> {session.title}</span>
     <span class="track-time">{elapsedLabel}</span>
     <div class="track-actions">
-      <button class="btn-icon" title="Остановить трекинг" onclick={stop}><Icon name="stop" /></button>
+      <button class="btn-icon" title={t("Остановить трекинг")} onclick={stop}><Icon name="stop" /></button>
     </div>
   </div>
 {/if}

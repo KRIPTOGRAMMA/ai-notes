@@ -7,6 +7,7 @@
   import { parseClipboardNote } from "../clipboardNote";
   import { applyCachedTheme } from "../theme";
   import type { PinnedItem, Subtask } from "../types";
+  import { t } from "../i18n.svelte";
   import "../../app.css";
 
   // "pinned" (v0.9.33) — полноценный третий режим, в отличие от "clipboard":
@@ -267,8 +268,8 @@
   {#if mode !== "pinned"}
     <div class="tabs">
       <div class="seg">
-        <button class:active={mode === "task"} onclick={() => mode = "task"}>Задача</button>
-        <button class:active={mode === "note"} onclick={() => mode = "note"}>Заметка</button>
+        <button class:active={mode === "task"} onclick={() => mode = "task"}>{t("Задача")}</button>
+        <button class:active={mode === "note"} onclick={() => mode = "note"}>{t("Заметка")}</button>
       </div>
       <span style="flex:1;"></span>
       <kbd>Ctrl Tab</kbd>
@@ -283,12 +284,12 @@
     {#if pinned}
       <div class="pin-head">
         <span class="pin-badge">⚡ {pinned.kind === "task" ? "Задача" : "Заметка"}</span>
-        {#if saved}<span class="pin-saved">Сохранено</span>{/if}
+        {#if saved}<span class="pin-saved">{t("Сохранено")}</span>{/if}
       </div>
       <!-- svelte-ignore a11y_autofocus -->
-      <input class="pin-title" bind:value={pinnedTitle} placeholder="Заголовок..."
+      <input class="pin-title" bind:value={pinnedTitle} placeholder={t("Заголовок...")}
         oninput={() => saved = false} />
-      <textarea class="pin-text" bind:value={pinnedText} placeholder="Текст... (Ctrl+Enter — сохранить)"
+      <textarea class="pin-text" bind:value={pinnedText} placeholder={t("Текст... (Ctrl+Enter — сохранить)")}
         rows={pinned.kind === "task" ? 3 : 6} autofocus oninput={() => saved = false}></textarea>
 
       <!-- Чек-лист — только у задачи: у заметки подзадач не бывает. Правки
@@ -297,7 +298,7 @@
       {#if pinned.kind === "task"}
         <div class="subs">
           <div class="subs-head">
-            <span class="subs-label">Подзадачи</span>
+            <span class="subs-label">{t("Подзадачи")}</span>
             {#if subs.length}<span class="subs-count">{subsDone} / {subs.length}</span>{/if}
           </div>
           {#each subs as s (s.id)}
@@ -306,10 +307,10 @@
                 onchange={() => toggleSub(s)} aria-label={s.title} />
               <span class="sub-title">{s.title}</span>
               <button class="sub-del" onclick={() => removeSub(s)} disabled={subsBusy}
-                title="Удалить подзадачу" aria-label="Удалить подзадачу {s.title}">✕</button>
+                title={t("Удалить подзадачу")} aria-label="Удалить подзадачу {s.title}">✕</button>
             </div>
           {/each}
-          <input class="sub-new" bind:value={newSub} placeholder="+ подзадача (Enter)"
+          <input class="sub-new" bind:value={newSub} placeholder={t("+ подзадача (Enter)")}
             disabled={subsBusy}
             onkeydown={(e) => {
               if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); addSub(); }
@@ -318,35 +319,34 @@
       {/if}
 
       <div class="buttons">
-        <button class="btn-ghost" onclick={cancel}>Закрыть</button>
+        <button class="btn-ghost" onclick={cancel}>{t("Закрыть")}</button>
         <button class="btn-primary" onclick={savePinned} disabled={busy || !pinnedTitle.trim()}>
-          Сохранить
+          {t("Сохранить")}
         </button>
       </div>
     {:else}
       <!-- Пустой слот — не ошибка: пользователь ещё ничего не закреплял, либо
            закреплённое удалено. Объясняем, как закрепить, вместо пустого окна. -->
       <div class="pin-empty">
-        <p class="pin-empty-title">⚡ Слот пуст</p>
+        <p class="pin-empty-title">{t("⚡ Слот пуст")}</p>
         <p class="pin-empty-hint">
-          Закрепите задачу или заметку кнопкой-молнией в списке — этот хоткей
-          будет открывать её сразу на правку.
+          {t("Закрепите задачу или заметку кнопкой-молнией в списке — этот хоткей будет открывать её сразу на правку.")}
         </p>
       </div>
       <div class="buttons">
-        <button class="btn-ghost" onclick={cancel}>Закрыть</button>
+        <button class="btn-ghost" onclick={cancel}>{t("Закрыть")}</button>
       </div>
     {/if}
   {:else if mode === "task"}
     <!-- svelte-ignore a11y_autofocus -->
-    <input bind:value={title} placeholder="Название задачи..." autofocus />
+    <input bind:value={title} placeholder={t("Название задачи...")} autofocus />
 
     <div class="row">
       <select bind:value={priority}>
-        <option value="Low">Низкий</option>
-        <option value="Medium">Средний</option>
-        <option value="High">Высокий</option>
-        <option value="Critical">Критический</option>
+        <option value="Low">{t("Низкий")}</option>
+        <option value="Medium">{t("Средний")}</option>
+        <option value="High">{t("Высокий")}</option>
+        <option value="Critical">{t("Критический")}</option>
       </select>
       <select bind:value={category}>
         {#each categoryStore.categories as c (c.id)}
@@ -359,26 +359,26 @@
     </div>
 
     {#if showDescription}
-      <textarea bind:value={description} placeholder="Описание..." rows="2"></textarea>
+      <textarea bind:value={description} placeholder={t("Описание...")} rows="2"></textarea>
     {/if}
 
     <div class="buttons">
-      <button class="btn-ghost" onclick={cancel}>Отмена</button>
-      <button class="btn-primary" onclick={createTask} disabled={!title.trim()}>Создать</button>
+      <button class="btn-ghost" onclick={cancel}>{t("Отмена")}</button>
+      <button class="btn-primary" onclick={createTask} disabled={!title.trim()}>{t("Создать")}</button>
     </div>
   {:else}
     {#if fromClipboard}
-      <p class="clip-hint">Текст из буфера обмена — можно поправить перед сохранением</p>
+      <p class="clip-hint">{t("Текст из буфера обмена — можно поправить перед сохранением")}</p>
     {/if}
     <!-- svelte-ignore a11y_autofocus -->
-    <input bind:value={noteTitle} placeholder="Заголовок заметки..." autofocus
+    <input bind:value={noteTitle} placeholder={t("Заголовок заметки...")} autofocus
       oninput={() => fromClipboard = false} />
-    <textarea bind:value={noteContent} placeholder="Текст заметки... (Ctrl+Enter — сохранить)" rows="3"
+    <textarea bind:value={noteContent} placeholder={t("Текст заметки... (Ctrl+Enter — сохранить)")} rows="3"
       oninput={() => fromClipboard = false}></textarea>
 
     <div class="buttons">
-      <button class="btn-ghost" onclick={cancel}>Отмена</button>
-      <button class="btn-primary" onclick={createNote} disabled={!noteTitle.trim() && !noteContent.trim()}>Создать</button>
+      <button class="btn-ghost" onclick={cancel}>{t("Отмена")}</button>
+      <button class="btn-primary" onclick={createNote} disabled={!noteTitle.trim() && !noteContent.trim()}>{t("Создать")}</button>
     </div>
   {/if}
 </div>

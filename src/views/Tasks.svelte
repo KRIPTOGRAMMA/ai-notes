@@ -9,6 +9,7 @@
   import { pinnedStore } from "../lib/stores/pinned.svelte";
   import { api } from "../lib/api/tauri";
   import { parseComposer, parseTaskText, matchCategoryQuery, SUBTASK_PREFIX } from "../lib/composer";
+  import { t } from "../lib/i18n.svelte";
   import TaskModal from "../lib/components/TaskModal.svelte";
   import TaskHistoryDetail from "../lib/components/TaskHistoryDetail.svelte";
   import Icon from "../lib/components/Icon.svelte";
@@ -811,8 +812,8 @@
     <button
       class="task-check"
       onclick={() => completeRow(task)}
-      title="Выполнить"
-      aria-label="Выполнить задачу"
+      title={t("Выполнить")}
+      aria-label={t("Выполнить задачу")}
     ></button>
 
     <div
@@ -857,11 +858,11 @@
     </div>
 
     <div class="task-actions">
-      <button class="btn-icon" disabled={busy} title="Переформулировать в SMART"
+      <button class="btn-icon" disabled={busy} title={t("Переформулировать в SMART")}
         onclick={() => rewriteTask(task.id, task.title)}>{#if busy}…{:else}<Icon name="sparkles" />{/if}</button>
-      <button class="btn-icon" disabled={busy} title="Разбить на подзадачи"
+      <button class="btn-icon" disabled={busy} title={t("Разбить на подзадачи")}
         onclick={() => generateSubtasks(task.id, task.title)}>{#if busy}…{:else}<Icon name="shuffle" />{/if}</button>
-      <button class="btn-icon" disabled={busy} title="Авто-категория"
+      <button class="btn-icon" disabled={busy} title={t("Авто-категория")}
         onclick={() => classifyTask(task.id, task.title)}>{#if busy}…{:else}<Icon name="tag" />{/if}</button>
       <button class="btn-icon" title={trackingId === task.id ? "Остановить трекинг" : "Начать трекинг"}
         onclick={() => toggleTracking(task.id)} class:active={trackingId === task.id}>
@@ -869,7 +870,7 @@
       <button class="btn-icon" class:active={pinnedStore.is("task", task.id)}
         title={pinnedStore.is("task", task.id) ? "Убрать из быстрого слота" : "В быстрый слот (Ctrl+Shift+J)"}
         onclick={() => pinnedStore.toggle("task", task.id)}><Icon name="zap" /></button>
-      <button class="btn-icon btn-danger" title="Удалить"
+      <button class="btn-icon btn-danger" title={t("Удалить")}
         onclick={() => taskStore.remove(task.id)}>✕</button>
     </div>
   </li>
@@ -877,16 +878,16 @@
   {#if subtasksPreview && subtasksPreview.taskId === task.id}
     <li class="task-sub-panel">
       <div class="sub-preview-head">
-        <span class="section-title" style="margin:0;">ИИ предлагает подзадачи</span>
+        <span class="section-title" style="margin:0;">{t("ИИ предлагает подзадачи")}</span>
         <div style="display:flex;gap:6px;">
-          <button class="btn-sm btn-primary" onclick={() => acceptAllSubtasks(task.id, subtasksPreview!.items)}>Принять все</button>
-          <button class="btn-sm" onclick={() => subtasksPreview = null}>Закрыть</button>
+          <button class="btn-sm btn-primary" onclick={() => acceptAllSubtasks(task.id, subtasksPreview!.items)}>{t("Принять все")}</button>
+          <button class="btn-sm" onclick={() => subtasksPreview = null}>{t("Закрыть")}</button>
         </div>
       </div>
       {#each subtasksPreview.items as subtask}
         <div class="sub-line">
           <span style="flex:1;">{subtask}</span>
-          <button class="btn-sm" onclick={() => acceptSubtask(task.id, subtask)}>+ Добавить</button>
+          <button class="btn-sm" onclick={() => acceptSubtask(task.id, subtask)}>{t("+ Добавить")}</button>
         </div>
       {/each}
     </li>
@@ -909,7 +910,7 @@
       <div class="sub-line">
         <input
           class="check-input"
-          placeholder="+ подзадача (Enter)"
+          placeholder={t("+ подзадача (Enter)")}
           bind:value={subDraft[task.id]}
           bind:this={draftEls[task.id]}
           onkeydown={(e) => onDraftKeydown(e, task.id)}
@@ -948,7 +949,7 @@
   <div role="dialog" aria-modal="true" class="overlay backdrop"
     onclick={(e) => { if (e.target === e.currentTarget) showProjects = false; }}>
     <div class="modal dialog">
-      <h2 class="dialog-title">Проекты</h2>
+      <h2 class="dialog-title">{t("Проекты")}</h2>
 
       {#if projectStore.error}
         <div class="alert" style="margin:0;">{projectStore.error}</div>
@@ -965,28 +966,28 @@
             onclick={() => projectStore.update(p.id, { archived: !p.archived })}>
             {p.archived ? "Вернуть" : "Архив"}
           </button>
-          <button class="btn-icon btn-danger" title="Удалить проект (задачи останутся без проекта)"
+          <button class="btn-icon btn-danger" title={t("Удалить проект (задачи останутся без проекта)")}
             onclick={() => projectStore.remove(p.id)}>✕</button>
         </div>
         {#if !p.archived}
           <div class="proj-goal">
-            <span class="muted">Цель:</span>
+            <span class="muted">{t("Цель:")}</span>
             <input class="goal-num" type="number" min="0" placeholder="—"
               value={p.goal_tasks ?? ""}
               onchange={(e) => projectStore.update(p.id, { goal_tasks: Number(e.currentTarget.value) || 0 })}
             />
-            <span class="muted">задач ·</span>
+            <span class="muted">{t("задач ·")}</span>
             <input class="goal-num" type="number" min="0" step="15" placeholder="—"
               value={p.goal_mins ?? ""}
               onchange={(e) => projectStore.update(p.id, { goal_mins: Number(e.currentTarget.value) || 0 })}
             />
-            <span class="muted">мин в</span>
+            <span class="muted">{t("мин в")}</span>
             <select
               value={p.goal_period}
               onchange={(e) => projectStore.update(p.id, { goal_period: e.currentTarget.value as "week" | "month" })}
             >
-              <option value="week">неделю</option>
-              <option value="month">месяц</option>
+              <option value="week">{t("неделю")}</option>
+              <option value="month">{t("месяц")}</option>
             </select>
             {#if goalText(p)}
               <span class="goal-chip" class:met={goalMet(p)}>{goalText(p)}</span>
@@ -997,9 +998,9 @@
             {#if showGoalHistory[p.id]}
               <div class="goal-history">
                 {#if goalHistoryLoading[p.id]}
-                  <span class="muted">Загрузка…</span>
+                  <span class="muted">{t("Загрузка…")}</span>
                 {:else if showGoalHistory[p.id].length === 0}
-                  <span class="muted">Нет записей</span>
+                  <span class="muted">{t("Нет записей")}</span>
                 {:else}
                   {#each showGoalHistory[p.id] as snap (snap.id)}
                     <div class="goal-history-row">
@@ -1015,20 +1016,20 @@
           </div>
         {/if}
       {:else}
-        <p class="muted" style="margin:0;font-size:13px;">Проектов пока нет — создайте первый.</p>
+        <p class="muted" style="margin:0;font-size:13px;">{t("Проектов пока нет — создайте первый.")}</p>
       {/each}
 
       <div class="proj-row">
         <input
           bind:value={newProjectName}
-          placeholder="Название нового проекта"
+          placeholder={t("Название нового проекта")}
           onkeydown={(e) => { if (e.key === "Enter") addProject(); }}
         />
-        <button class="btn-primary" onclick={addProject} disabled={!newProjectName.trim()}>Создать</button>
+        <button class="btn-primary" onclick={addProject} disabled={!newProjectName.trim()}>{t("Создать")}</button>
       </div>
 
       <div class="actions">
-        <button class="btn-ghost" onclick={() => showProjects = false}>Закрыть</button>
+        <button class="btn-ghost" onclick={() => showProjects = false}>{t("Закрыть")}</button>
       </div>
     </div>
   </div>
@@ -1038,31 +1039,31 @@
   <div role="dialog" aria-modal="true" class="overlay backdrop"
     onclick={(e) => { if (e.target === e.currentTarget) { showSmartListModal = false; resetSmartListForm(); } }}>
     <div class="modal dialog">
-      <h2 class="dialog-title">Новый умный список</h2>
+      <h2 class="dialog-title">{t("Новый умный список")}</h2>
 
       {#if smartListStore.error}
         <div class="alert" style="margin:0;">{smartListStore.error}</div>
       {/if}
 
       <label class="field">
-        <span class="label">Название</span>
-        <input bind:value={newSmartListName} placeholder="Например: Важное" />
+        <span class="label">{t("Название")}</span>
+        <input bind:value={newSmartListName} placeholder={t("Например: Важное")} />
       </label>
 
       <div class="pair" style="margin-top:8px;">
         <label class="field">
-          <span class="label">Категория</span>
+          <span class="label">{t("Категория")}</span>
           <select bind:value={newSmartListCategory}>
-            <option value="">Любая</option>
+            <option value="">{t("Любая")}</option>
             {#each categoryStore.categories as c (c.id)}
               <option value={c.id}>{c.name}</option>
             {/each}
           </select>
         </label>
         <label class="field">
-          <span class="label">Приоритет</span>
+          <span class="label">{t("Приоритет")}</span>
           <select bind:value={newSmartListPriority}>
-            <option value="">Любой</option>
+            <option value="">{t("Любой")}</option>
             {#each Object.entries(PRIORITY_LABELS) as [value, label] (value)}
               <option {value}>{label}</option>
             {/each}
@@ -1072,24 +1073,24 @@
 
       <div class="pair" style="margin-top:8px;">
         <label class="field">
-          <span class="label">Тег</span>
-          <input bind:value={newSmartListTag} placeholder="без #" />
+          <span class="label">{t("Тег")}</span>
+          <input bind:value={newSmartListTag} placeholder={t("без #")} />
         </label>
         <label class="field">
-          <span class="label">Дедлайн</span>
+          <span class="label">{t("Дедлайн")}</span>
           <select bind:value={newSmartListHasDeadline}>
-            <option value="">Не важно</option>
-            <option value="yes">Есть дедлайн</option>
-            <option value="no">Без дедлайна</option>
+            <option value="">{t("Не важно")}</option>
+            <option value="yes">{t("Есть дедлайн")}</option>
+            <option value="no">{t("Без дедлайна")}</option>
           </select>
         </label>
       </div>
 
-      <p class="hint">Условия комбинируются через «И» — задача должна подойти под все заданные.</p>
+      <p class="hint">{t("Условия комбинируются через «И» — задача должна подойти под все заданные.")}</p>
 
       <div class="actions">
-        <button class="btn-ghost" onclick={() => { showSmartListModal = false; resetSmartListForm(); }}>Отмена</button>
-        <button class="btn-primary" onclick={createSmartList} disabled={!newSmartListName.trim()}>Создать</button>
+        <button class="btn-ghost" onclick={() => { showSmartListModal = false; resetSmartListForm(); }}>{t("Отмена")}</button>
+        <button class="btn-primary" onclick={createSmartList} disabled={!newSmartListName.trim()}>{t("Создать")}</button>
       </div>
     </div>
   </div>
@@ -1097,25 +1098,28 @@
 
 <div class="page" class:board-mode={viewMode === "board"}>
   <div class="page-head">
-    <h1 class="page-title">Задачи</h1>
+    <h1 class="page-title">{t("Задачи")}</h1>
     <span class="muted count">
-      {taskStore.activeTasks.length} актив. · {taskStore.historyTasks.length} в истории
+      {t("{active} актив. · {history} в истории", {
+        active: taskStore.activeTasks.length,
+        history: taskStore.historyTasks.length,
+      })}
     </span>
     <div class="seg">
-      <button class:active={viewMode === "list"} onclick={() => viewMode = "list"}>Список</button>
-      <button class:active={viewMode === "board"} onclick={() => viewMode = "board"}>Доска</button>
+      <button class:active={viewMode === "list"} onclick={() => viewMode = "list"}>{t("Список")}</button>
+      <button class:active={viewMode === "board"} onclick={() => viewMode = "board"}>{t("Доска")}</button>
     </div>
     <span style="flex:1;"></span>
     <input
       bind:value={searchQuery}
       oninput={handleSearch}
-      placeholder="Поиск задач…"
+      placeholder={t("Поиск задач…")}
       class="head-search"
     />
     {#if projectStore.projects.length > 0}
-      <select bind:value={projectFilter} class="project-filter" title="Фильтр по проекту">
-        <option value="all">Все проекты</option>
-        <option value="none">Без проекта</option>
+      <select bind:value={projectFilter} class="project-filter" title={t("Фильтр по проекту")}>
+        <option value="all">{t("Все проекты")}</option>
+        <option value="none">{t("Без проекта")}</option>
         {#each projectStore.active as p (p.id)}
           <option value={p.id}>{p.name}</option>
         {/each}
@@ -1123,17 +1127,17 @@
     {/if}
     {#if aiEnabled}
       <button onclick={askWhatNow} disabled={whatNowPending}
-        title="ИИ посоветует, чем заняться сейчас — по блокам, дедлайнам и приоритетам">
+        title={t("ИИ посоветует, чем заняться сейчас — по блокам, дедлайнам и приоритетам")}>
         {#if whatNowPending}Думаю…{:else}<Icon name="target" size={12} /> Что сейчас?{/if}
       </button>
     {/if}
-    <button onclick={() => { showProjects = true; projectStore.load(); }}>Проекты</button>
+    <button onclick={() => { showProjects = true; projectStore.load(); }}>{t("Проекты")}</button>
     <div class="seg">
-      <button class:active={listSubView === "active"} onclick={() => listSubView = "active"}>Активные</button>
-      <button class:active={listSubView === "history"} onclick={() => listSubView = "history"}>История</button>
-      <button class:active={listSubView === "trash"} onclick={() => { listSubView = "trash"; taskStore.loadDeleted(); }}>Корзина</button>
+      <button class:active={listSubView === "active"} onclick={() => listSubView = "active"}>{t("Активные")}</button>
+      <button class:active={listSubView === "history"} onclick={() => listSubView = "history"}>{t("История")}</button>
+      <button class:active={listSubView === "trash"} onclick={() => { listSubView = "trash"; taskStore.loadDeleted(); }}>{t("Корзина")}</button>
     </div>
-    <button class="btn-primary" onclick={() => { boardCreateStatus = "Todo"; showCreateModal = true; }}>+ Новая</button>
+    <button class="btn-primary" onclick={() => { boardCreateStatus = "Todo"; showCreateModal = true; }}>{t("+ Новая")}</button>
   </div>
 
   <!-- v0.9.25: ошибки стора наконец видны. Раньше taskStore.error только
@@ -1144,36 +1148,36 @@
   {#if taskStore.error}
     <div class="alert task-error" role="alert">
       <span>{taskStore.error}</span>
-      <button class="btn-sm" onclick={() => taskStore.clearError()} title="Скрыть">✕</button>
+      <button class="btn-sm" onclick={() => taskStore.clearError()} title={t("Скрыть")}>✕</button>
     </div>
   {/if}
 
   {#if selectedIds.size > 0}
     <div class="bulk-bar card">
       <span class="bulk-count">{selectedIds.size} выбрано</span>
-      <select bind:value={bulkProjectId} disabled={bulkBusy} title="Перенести в проект">
-        <option value="" disabled selected>В проект…</option>
-        <option value="none">Без проекта</option>
+      <select bind:value={bulkProjectId} disabled={bulkBusy} title={t("Перенести в проект")}>
+        <option value="" disabled selected>{t("В проект…")}</option>
+        <option value="none">{t("Без проекта")}</option>
         {#each projectStore.active as p (p.id)}
           <option value={p.id}>{p.name}</option>
         {/each}
       </select>
       {#if bulkProjectId}
-        <button class="btn-sm" disabled={bulkBusy} onclick={bulkMoveToProject}>Перенести</button>
+        <button class="btn-sm" disabled={bulkBusy} onclick={bulkMoveToProject}>{t("Перенести")}</button>
       {/if}
-      <select bind:value={bulkCategory} disabled={bulkBusy} title="Сменить категорию">
-        <option value="" disabled selected>Категория…</option>
+      <select bind:value={bulkCategory} disabled={bulkBusy} title={t("Сменить категорию")}>
+        <option value="" disabled selected>{t("Категория…")}</option>
         {#each categoryStore.categories as c (c.id)}
           <option value={c.id}>{c.name}</option>
         {/each}
       </select>
       {#if bulkCategory}
-        <button class="btn-sm" disabled={bulkBusy} onclick={bulkSetCategory}>Применить</button>
+        <button class="btn-sm" disabled={bulkBusy} onclick={bulkSetCategory}>{t("Применить")}</button>
       {/if}
-      <button class="btn-sm" disabled={bulkBusy} onclick={bulkComplete}>Выполнить</button>
-      <button class="btn-sm btn-danger" disabled={bulkBusy} onclick={bulkDelete}>Удалить</button>
+      <button class="btn-sm" disabled={bulkBusy} onclick={bulkComplete}>{t("Выполнить")}</button>
+      <button class="btn-sm btn-danger" disabled={bulkBusy} onclick={bulkDelete}>{t("Удалить")}</button>
       <span style="flex:1;"></span>
-      <button class="btn-icon" title="Снять выбор" onclick={clearSelection}>✕</button>
+      <button class="btn-icon" title={t("Снять выбор")} onclick={clearSelection}>✕</button>
     </div>
   {/if}
 
@@ -1206,7 +1210,7 @@
           <div class="column-head">
             <span class="column-title" style="--cat: {col.color}">{col.name}</span>
             <span class="muted column-count">{boardTasksFor(col.id).length}</span>
-            <button class="btn-icon" title="Новая задача" onclick={() => openBoardCreate(col.id)}>+</button>
+            <button class="btn-icon" title={t("Новая задача")} onclick={() => openBoardCreate(col.id)}>+</button>
           </div>
 
           <div class="column-body">
@@ -1223,7 +1227,7 @@
                   <span class="prio-dot" style="--prio: var(--prio-{task.priority.toLowerCase()});" title="Приоритет: {PRIORITY_LABELS[task.priority]}"></span>
                   {task.title}
                   {#if trackingId === task.id}
-                    <span class="tracking-dot" title="Идёт трекинг"><Icon name="play" size={10} /></span>
+                    <span class="tracking-dot" title={t("Идёт трекинг")}><Icon name="play" size={10} /></span>
                   {/if}
                 </div>
                 <div class="board-card-meta">
@@ -1238,18 +1242,18 @@
                 </div>
               </button>
             {:else}
-              <p class="empty-col muted">Пусто</p>
+              <p class="empty-col muted">{t("Пусто")}</p>
             {/each}
           </div>
         </div>
       {/each}
       <div class="add-column">
-        <button class="btn-sm" onclick={() => showStatusQuickAdd = true}>+ Колонка</button>
+        <button class="btn-sm" onclick={() => showStatusQuickAdd = true}>{t("+ Колонка")}</button>
         {#if showStatusQuickAdd}
           <!-- svelte-ignore a11y_autofocus -->
           <input
             bind:value={newBoardStatusName}
-            placeholder="Название статуса"
+            placeholder={t("Название статуса")}
             autofocus
             onkeydown={(e) => { if (e.key === "Enter") addBoardStatus(); if (e.key === "Escape") { showStatusQuickAdd = false; newBoardStatusName = ""; } }}
             onblur={() => { if (!newBoardStatusName.trim()) showStatusQuickAdd = false; }}
@@ -1261,7 +1265,7 @@
   {#if listSubView === "active"}
   {#if todayBlocks.length > 0 && !searchQuery.trim()}
     <div class="day-plan card">
-      <span class="day-plan-label">Сегодня:</span>
+      <span class="day-plan-label">{t("Сегодня:")}</span>
       {#each todayBlocks as t (t.id)}
         <button class="chip day-plan-chip" onclick={() => editingTask = t} title={t.title}>
           <span class="day-plan-time">{blockTime(t)}</span> {t.title}
@@ -1276,21 +1280,21 @@
         class="chip smart-list-chip"
         class:active-toggle={activeSmartListId === null}
         onclick={() => activeSmartListId = null}
-      >Все</button>
+      >{t("Все")}</button>
       {#each BUILTIN_SMART_LISTS as l (l.id)}
         <button
           class="chip smart-list-chip"
           class:active-toggle={activeSmartListId === l.id}
           onclick={() => activeSmartListId = activeSmartListId === l.id ? null : l.id}
-        >{l.name}</button>
+        >{t(l.name)}</button>
       {/each}
       {#each smartListStore.lists as l (l.id)}
         <span class="chip smart-list-chip custom" class:active-toggle={activeSmartListId === l.id}>
           <button class="smart-list-name" onclick={() => activeSmartListId = activeSmartListId === l.id ? null : l.id}>{l.name}</button>
-          <button class="smart-list-remove" title="Удалить список" onclick={() => removeSmartList(l.id)}>✕</button>
+          <button class="smart-list-remove" title={t("Удалить список")} onclick={() => removeSmartList(l.id)}>✕</button>
         </span>
       {/each}
-      <button class="chip smart-list-chip smart-list-add" title="Создать умный список" onclick={() => showSmartListModal = true}>+ Список</button>
+      <button class="chip smart-list-chip smart-list-add" title={t("Создать умный список")} onclick={() => showSmartListModal = true}>{t("+ Список")}</button>
     </div>
   {/if}
 
@@ -1302,7 +1306,7 @@
         bind:value={composerText}
         onkeydown={composerKeydown}
         rows={composerRows}
-        placeholder="Быстрая задача… (!приоритет @категория #тег, завтра 15:00 — Shift+Enter подзадача, Ctrl+Enter создать)"
+        placeholder={t("Быстрая задача… (!приоритет @категория #тег, завтра 15:00 — Shift+Enter подзадача, Ctrl+Enter создать)")}
       ></textarea>
       {#if composerDraft.title}
         <button class="btn-primary btn-sm composer-send" disabled={composerBusy} onclick={submitComposer}>
@@ -1335,11 +1339,11 @@
   {/if}
 
   {#if searchQuery.trim()}
-    <div class="section-title">Результаты поиска</div>
+    <div class="section-title">{t("Результаты поиска")}</div>
     {#if isSearching}
-      <div class="empty">Поиск…</div>
+      <div class="empty">{t("Поиск…")}</div>
     {:else if searchResults.length === 0}
-      <div class="empty">Ничего не найдено</div>
+      <div class="empty">{t("Ничего не найдено")}</div>
     {:else}
       <ul class="task-list card">
         {#each searchResults as task (task.id)}
@@ -1350,8 +1354,8 @@
   {:else}
     {#if taskStore.activeTasks.length === 0}
       <div class="empty card">
-        Нет активных задач.<br />
-        <span class="muted">Создайте первую: «+ Новая» или Ctrl+Shift+N</span>
+        {t("Нет активных задач.")}<br />
+        <span class="muted">{t("Создайте первую: «+ Новая» или Ctrl+Shift+N")}</span>
       </div>
     {:else if filteredActive.length === 0}
       <div class="empty card">{activeSmartListId ? "В этом списке нет задач" : "В этом проекте нет активных задач"}</div>
@@ -1389,10 +1393,10 @@
 
   {:else if listSubView === "history"}
     <div class="empty-hint">
-      ✓ Выполненные задачи. Повторяющиеся не попадают сюда — они остаются активными.
+      {t("✓ Выполненные задачи. Повторяющиеся не попадают сюда — они остаются активными.")}
     </div>
     {#if taskStore.historyTasks.length === 0}
-      <div class="empty card">История пуста</div>
+      <div class="empty card">{t("История пуста")}</div>
     {:else}
       <ul class="task-list card history">
         {#each taskStore.historyTasks as task (task.id)}
@@ -1417,7 +1421,7 @@
               <span class="chip">{statusStore.name(task.status)}</span>
             </div>
             <div class="task-actions">
-              <button class="btn-icon btn-danger" title="Удалить" onclick={() => taskStore.remove(task.id)}>✕</button>
+              <button class="btn-icon btn-danger" title={t("Удалить")} onclick={() => taskStore.remove(task.id)}>✕</button>
             </div>
           </li>
         {/each}
@@ -1426,10 +1430,10 @@
 
   {:else}
     <div class="empty-hint trash-hint">
-      🗑 Удалённые задачи. Восстановить можно в любой момент, пока не нажато «Удалить навсегда».
+      {t("🗑 Удалённые задачи. Восстановить можно в любой момент, пока не нажато «Удалить навсегда».")}
     </div>
     {#if taskStore.deletedTasks.length === 0}
-      <div class="empty card">Корзина пуста</div>
+      <div class="empty card">{t("Корзина пуста")}</div>
     {:else}
       <ul class="task-list card trash">
         {#each taskStore.deletedTasks as task (task.id)}
@@ -1447,8 +1451,8 @@
               {/if}
             </div>
             <div class="task-actions">
-              <button class="btn-sm" title="Восстановить" onclick={() => taskStore.restore(task.id)}>Восстановить</button>
-              <button class="btn-icon btn-danger" title="Удалить навсегда" onclick={() => taskStore.purge(task.id)}>✕</button>
+              <button class="btn-sm" title={t("Восстановить")} onclick={() => taskStore.restore(task.id)}>{t("Восстановить")}</button>
+              <button class="btn-icon btn-danger" title={t("Удалить навсегда")} onclick={() => taskStore.purge(task.id)}>✕</button>
             </div>
           </li>
         {/each}

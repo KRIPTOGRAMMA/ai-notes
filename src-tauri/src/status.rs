@@ -28,7 +28,8 @@ pub struct StatusPayload {
 fn empty_payload() -> StatusPayload {
     StatusPayload {
         text: String::new(),
-        tooltip: "AI Notes: БД не найдена".into(),
+        tooltip: format!("AI Notes: {}",
+            crate::i18n::tr("БД не найдена", crate::i18n::lang_from_setting(""))),
         class: "off".into(),
         alt: String::new(),
     }
@@ -53,6 +54,9 @@ struct Block {
 }
 
 pub async fn status_payload(pool: &SqlitePool, now: DateTime<Utc>) -> Result<StatusPayload, sqlx::Error> {
+    // v0.9.39: строка статуса читается из waybar, то есть вне окна приложения,
+    // поэтому язык берётся из тех же настроек, что и остальной интерфейс.
+    let lang = crate::i18n::current_lang(pool).await;
     // Тайм-блоки сегодняшнего локального дня (не Done, не скрытые)
     let rows = sqlx::query(
         "SELECT title, scheduled_at, COALESCE(scheduled_mins, 60) AS mins FROM tasks
@@ -184,20 +188,20 @@ pub async fn status_payload(pool: &SqlitePool, now: DateTime<Utc>) -> Result<Sta
     // Помодоро — самое сиюминутное состояние (v0.6.6: раньше не показывалось,
     // т.к. фаза жила только в рантайме и короткоживущий CLI её не видел).
     let pomo_label = match (pomo_phase.as_str(), pomo_until) {
-        ("work", Some(t)) if t > now => Some(format!("🍅 до {}", hhmm(t))),
-        ("break", Some(t)) if t > now => Some(format!("☕ до {}", hhmm(t))),
-        ("paused", _) => Some("🍅 пауза".to_string()),
+        ("work", Some(t)) if t > now => Some(format!("🍅 {}", crate::i18n::tr_args("до {time}", lang, &[("time", hhmm(t))]))),
+        ("break", Some(t)) if t > now => Some(format!("☕ {}", crate::i18n::tr_args("до {time}", lang, &[("time", hhmm(t))]))),
+        ("paused", _) => Some(format!("🍅 {}", crate::i18n::tr("пауза", lang))),
         _ => None,
     };
 
     let (text, class) = if let Some(label) = &pomo_label {
         (label.clone(), "pomodoro")
     } else if let Some((ref title, mins)) = active_session {
-        (format!("▶ {} · {} мин", ellipsize(title, TITLE_MAX), mins), "tracking")
+        (crate::i18n::tr_args("▶ {task} · {n} мин", lang, &[("task", ellipsize(title, TITLE_MAX)), ("n", mins.to_string())]), "tracking")
     } else if let Some(b) = current {
-        (format!("▶ {} до {}", ellipsize(&b.title, TITLE_MAX), hhmm(b.end)), "block")
+        (crate::i18n::tr_args("▶ {task} до {time}", lang, &[("task", ellipsize(&b.title, TITLE_MAX)), ("time", hhmm(b.end))]), "block")
     } else if let Some(b) = routine_current {
-        (format!("▶ {} до {}", ellipsize(&b.title, TITLE_MAX), hhmm(b.end)), "block")
+        (crate::i18n::tr_args("▶ {task} до {time}", lang, &[("task", ellipsize(&b.title, TITLE_MAX)), ("time", hhmm(b.end))]), "block")
     } else if let Some(b) = next {
         (format!("⏱ {} {}", hhmm(b.start), ellipsize(&b.title, TITLE_MAX)), "next")
     } else if let Some(b) = routine_next {
@@ -212,43 +216,44 @@ pub async fn status_payload(pool: &SqlitePool, now: DateTime<Utc>) -> Result<Sta
 
     let mut tip: Vec<String> = Vec::new();
     if let Some((ref title, mins)) = active_session {
-        tip.push(format!("Трекинг: {} ({} мин)", title, mins));
+        tip.push(crate::i18n::tr_args("Трекинг: {task} ({n} мин)", lang, &[("task", title.clone()), ("n", mins.to_string())]));
     }
     if pomo_label.is_some() {
-        let phase_ru = match pomo_phase.as_str() {
+        let phase = match pomo_phase.as_str() {
             "work" => "работа",
             "break" => "перерыв",
             "paused" => "на паузе",
             _ => "",
         };
-        tip.push(format!("Помодоро: {phase_ru}"));
+        tip.push(crate::i18n::tr_args("Помодоро: {phase}", lang,
+            &[("phase", crate::i18n::tr(phase, lang))]));
     }
     if let Some(b) = current {
-        tip.push(format!("Идёт: {} (до {})", b.title, hhmm(b.end)));
+        tip.push(crate::i18n::tr_args("Идёт: {task} (до {time})", lang, &[("task", b.title.clone()), ("time", hhmm(b.end))]));
     } else if let Some(b) = routine_current {
-        tip.push(format!("Идёт рутина: {} (до {})", b.title, hhmm(b.end)));
+        tip.push(crate::i18n::tr_args("Идёт рутина: {task} (до {time})", lang, &[("task", b.title.clone()), ("time", hhmm(b.end))]));
     }
     if let Some(b) = next {
-        tip.push(format!("Далее: {} в {}", b.title, hhmm(b.start)));
+        tip.push(crate::i18n::tr_args("Далее: {task} в {time}", lang, &[("task", b.title.clone()), ("time", hhmm(b.start))]));
     } else if let Some(b) = routine_next {
-        tip.push(format!("Далее рутина: {} в {}", b.title, hhmm(b.start)));
+        tip.push(crate::i18n::tr_args("Далее рутина: {task} в {time}", lang, &[("task", b.title.clone()), ("time", hhmm(b.start))]));
     }
     if let Some(t) = &in_progress {
-        tip.push(format!("В работе: {t}"));
+        tip.push(crate::i18n::tr_args("В работе: {task}", lang, &[("task", t.clone())]));
     }
     if due > 0 {
-        let mut line = format!("Задач на сегодня: {due}");
+        let mut line = crate::i18n::tr_args("Задач на сегодня: {n}", lang, &[("n", due.to_string())]);
         if overdue > 0 {
-            line.push_str(&format!(" (просрочено: {overdue})"));
+            line.push_str(&crate::i18n::tr_args(" (просрочено: {n})", lang, &[("n", overdue.to_string())]));
         }
         tip.push(line);
     }
-    tip.push(format!("Режим: {work_mode}"));
+    tip.push(crate::i18n::tr_args("Режим: {mode}", lang, &[("mode", work_mode.clone())]));
     if quiet_until == crate::commands::settings::QUIET_FOREVER {
-        tip.push("Уведомления: выключены".into());
+        tip.push(crate::i18n::tr("Уведомления: выключены", lang));
     } else if let Ok(t) = DateTime::parse_from_rfc3339(&quiet_until) {
         if now < t.with_timezone(&Utc) {
-            tip.push(format!("Уведомления: пауза до {}", hhmm(t.with_timezone(&Utc))));
+            tip.push(crate::i18n::tr_args("Уведомления: пауза до {time}", lang, &[("time", hhmm(t.with_timezone(&Utc)))]));
         }
     }
 
@@ -294,6 +299,11 @@ mod tests {
     async fn test_pool() -> SqlitePool {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         sqlx::migrate!("./src/db/migrations").run(&pool).await.unwrap();
+        // v0.9.39: язык задаётся явно. Без этого пустая настройка означала бы
+        // «определить по локали ОС», и тесты ниже, сверяющие русские строки,
+        // падали бы у разработчика с LANG=en_US — то есть результат зависел
+        // бы от машины, а не от кода.
+        crate::commands::settings::set_setting(&pool, "language", "ru").await.unwrap();
         pool
     }
 
@@ -378,6 +388,28 @@ mod tests {
             .execute(&pool).await.unwrap();
         let p = status_payload(&pool, now).await.unwrap();
         assert_eq!(p.class, "block");
+    }
+
+    // v0.9.39: весь тултип уходит в waybar, то есть виден вне окна. Проверяем
+    // не отдельную строку, а что при language=en в нём не остаётся кириллицы —
+    // тот же приём, что в e2e для экранов фронта.
+    #[tokio::test]
+    async fn english_status_has_no_russian_left() {
+        let pool = test_pool().await;
+        crate::commands::settings::set_setting(&pool, "language", "en").await.unwrap();
+        crate::commands::settings::set_setting(&pool, "work_mode", "Light").await.unwrap();
+        let now = noon_utc();
+        // Идущий блок — чтобы в text попала ветка «▶ … до …», а не только
+        // «в работе»: иначе четыре строки с временем остались бы непроверенными.
+        insert_task(&pool, "Report", "Todo", None, Some(now - Duration::minutes(30)), Some(60)).await;
+
+        let p = status_payload(&pool, now).await.unwrap();
+        let all = format!("{}\n{}", p.text, p.tooltip);
+        assert!(
+            !all.chars().any(|c| ('а'..='я').contains(&c) || ('А'..='Я').contains(&c)),
+            "в английском статусе осталась кириллица: {all}"
+        );
+        assert!(all.contains("Mode: Light"), "{all}");
     }
 
     #[tokio::test]

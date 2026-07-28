@@ -7,6 +7,7 @@
   import { pinnedStore } from "../lib/stores/pinned.svelte";
   import { api } from "../lib/api/tauri";
   import { extractWikiLinks, renderMarkdown } from "../lib/markdown";
+  import { t, i18n } from "../lib/i18n.svelte";
   import { convertFileSrc } from "@tauri-apps/api/core";
   import { save as saveDialog } from "@tauri-apps/plugin-dialog";
   import Icon from "../lib/components/Icon.svelte";
@@ -337,8 +338,13 @@
     if (!selectedId) zenMode = false;
   });
 
+  // Локаль даты идёт за выбранным языком, а не зашита в "ru-RU" (v0.9.36):
+  // иначе в английском интерфейсе даты оставались бы «28 июл.». Остальные
+  // места в проекте форматируют через `[]` — системную локаль; здесь нужен
+  // именно выбранный язык, потому что он мог быть переключён вручную.
   function formatDate(iso: string) {
-    return new Date(iso).toLocaleDateString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+    return new Date(iso).toLocaleDateString(i18n.lang === "en" ? "en-US" : "ru-RU",
+      { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
   }
 
   const linkedTask = $derived(
@@ -679,18 +685,18 @@ ${bodyHtml}
   <!-- Список заметок -->
   <div class="list-pane">
     <div class="list-head">
-      <button class="btn-primary btn-sm" style="width:100%;" onclick={newNote}>+ Новая заметка</button>
-      <button class="btn-ghost btn-sm" style="width:100%;" onclick={openDailyNote}><Icon name="calendar" size={12} /> Сегодня</button>
-      <input class="filter-input" bind:value={noteFilter} placeholder="Поиск..." />
+      <button class="btn-primary btn-sm" style="width:100%;" onclick={newNote}>{t("+ Новая заметка")}</button>
+      <button class="btn-ghost btn-sm" style="width:100%;" onclick={openDailyNote}><Icon name="calendar" size={12} /> {t("Сегодня")}</button>
+      <input class="filter-input" bind:value={noteFilter} placeholder={t("Поиск...")} />
       <div class="filter-row">
         <select bind:value={filterTag} class="filter-select">
-          <option value="">Все теги</option>
+          <option value="">{t("Все теги")}</option>
           {#each allTags as t}
             <option value={t}>#{t}</option>
           {/each}
         </select>
         <select bind:value={filterProjectId} class="filter-select">
-          <option value="">Все проекты</option>
+          <option value="">{t("Все проекты")}</option>
           {#each projectStore.active as p (p.id)}
             <option value={p.id}>{p.name}</option>
           {/each}
@@ -701,26 +707,26 @@ ${bodyHtml}
     {#if selectedNoteIds.size > 0}
       <div class="bulk-notes-bar">
         <span class="bulk-notes-count">{selectedNoteIds.size} выбрано</span>
-        <select bind:value={bulkNotesProjectId} disabled={bulkNotesBusy} title="Перенести в проект">
-          <option value="" disabled selected>В проект…</option>
-          <option value="none">Без проекта</option>
+        <select bind:value={bulkNotesProjectId} disabled={bulkNotesBusy} title={t("Перенести в проект")}>
+          <option value="" disabled selected>{t("В проект…")}</option>
+          <option value="none">{t("Без проекта")}</option>
           {#each projectStore.active as p (p.id)}
             <option value={p.id}>{p.name}</option>
           {/each}
         </select>
         {#if bulkNotesProjectId}
-          <button class="btn-sm" disabled={bulkNotesBusy} onclick={bulkMoveNotesToProject}>Перенести</button>
+          <button class="btn-sm" disabled={bulkNotesBusy} onclick={bulkMoveNotesToProject}>{t("Перенести")}</button>
         {/if}
-        <button class="btn-sm btn-danger" disabled={bulkNotesBusy} onclick={bulkDeleteNotes}>Удалить</button>
+        <button class="btn-sm btn-danger" disabled={bulkNotesBusy} onclick={bulkDeleteNotes}>{t("Удалить")}</button>
         <span style="flex:1;"></span>
-        <button class="btn-icon" title="Снять выбор" onclick={clearNoteSelection}>✕</button>
+        <button class="btn-icon" title={t("Снять выбор")} onclick={clearNoteSelection}>✕</button>
       </div>
     {/if}
 
     {#if noteStore.notes.length === 0}
-      <div class="empty">Нет заметок</div>
+      <div class="empty">{t("Нет заметок")}</div>
     {:else if filteredNotes.length === 0}
-      <div class="empty">Нет заметок по фильтру</div>
+      <div class="empty">{t("Нет заметок по фильтру")}</div>
     {:else}
       <ul class="note-list">
         {#each filteredNotes as note (note.id)}
@@ -762,37 +768,37 @@ ${bodyHtml}
        (тот самый класс бага, что чинили в v0.6.9/v0.7 для смены заметок). -->
   <div class="editor-pane" class:zen={zenMode}>
     {#if !selected}
-      <div class="empty" style="margin:auto;">Выберите заметку или создайте новую</div>
+      <div class="empty" style="margin:auto;">{t("Выберите заметку или создайте новую")}</div>
     {:else}
       <div class="editor-head">
-        <input class="title-input" bind:value={editTitle} oninput={scheduleSave} placeholder="Название" />
+        <input class="title-input" bind:value={editTitle} oninput={scheduleSave} placeholder={t("Название")} />
         {#if saving}
-          <span class="muted" style="font-size:11px;">Сохранение…</span>
+          <span class="muted" style="font-size:11px;">{t("Сохранение…")}</span>
         {/if}
         {#if renameToast}
           <span class="rename-toast">{renameToast}</span>
         {/if}
         {#if !zenMode && aiEnabled}
-          <button class="btn-icon" disabled={linkSuggesting} title="ИИ предложит заметки для связи"
+          <button class="btn-icon" disabled={linkSuggesting} title={t("ИИ предложит заметки для связи")}
             onclick={suggestLinks}>{#if linkSuggesting}…{:else}<Icon name="sparkles" />{/if}</button>
         {/if}
         {#if !zenMode}
-          <button class="btn-icon" title="Версии заметки" onclick={openRevisions}><Icon name="clock" /></button>
+          <button class="btn-icon" title={t("Версии заметки")} onclick={openRevisions}><Icon name="clock" /></button>
           {#if aiEnabled}
-            <button class="btn-icon" disabled={summarizing} title="ИИ: резюме заметки" onclick={summarizeNote}>
+            <button class="btn-icon" disabled={summarizing} title={t("ИИ: резюме заметки")} onclick={summarizeNote}>
               {#if summarizing}…{:else}<Icon name="sparkles" />{/if}
             </button>
-            <button class="btn-icon" disabled={extractingTasks} title="ИИ: извлечь задачи из заметки" onclick={extractTasks}>
+            <button class="btn-icon" disabled={extractingTasks} title={t("ИИ: извлечь задачи из заметки")} onclick={extractTasks}>
               {#if extractingTasks}…{:else}<Icon name="checklist" />{/if}
             </button>
           {/if}
-          <button class="btn-icon" disabled={exporting} title="Экспорт в HTML" onclick={exportNoteAsHtml}><Icon name="export" /></button>
+          <button class="btn-icon" disabled={exporting} title={t("Экспорт в HTML")} onclick={exportNoteAsHtml}><Icon name="export" /></button>
         {/if}
         <button class="btn-icon" title={zenMode ? "Выйти из zen-режима (Esc)" : "Zen-режим (Ctrl+Shift+Z)"} onclick={toggleZen}>
           <Icon name={zenMode ? "collapse" : "expand"} />
         </button>
         {#if !zenMode}
-          <button class="btn-icon btn-danger" title="Удалить заметку" onclick={deleteSelected}>✕</button>
+          <button class="btn-icon btn-danger" title={t("Удалить заметку")} onclick={deleteSelected}>✕</button>
         {/if}
       </div>
 
@@ -801,16 +807,16 @@ ${bodyHtml}
           {#if linkSuggestions.error}
             <span class="alert" style="margin:0;">{linkSuggestions.error}</span>
           {:else if linkSuggestions.titles.length === 0}
-            <span class="muted">Связей не найдено</span>
+            <span class="muted">{t("Связей не найдено")}</span>
           {:else}
-            <span class="muted">Связанные:</span>
+            <span class="muted">{t("Связанные:")}</span>
             {#each linkSuggestions.titles as t (t)}
               <button class="chip link-chip" onclick={() => acceptLinkSuggestion(t)} title="Добавить [[{t}]] в заметку">
                 + {t}
               </button>
             {/each}
           {/if}
-          <button class="btn-icon" title="Закрыть" onclick={() => linkSuggestions = null}>✕</button>
+          <button class="btn-icon" title={t("Закрыть")} onclick={() => linkSuggestions = null}>✕</button>
         </div>
       {/if}
 
@@ -819,17 +825,17 @@ ${bodyHtml}
           {#if extractedTasks.error}
             <span class="alert" style="margin:0;">{extractedTasks.error}</span>
           {:else if extractedTasks.items.length === 0}
-            <span class="muted">Задач в заметке не найдено</span>
+            <span class="muted">{t("Задач в заметке не найдено")}</span>
           {:else}
-            <span class="muted">Задачи из заметки:</span>
+            <span class="muted">{t("Задачи из заметки:")}</span>
             {#each extractedTasks.items as t (t)}
               <button class="chip link-chip" disabled={creatingExtractedTask} onclick={() => acceptExtractedTask(t)} title="Создать задачу «{t}»">
                 + {t}
               </button>
             {/each}
-            <button class="btn-sm btn-primary" disabled={creatingExtractedTask} onclick={acceptAllExtractedTasks}>Принять все</button>
+            <button class="btn-sm btn-primary" disabled={creatingExtractedTask} onclick={acceptAllExtractedTasks}>{t("Принять все")}</button>
           {/if}
-          <button class="btn-icon" title="Закрыть" onclick={closeExtractedTasks}>✕</button>
+          <button class="btn-icon" title={t("Закрыть")} onclick={closeExtractedTasks}>✕</button>
         </div>
       {/if}
 
@@ -837,9 +843,9 @@ ${bodyHtml}
       {#if !zenMode}
         <div class="editor-meta">
           <label class="meta-label">
-            Задача:
+            {t("Задача:")}
             <select bind:value={editLinkedTaskId} onchange={saveMeta}>
-              <option value={null}>— не привязана —</option>
+              <option value={null}>{t("— не привязана —")}</option>
               {#each taskStore.activeTasks as t (t.id)}
                 <option value={t.id}>{t.title}</option>
               {/each}
@@ -847,9 +853,9 @@ ${bodyHtml}
           </label>
           {#if projectStore.projects.length > 0}
             <label class="meta-label">
-              Проект:
+              {t("Проект:")}
               <select bind:value={editProjectId} onchange={saveMeta}>
-                <option value={null}>— без проекта —</option>
+                <option value={null}>{t("— без проекта —")}</option>
                 {#each projectStore.active as p (p.id)}
                   <option value={p.id}>{p.name}</option>
                 {/each}
@@ -860,10 +866,10 @@ ${bodyHtml}
             <span class="chip"><Icon name="link" size={11} /> {linkedTask.title}</span>
           {/if}
           <label class="meta-label">
-            Напоминание:
+            {t("Напоминание:")}
             <input type="datetime-local" bind:value={editReminderAt} onchange={saveMeta} />
             {#if editReminderAt}
-              <button class="btn-icon" title="Убрать напоминание" onclick={() => { editReminderAt = ""; saveMeta(); }}>✕</button>
+              <button class="btn-icon" title={t("Убрать напоминание")} onclick={() => { editReminderAt = ""; saveMeta(); }}>✕</button>
             {/if}
           </label>
 
@@ -874,7 +880,7 @@ ${bodyHtml}
                 <button class="tag-remove" onclick={() => removeTag(tag)}>×</button>
               </span>
             {/each}
-            <input class="tag-input" bind:value={tagInput} onkeydown={onTagKeydown} placeholder="+ тег" />
+            <input class="tag-input" bind:value={tagInput} onkeydown={onTagKeydown} placeholder={t("+ тег")} />
           </div>
         </div>
       {/if}
@@ -887,16 +893,16 @@ ${bodyHtml}
            продолжают работать, панель не нужна. -->
       {#if !zenMode}
         <div class="format-toolbar">
-          <button class="btn-icon" title="Жирный (Ctrl+B)" onclick={() => editorRef?.formatBold()}><Icon name="bold" /></button>
-          <button class="btn-icon" title="Курсив (Ctrl+I)" onclick={() => editorRef?.formatItalic()}><Icon name="italic" /></button>
-          <button class="btn-icon" title="Заголовок" onclick={() => editorRef?.formatHeading()}><Icon name="heading" /></button>
-          <button class="btn-icon" title="Чек-лист" onclick={() => editorRef?.formatChecklist()}><Icon name="checklist" /></button>
-          <button class="btn-icon" title="Нумерованный список" onclick={() => editorRef?.formatOrderedList()}><Icon name="orderlist" /></button>
-          <button class="btn-icon" title="Цитата" onclick={() => editorRef?.formatQuote()}><Icon name="quote" /></button>
-          <button class="btn-icon" title="Вики-ссылка (Ctrl+Shift+K)" onclick={() => editorRef?.formatWikiLink()}><Icon name="wikilink" /></button>
-          <button class="btn-icon" title="Ссылка" onclick={() => editorRef?.formatLink()}><Icon name="link" /></button>
-          <button class="btn-icon" title="Код" onclick={() => editorRef?.formatCode()}><Icon name="code" /></button>
-          <button class="btn-icon" title="Таблица" onclick={() => editorRef?.insertTable()}><Icon name="table" /></button>
+          <button class="btn-icon" title={t("Жирный (Ctrl+B)")} onclick={() => editorRef?.formatBold()}><Icon name="bold" /></button>
+          <button class="btn-icon" title={t("Курсив (Ctrl+I)")} onclick={() => editorRef?.formatItalic()}><Icon name="italic" /></button>
+          <button class="btn-icon" title={t("Заголовок")} onclick={() => editorRef?.formatHeading()}><Icon name="heading" /></button>
+          <button class="btn-icon" title={t("Чек-лист")} onclick={() => editorRef?.formatChecklist()}><Icon name="checklist" /></button>
+          <button class="btn-icon" title={t("Нумерованный список")} onclick={() => editorRef?.formatOrderedList()}><Icon name="orderlist" /></button>
+          <button class="btn-icon" title={t("Цитата")} onclick={() => editorRef?.formatQuote()}><Icon name="quote" /></button>
+          <button class="btn-icon" title={t("Вики-ссылка (Ctrl+Shift+K)")} onclick={() => editorRef?.formatWikiLink()}><Icon name="wikilink" /></button>
+          <button class="btn-icon" title={t("Ссылка")} onclick={() => editorRef?.formatLink()}><Icon name="link" /></button>
+          <button class="btn-icon" title={t("Код")} onclick={() => editorRef?.formatCode()}><Icon name="code" /></button>
+          <button class="btn-icon" title={t("Таблица")} onclick={() => editorRef?.insertTable()}><Icon name="table" /></button>
         </div>
       {/if}
 
@@ -906,7 +912,7 @@ ${bodyHtml}
             <Editor
               bind:this={editorRef}
               bind:value={editContent}
-              placeholder="Начните писать... (Markdown, чек-листы: - [ ] пункт, ссылки: [[заметка]])"
+              placeholder={t("Начните писать... (Markdown, чек-листы: - [ ] пункт, ссылки: [[заметка]])")}
               knownTitles={otherTitles}
               resolveExists={(t) => findByTitle(t) !== null}
               onWikiLinkClick={openWikiLink}
@@ -923,21 +929,21 @@ ${bodyHtml}
                пересчёт в систему координат ближайшего relative-родителя. -->
           <div class="selection-menu" style="left:{selectionMenu.left}px; top:{selectionMenu.top}px;">
             {#if selectionBusy}
-              <span class="muted" style="padding:4px 8px;">Думаю…</span>
+              <span class="muted" style="padding:4px 8px;">{t("Думаю…")}</span>
             {:else if selectionResult}
               {#if selectionResult.error}
                 <span class="alert" style="margin:0; padding:4px 8px;">{selectionResult.error}</span>
-                <button class="btn-icon" title="Закрыть" onclick={dismissSelectionResult}>✕</button>
+                <button class="btn-icon" title={t("Закрыть")} onclick={dismissSelectionResult}>✕</button>
               {:else}
                 <div class="selection-preview">{selectionResult.text}</div>
-                <button class="btn-icon" title="Заменить выделение" onclick={acceptSelectionResult}>✓</button>
-                <button class="btn-icon" title="Отмена" onclick={dismissSelectionResult}>✕</button>
+                <button class="btn-icon" title={t("Заменить выделение")} onclick={acceptSelectionResult}>✓</button>
+                <button class="btn-icon" title={t("Отмена")} onclick={dismissSelectionResult}>✕</button>
               {/if}
             {:else}
               {#each Object.entries(SELECTION_ACTION_LABELS) as [action, label] (action)}
                 <button class="chip" onclick={() => runSelectionAction(action as SelectionAction)}>{label}</button>
               {/each}
-              <button class="btn-icon" title="Закрыть" onclick={() => selectionMenu = null}>✕</button>
+              <button class="btn-icon" title={t("Закрыть")} onclick={() => selectionMenu = null}>✕</button>
             {/if}
           </div>
         {/if}
@@ -945,7 +951,7 @@ ${bodyHtml}
 
       {#if !zenMode && backlinks.length > 0}
         <div class="backlinks">
-          <span class="backlinks-label">Ссылаются сюда:</span>
+          <span class="backlinks-label">{t("Ссылаются сюда:")}</span>
           {#each backlinks as b (b.id)}
             <button class="backlink chip" onclick={() => selectNote(b)}>{b.title}</button>
           {/each}
@@ -959,10 +965,10 @@ ${bodyHtml}
   <div class="backdrop" role="presentation" onclick={closeRevisions} onkeydown={(e) => e.key === "Escape" && closeRevisions()}>
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <div class="dialog card revisions-dialog" role="dialog" onclick={(e) => e.stopPropagation()}>
-      <h3 class="dialog-title">Версии заметки</h3>
+      <h3 class="dialog-title">{t("Версии заметки")}</h3>
 
       {#if revisions.length === 0}
-        <p class="muted">Ещё нет сохранённых версий — они появляются при правках с интервалом от 10 минут.</p>
+        <p class="muted">{t("Ещё нет сохранённых версий — они появляются при правках с интервалом от 10 минут.")}</p>
       {:else}
         <div class="revisions-body">
           <ul class="revisions-list">
@@ -983,14 +989,14 @@ ${bodyHtml}
                 {revisionsBusy ? "Восстановление…" : "Восстановить"}
               </button>
             {:else}
-              <span class="muted">Выберите версию слева для просмотра</span>
+              <span class="muted">{t("Выберите версию слева для просмотра")}</span>
             {/if}
           </div>
         </div>
       {/if}
 
       <div class="actions">
-        <button class="btn-ghost" onclick={closeRevisions}>Закрыть</button>
+        <button class="btn-ghost" onclick={closeRevisions}>{t("Закрыть")}</button>
       </div>
     </div>
   </div>
@@ -1000,16 +1006,16 @@ ${bodyHtml}
   <div class="backdrop" role="presentation" onclick={closeSummary} onkeydown={(e) => e.key === "Escape" && closeSummary()}>
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <div class="dialog card summary-dialog" role="dialog" onclick={(e) => e.stopPropagation()}>
-      <h3 class="dialog-title">Резюме заметки</h3>
+      <h3 class="dialog-title">{t("Резюме заметки")}</h3>
       {#if summarizing}
-        <p class="muted">Сжимаю заметку…</p>
+        <p class="muted">{t("Сжимаю заметку…")}</p>
       {:else if summaryResult?.error}
         <p class="alert">{summaryResult.error}</p>
         <div class="actions">
-          <button class="btn-ghost" onclick={closeSummary}>Закрыть</button>
+          <button class="btn-ghost" onclick={closeSummary}>{t("Закрыть")}</button>
         </div>
       {:else if summaryResult}
-        <button class="summary-text" title="Скопировать и закрыть" onclick={copySummaryAndClose}>
+        <button class="summary-text" title={t("Скопировать и закрыть")} onclick={copySummaryAndClose}>
           {summaryResult.text}
         </button>
         <p class="muted" style="font-size:11px;">{summaryCopied ? "Скопировано ✓" : "Клик по тексту — скопировать и закрыть"}</p>

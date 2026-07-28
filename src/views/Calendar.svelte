@@ -8,6 +8,9 @@
   import RoutinesModal from "../lib/components/RoutinesModal.svelte";
   import Icon from "../lib/components/Icon.svelte";
   import type { Task, CreateTaskPayload, RoutineBlock } from "../lib/types";
+  // `t` в этом файле занято переменной задачи в {#each}, поэтому перевод
+  // импортируется как `tr` — переименовывать циклы ради имени функции хуже.
+  import { t as tr, i18n } from "../lib/i18n.svelte";
 
   let { onOpenTask }: { onOpenTask: (id: string) => void } = $props();
 
@@ -94,11 +97,27 @@
     return `${fmt(start)}–${fmt(end)}`;
   }
 
-  const MONTHS = [
-    "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
-    "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь",
-  ];
-  const WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+  // v0.9.37: названия месяцев и дней недели берутся у Intl, а не из словаря.
+  // Это данные календаря, а не строки интерфейса: класть 19 записей в
+  // i18n.en.ts значило бы поддерживать вручную то, что платформа уже знает
+  // для обоих языков (и знала бы для третьего, если он появится).
+  // $derived — чтобы список пересобрался при смене языка без перезагрузки.
+  const locale = $derived(i18n.lang === "en" ? "en-US" : "ru-RU");
+  const MONTHS = $derived(
+    Array.from({ length: 12 }, (_, m) => {
+      const name = new Intl.DateTimeFormat(locale, { month: "long" }).format(new Date(2021, m, 1));
+      return name.charAt(0).toUpperCase() + name.slice(1);
+    })
+  );
+  // Начало недели — понедельник (2021-03-01 был понедельником), как во всём
+  // приложении; Intl сам по себе порядок дней не задаёт.
+  const WEEKDAYS = $derived(
+    Array.from({ length: 7 }, (_, i) => {
+      const name = new Intl.DateTimeFormat(locale, { weekday: "short" })
+        .format(new Date(2021, 2, 1 + i));
+      return name.charAt(0).toUpperCase() + name.slice(1).replace(/\.$/, "");
+    })
+  );
 
   function localDateKey(d: Date): string {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -363,18 +382,18 @@
 
 <div class="cal">
   <div class="page-head">
-    <h2 class="page-title">Календарь</h2>
+    <h2 class="page-title">{tr("Календарь")}</h2>
     <div class="mode-toggle">
-      <button class:active-toggle={viewMode === "month"} onclick={() => viewMode = "month"}>Месяц</button>
-      <button class:active-toggle={viewMode === "week"} onclick={() => viewMode = "week"}>Неделя</button>
+      <button class:active-toggle={viewMode === "month"} onclick={() => viewMode = "month"}>{tr("Месяц")}</button>
+      <button class:active-toggle={viewMode === "week"} onclick={() => viewMode = "week"}>{tr("Неделя")}</button>
     </div>
     <span style="flex:1;"></span>
     <button class="btn-icon" onclick={() => shiftMonth(-1)} title={viewMode === "week" ? "Предыдущая неделя" : "Предыдущий месяц"}>←</button>
     <span class="month-label">{viewMode === "week" ? weekLabel : `${MONTHS[month]} ${year}`}</span>
     <button class="btn-icon" onclick={() => shiftMonth(1)} title={viewMode === "week" ? "Следующая неделя" : "Следующий месяц"}>→</button>
-    <button class="btn-sm" onclick={goToday}>Сегодня</button>
+    <button class="btn-sm" onclick={goToday}>{tr("Сегодня")}</button>
     {#if viewMode === "week"}
-      <button class="btn-sm" onclick={() => showRoutinesModal = true}>Рутины</button>
+      <button class="btn-sm" onclick={() => showRoutinesModal = true}>{tr("Рутины")}</button>
     {/if}
   </div>
 
@@ -421,12 +440,12 @@
                          Ноль не рисуем — у будущих блоков он ноль по определению,
                          и «0 мин простоя» выглядело бы как утверждение о факте. -->
                     {#if blockIdle.get(t.id)}
-                      <span class="block-idle" title="Простой внутри блока по данным мониторинга">
+                      <span class="block-idle" title={tr("Простой внутри блока по данным мониторинга")}>
                         простой {blockIdle.get(t.id)} мин
                       </span>
                     {/if}
                   </button>
-                  <button class="block-x" title="Снять блок" onclick={(e) => { e.stopPropagation(); unschedule(t.id); }}>✕</button>
+                  <button class="block-x" title={tr("Снять блок")} onclick={(e) => { e.stopPropagation(); unschedule(t.id); }}>✕</button>
                   <div class="resize-handle" role="presentation" onmousedown={(e) => startResize(e, t)}></div>
                 </div>
               {/each}
@@ -465,20 +484,20 @@
     </div>
 
     <aside class="backlog card">
-      <div class="section-title" style="margin-bottom:8px;">Бэклог</div>
+      <div class="section-title" style="margin-bottom:8px;">{tr("Бэклог")}</div>
 
       {#if aiEnabled}
         {#if proposed}
           <div class="plan-bar">
             <span class="plan-hint">ИИ предложил {proposed.length} блок(а) — пунктиром в сетке</span>
             <div class="plan-actions">
-              <button class="btn-primary btn-sm" onclick={applyPlan}>Применить</button>
-              <button class="btn-ghost btn-sm" onclick={() => proposed = null}>Отмена</button>
+              <button class="btn-primary btn-sm" onclick={applyPlan}>{tr("Применить")}</button>
+              <button class="btn-ghost btn-sm" onclick={() => proposed = null}>{tr("Отмена")}</button>
             </div>
           </div>
         {:else}
           <button class="btn-sm plan-btn" onclick={planDay} disabled={planning || backlog.length === 0}
-            title="ИИ разложит важные задачи из бэклога по свободному времени сегодня">
+            title={tr("ИИ разложит важные задачи из бэклога по свободному времени сегодня")}>
             {#if planning}Планирую…{:else}<Icon name="zap" size={12} /> Спланировать день{/if}
           </button>
         {/if}
@@ -491,7 +510,7 @@
       {/if}
 
       {#if backlog.length === 0}
-        <p class="muted" style="font-size:12px;margin:0;">Все активные задачи уже в расписании</p>
+        <p class="muted" style="font-size:12px;margin:0;">{tr("Все активные задачи уже в расписании")}</p>
       {:else}
         {#each backlog as t (t.id)}
           <div
@@ -499,7 +518,7 @@
             draggable="true"
             role="listitem"
             ondragstart={(e) => onBacklogDragStart(e, t)}
-            title="Перетащите на день и время"
+            title={tr("Перетащите на день и время")}
           >{t.title}</div>
         {/each}
       {/if}
@@ -524,7 +543,7 @@
         onkeydown={(e) => { if (e.key === "Enter" && e.target === e.currentTarget) createFor = cell.key; }}
         role="button"
         tabindex="0"
-        title="Создать задачу на этот день"
+        title={tr("Создать задачу на этот день")}
       >
         <div class="day-num" class:today={cell.isToday}>{cell.day}</div>
         <div class="day-tasks">
@@ -542,8 +561,7 @@
   </div>
 
   <p class="muted" style="font-size:12px;margin-top:10px;">
-    Задачи разложены по дате дедлайна. Красные — просроченные, зачёркнутые — выполненные.
-    Клик по задаче открывает её, клик по дню — создаёт задачу с дедлайном на этот день.
+    {tr("Задачи разложены по дате дедлайна. Красные — просроченные, зачёркнутые — выполненные. Клик по задаче открывает её, клик по дню — создаёт задачу с дедлайном на этот день.")}
   </p>
   {/if}
 </div>

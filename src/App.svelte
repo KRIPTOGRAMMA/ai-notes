@@ -219,7 +219,7 @@
       <kbd>Ctrl K</kbd>
     </button>
 
-    <button class="nav-item bell-item" onclick={() => showNotifications = true} title="Уведомления">
+    <button class="nav-item bell-item" onclick={() => showNotifications = true} title={t("Уведомления")}>
       <Icon name="bell" size={16} />
       <span>Уведомления</span>
       {#if unreadNotifications > 0}

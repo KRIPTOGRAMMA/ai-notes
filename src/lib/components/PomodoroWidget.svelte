@@ -3,6 +3,7 @@
   import { api } from "../api/tauri";
   import Icon from "./Icon.svelte";
 
+  import { t } from "../i18n.svelte";
   // Опрос раз в секунду — состояние живёт в БД (settings), пишется циклом
   // на бэкенде при каждой смене фазы; здесь просто отражаем его.
   let phase = $state<"work" | "break" | "paused" | "off">("off");
@@ -67,7 +68,7 @@
 
 {#if phase === "off"}
   <div class="pomo card">
-    <button class="btn-icon" title="Начать помидор" onclick={start}><Icon name="play" /> <Icon name="timer" /></button>
+    <button class="btn-icon" title={t("Начать помидор")} onclick={start}><Icon name="play" /> <Icon name="timer" /></button>
   </div>
 {:else}
   <div class="pomo card">
@@ -79,8 +80,8 @@
       <button class="btn-icon" title={phase === "paused" ? "Продолжить" : "Пауза"} onclick={togglePause}>
         {#if phase === "paused"}<Icon name="play" />{:else}<Icon name="pause" />{/if}
       </button>
-      <button class="btn-icon" title="Пропустить фазу" onclick={skip}><Icon name="skip" /></button>
-      <button class="btn-icon" title="Остановить" onclick={stop}><Icon name="stop" /></button>
+      <button class="btn-icon" title={t("Пропустить фазу")} onclick={skip}><Icon name="skip" /></button>
+      <button class="btn-icon" title={t("Остановить")} onclick={stop}><Icon name="stop" /></button>
     </div>
   </div>
 {/if}
