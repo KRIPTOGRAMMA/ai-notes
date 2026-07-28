@@ -6,10 +6,20 @@
   import { categoryStore } from "../stores/categories.svelte";
   import { parseClipboardNote } from "../clipboardNote";
   import { applyCachedTheme } from "../theme";
+  import type { PinnedItem } from "../types";
   import "../../app.css";
 
-  type Mode = "task" | "note";
+  // "pinned" (v0.9.33) — полноценный третий режим, в отличие от "clipboard":
+  // тот схлопывался в "note", потому что тоже создавал заметку. Здесь окно
+  // ничего не создаёт, а правит существующее, поэтому и форма своя.
+  type Mode = "task" | "note" | "pinned";
   let mode = $state<Mode>("task");
+
+  // Закреплённое: null — слот пуст (не закрепляли, или объект удалён).
+  let pinned = $state<PinnedItem | null>(null);
+  let pinnedTitle = $state("");
+  let pinnedText = $state("");
+  let saved = $state(false);
   // v0.9.26: подсказка «текст взят из буфера» — только для режима clipboard,
   // снимается при первой же правке, чтобы не висеть над отредактированным
   // текстом. Сам "clipboard" в Mode не входит: это не третья вкладка, а
@@ -36,6 +46,17 @@
   // Пустой буфер (или картинка/файл в нём) — не ошибка: открывается обычная
   // пустая заметка, как по Ctrl+Shift+M.
   async function applyMode(m: string) {
+    if (m === "pinned") {
+      mode = "pinned";
+      fromClipboard = false;
+      saved = false;
+      // Слот читается при каждом открытии, а не кэшируется: закреплённое
+      // могли отредактировать в главном окне или удалить.
+      pinned = await api.getPinnedItem().catch(() => null);
+      pinnedTitle = pinned?.title ?? "";
+      pinnedText = pinned?.text ?? "";
+      return;
+    }
     if (m !== "clipboard") {
       mode = m === "note" ? "note" : "task";
       fromClipboard = false;
@@ -68,6 +89,9 @@
     noteTitle = ""; noteContent = "";
     errorMsg = null;
     fromClipboard = false;
+    // Сам слот (pinned) не сбрасываем: reset чистит черновики создания, а
+    // закреплённое — не черновик, оно живёт в БД и переживает закрытие окна.
+    saved = false;
   }
 
   async function createTask() {
@@ -112,8 +136,40 @@
     }
   }
 
+  // Правка закреплённого. В отличие от createTask/createNote окно НЕ прячется
+  // после сохранения: слот — это то, к чему возвращаются, и дописывать в него
+  // обычно хочется несколькими подходами. Вместо закрытия — пометка «Сохранено».
+  async function savePinned() {
+    if (!pinned || busy) return;
+    const title = pinnedTitle.trim();
+    // Пустой заголовок отклоняем: у задачи он обязателен на бэкенде, а у
+    // заметки превратился бы в безымянную строку в списке.
+    if (!title) {
+      errorMsg = "Заголовок не может быть пустым";
+      return;
+    }
+    busy = true;
+    errorMsg = null;
+    try {
+      if (pinned.kind === "task") {
+        await api.updateTask(pinned.id, { title, description: pinnedText });
+        await emit("task-updated");
+      } else {
+        await api.updateNote(pinned.id, { title, content: pinnedText });
+        await emit("note-updated");
+      }
+      saved = true;
+    } catch (e) {
+      errorMsg = typeof e === "string" ? e : (e as Error)?.message ?? "Не удалось сохранить";
+    } finally {
+      busy = false;
+    }
+  }
+
   function submit() {
-    if (mode === "task") createTask(); else createNote();
+    if (mode === "pinned") savePinned();
+    else if (mode === "task") createTask();
+    else createNote();
   }
 
   async function cancel() {
@@ -122,18 +178,21 @@
   }
 
   function onKeydown(e: KeyboardEvent) {
+    // Ctrl+Tab переключает вкладки создания. В режиме правки закреплённого
+    // вкладок нет — уводить оттуда в форму создания значило бы бросить
+    // несохранённую правку, поэтому режим игнорирует переключение.
     if (e.ctrlKey && e.key === "Tab") {
       e.preventDefault();
-      mode = mode === "task" ? "note" : "task";
+      if (mode !== "pinned") mode = mode === "task" ? "note" : "task";
       return;
     }
     if (e.key === "Escape") { cancel(); return; }
     // Enter создаёт: для задачи — в любом поле; для заметки — только с Ctrl
-    // (обычный Enter в textarea переносит строку).
+    // (обычный Enter в textarea переносит строку). Правка закреплённого — как
+    // заметка: там тоже многострочный текст.
     if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      if (mode === "task") { submit(); }
-      else if (e.ctrlKey) { submit(); }
+      if (mode === "task") { e.preventDefault(); submit(); }
+      else if (e.ctrlKey) { e.preventDefault(); submit(); }
     }
   }
 </script>
@@ -141,20 +200,54 @@
 <svelte:window onkeydown={onKeydown} />
 
 <div class="container">
-  <div class="tabs">
-    <div class="seg">
-      <button class:active={mode === "task"} onclick={() => mode = "task"}>Задача</button>
-      <button class:active={mode === "note"} onclick={() => mode = "note"}>Заметка</button>
+  {#if mode !== "pinned"}
+    <div class="tabs">
+      <div class="seg">
+        <button class:active={mode === "task"} onclick={() => mode = "task"}>Задача</button>
+        <button class:active={mode === "note"} onclick={() => mode = "note"}>Заметка</button>
+      </div>
+      <span style="flex:1;"></span>
+      <kbd>Ctrl Tab</kbd>
     </div>
-    <span style="flex:1;"></span>
-    <kbd>Ctrl Tab</kbd>
-  </div>
+  {/if}
 
   {#if errorMsg}
     <p class="error">{errorMsg}</p>
   {/if}
 
-  {#if mode === "task"}
+  {#if mode === "pinned"}
+    {#if pinned}
+      <div class="pin-head">
+        <span class="pin-badge">📌 {pinned.kind === "task" ? "Задача" : "Заметка"}</span>
+        {#if saved}<span class="pin-saved">Сохранено</span>{/if}
+      </div>
+      <!-- svelte-ignore a11y_autofocus -->
+      <input class="pin-title" bind:value={pinnedTitle} placeholder="Заголовок..."
+        oninput={() => saved = false} />
+      <textarea class="pin-text" bind:value={pinnedText} placeholder="Текст... (Ctrl+Enter — сохранить)"
+        rows="6" autofocus oninput={() => saved = false}></textarea>
+
+      <div class="buttons">
+        <button class="btn-ghost" onclick={cancel}>Закрыть</button>
+        <button class="btn-primary" onclick={savePinned} disabled={busy || !pinnedTitle.trim()}>
+          Сохранить
+        </button>
+      </div>
+    {:else}
+      <!-- Пустой слот — не ошибка: пользователь ещё ничего не закреплял, либо
+           закреплённое удалено. Объясняем, как закрепить, вместо пустого окна. -->
+      <div class="pin-empty">
+        <p class="pin-empty-title">📌 Слот пуст</p>
+        <p class="pin-empty-hint">
+          Закрепите задачу или заметку кнопкой 📌 в списке — этот хоткей будет
+          открывать её сразу на правку.
+        </p>
+      </div>
+      <div class="buttons">
+        <button class="btn-ghost" onclick={cancel}>Закрыть</button>
+      </div>
+    {/if}
+  {:else if mode === "task"}
     <!-- svelte-ignore a11y_autofocus -->
     <input bind:value={title} placeholder="Название задачи..." autofocus />
 
@@ -245,5 +338,52 @@
     gap: 8px;
     justify-content: flex-end;
     margin-top: 2px;
+  }
+  /* v0.9.33: правка закреплённого. Форма создания — «пустой бланк»,
+     здесь наоборот важно с первого взгляда понять, что правится уже
+     существующее, поэтому шапка с типом и акцентная рамка вокруг текста. */
+  .pin-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .pin-badge {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--accent);
+    letter-spacing: 0.02em;
+  }
+  .pin-saved {
+    font-size: 11px;
+    color: var(--text-muted, #888);
+    margin-left: auto;
+  }
+  .pin-title {
+    font-weight: 600;
+  }
+  .pin-text {
+    flex: 1;
+    resize: none;
+    font-size: 13px;
+    border-left: 2px solid var(--accent);
+  }
+  .pin-empty {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 6px;
+    text-align: center;
+  }
+  .pin-empty-title {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .pin-empty-hint {
+    margin: 0;
+    font-size: 12px;
+    color: var(--text-muted, #888);
+    line-height: 1.4;
   }
 </style>

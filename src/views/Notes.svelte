@@ -4,6 +4,7 @@
   import { noteStore } from "../lib/stores/notes.svelte";
   import { taskStore } from "../lib/stores/tasks.svelte";
   import { projectStore } from "../lib/stores/projects.svelte";
+  import { pinnedStore } from "../lib/stores/pinned.svelte";
   import { api } from "../lib/api/tauri";
   import { extractWikiLinks, renderMarkdown } from "../lib/markdown";
   import { convertFileSrc } from "@tauri-apps/api/core";
@@ -643,6 +644,7 @@ ${bodyHtml}
   onMount(() => {
     noteStore.load();
     taskStore.load();
+    pinnedStore.load();
     // Капабилити-детект: при выключенном ИИ кнопка «Предложить связи» скрыта
     api.getSettings().then(s => aiEnabled = s.ai_provider !== "none").catch(() => {});
     const unlisteners: UnlistenFn[] = [];
@@ -734,6 +736,18 @@ ${bodyHtml}
               onclick={(e) => togglePin(note, e)}
             >
               <Icon name="pin" size={13} />
+            </button>
+            <!-- v0.9.33: «быстрый слот» — не путать с закреплением выше.
+                 Пин поднимает заметку наверх списка, молния кладёт её под
+                 глобальный хоткей. Разные иконки и разные подписи именно
+                 потому, что кнопки соседние. -->
+            <button
+              class="slot-btn"
+              class:pinned={pinnedStore.is("note", note.id)}
+              title={pinnedStore.is("note", note.id) ? "Убрать из быстрого слота" : "В быстрый слот (Ctrl+Shift+J)"}
+              onclick={(e) => { e.stopPropagation(); pinnedStore.toggle("note", note.id); }}
+            >
+              <Icon name="zap" size={13} />
             </button>
           </li>
         {/each}
@@ -1146,6 +1160,35 @@ ${bodyHtml}
   .note-row:hover .pin-btn,
   .pin-btn.pinned {
     opacity: 1;
+  }
+
+  /* Быстрый слот (v0.9.33). Свой класс, а не .pin-btn с модификатором:
+     e2e закрепления ищет `.pin-btn` внутри строки и на двух совпадениях
+     падает — и по делу, это две разные функции, а не варианты одной.
+     Цвет активного состояния жёлтый, а не акцентный: рядом стоит пин,
+     активный как раз акцентным, одинаковый цвет их бы слил. */
+  .slot-btn {
+    flex-shrink: 0;
+    padding: 4px;
+    border: none;
+    border-radius: var(--radius);
+    background: transparent;
+    color: var(--text-secondary);
+    opacity: 0;
+  }
+
+  .note-row:hover .slot-btn,
+  .slot-btn.pinned {
+    opacity: 1;
+  }
+
+  .slot-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  .slot-btn.pinned {
+    color: #d9a441;
   }
 
   .pin-btn:hover {

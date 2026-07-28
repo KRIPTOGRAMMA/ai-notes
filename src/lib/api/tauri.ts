@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Task, Subtask, CreateTaskPayload, UpdateTaskPayload, Note, CreateNotePayload, UpdateNotePayload, AppSettings, Project, UpdateProjectPayload, CategoryInfo, StatusInfo, NoteSnippet, TaskSnippet, GoalSnapshot, Routine, RoutineBlock, ActiveSession, NoteRevision, ChecklistTemplate, DayCompletion, ModelOption, SmartList, SmartListFilter, NotificationEntry, QuickMode, BlockIdle } from "../types";
+import type { Task, Subtask, CreateTaskPayload, UpdateTaskPayload, Note, CreateNotePayload, UpdateNotePayload, AppSettings, Project, UpdateProjectPayload, CategoryInfo, StatusInfo, NoteSnippet, TaskSnippet, GoalSnapshot, Routine, RoutineBlock, ActiveSession, NoteRevision, ChecklistTemplate, DayCompletion, ModelOption, SmartList, SmartListFilter, NotificationEntry, QuickMode, BlockIdle, PinnedItem } from "../types";
 
 export const api = {
   getTasks: () => invoke<Task[]>("get_tasks"),
@@ -33,6 +33,9 @@ export const api = {
   openQuickCapture: (mode: QuickMode) => invoke<void>("open_quick_capture", { mode }),
   getQuickMode: () => invoke<QuickMode>("get_quick_mode"),
   readClipboardText: () => invoke<string>("read_clipboard_text"),
+  getPinnedItem: () => invoke<PinnedItem | null>("get_pinned_item"),
+  setPinnedItem: (kind: "task" | "note" | null, id: string | null) =>
+    invoke<void>("set_pinned_item", { kind, id }),
   aiRewrite: (taskId: string, title: string) => invoke<void>("ai_rewrite", { taskId, title }),
   aiSubtasks: (taskId: string, title: string) => invoke<void>("ai_subtasks", { taskId, title }),
   aiClassify: (taskId: string, title: string) => invoke<void>("ai_classify", { taskId, title }),

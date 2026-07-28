@@ -7,6 +7,7 @@
   import { listen } from "@tauri-apps/api/event";
   import type { AppSettings } from "./lib/types";
   import { applyCachedTheme, applyTheme } from "./lib/theme";
+  import { i18n, t } from "./lib/i18n.svelte";
   import { parseKeybinds, comboFor, comboMatches, formatCombo, type Keybinds } from "./lib/keybinds";
   import Onboarding from "./views/Onboarding.svelte";
   import Tasks from "./views/Tasks.svelte";
@@ -61,6 +62,9 @@
       loadedSettings = await api.getSettings();
       showOnboarding = !loadedSettings.onboarding_complete;
       applyTheme(loadedSettings.theme_mode, loadedSettings);
+      // Язык до отрисовки интерфейса (v0.9.32): пустая настройка означает
+      // «пользователь не выбирал» — тогда берём системную локаль.
+      i18n.init(loadedSettings.language);
       keybinds = parseKeybinds(loadedSettings.keybinds);
     } catch {
       loadedSettings = null;
@@ -192,13 +196,13 @@
           class="nav-item"
           class:active={activeView === item.view}
           onclick={() => activeView = item.view}
-          title="{item.label} ({formatCombo(comboFor(keybinds, item.actionId))})"
+          title="{t(item.label)} ({formatCombo(comboFor(keybinds, item.actionId))})"
         >
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none"
             stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <path d={item.icon} />
           </svg>
-          <span>{item.label}</span>
+          <span>{t(item.label)}</span>
         </button>
       {/each}
     </nav>

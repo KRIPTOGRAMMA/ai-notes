@@ -1051,6 +1051,49 @@ test("цель проекта: прогресс в заголовке групп
   await expect(goalCard.locator(".goal-val")).toHaveText("1/1");
 });
 
+// v0.9.32: язык интерфейса. Единственный тест, работающий с английским —
+// остальные прибиты к русскому в моке (иначе каждая строка словаря ломала
+// бы десятки тестов, проверяющих логику, а не перевод).
+test("язык: переключение меняет интерфейс сразу и переживает перезагрузку", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+
+  // Навигация по-русски: мок отдаёт language: "ru"
+  await expect(page.locator(".nav-item span", { hasText: "Задачи" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Настройки" }).click();
+  await page.locator("label", { hasText: "Язык" }).locator("select").selectOption("en");
+
+  // Применяется сразу, без «Сохранить» — как и тема
+  await expect(page.locator(".nav-item span", { hasText: "Tasks" })).toBeVisible();
+  await expect(page.locator(".nav-item span", { hasText: "Задачи" })).toHaveCount(0);
+
+  // После сохранения переживает перезагрузку
+  await page.getByRole("button", { name: /Сохранить|Save/ }).first().click();
+  await page.reload();
+  await expect(page.locator(".nav-item span", { hasText: "Tasks" })).toBeVisible();
+
+  // и обратно
+  await page.getByRole("button", { name: "Settings" }).click();
+  await page.locator("label", { hasText: "Language" }).locator("select").selectOption("ru");
+  await expect(page.locator(".nav-item span", { hasText: "Задачи" })).toBeVisible();
+});
+
+// Непереведённая строка должна деградировать в русский оригинал, а не в
+// пустоту или ключ — это главное свойство схемы «ключ = русский текст».
+test("язык: строки без перевода остаются русскими, а не пустыми", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Настройки" }).click();
+  await page.locator("label", { hasText: "Язык" }).locator("select").selectOption("en");
+
+  // «Внешний вид» переведён, а заголовки секций ниже — ещё нет; они должны
+  // остаться читаемыми русскими, а не превратиться в пустые блоки.
+  await expect(page.locator(".section-title", { hasText: "Appearance" })).toBeVisible();
+  const titles = await page.locator(".section-title").allTextContents();
+  expect(titles.every(s => s.trim().length > 0)).toBe(true);
+});
+
 // v0.9.31: домены в трекинге. Приватностная фича — тест проверяет прежде
 // всего, что по умолчанию ничего не собирается и не показывается.
 test("домены: выключены по умолчанию, галочка сохраняется, историю можно забыть", async ({ page }) => {
@@ -2697,4 +2740,105 @@ test("канбан: своя колонка добавляется на доск
   const reviewRow = statusSection.locator(".rule-row").nth(4);
   await reviewRow.getByTitle(/Удалить/).click();
   await expect(statusSection.locator(".rule-row input:not(.cat-color)")).toHaveCount(5);
+});
+
+// v0.9.33: быстрый слот (Ctrl+Shift+J) — одна закреплённая задача или заметка,
+// которую хоткей открывает сразу на правку текста. В отличие от остальных
+// режимов quick-task.html этот ничего не создаёт, а меняет существующее.
+test("быстрый слот: открывает закреплённую задачу и сохраняет правку текста", async ({ page }) => {
+  await seedDb(page, {
+    tasks: [{
+      id: "t1", title: "Дописать главу", description: "план на вечер",
+      status: "Todo", priority: "Medium", category: "Work", deadline: null,
+      tags: [], recurrence: null, hidden: false, sort_order: 1,
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    }],
+    notes: [], projects: [],
+    quickMode: "pinned", pinnedKind: "task", pinnedId: "t1",
+  });
+  await withMock(page);
+  await page.goto("/quick-task.html");
+
+  // видно, что правится именно задача, а не создаётся новая
+  await expect(page.locator(".pin-badge")).toHaveText("📌 Задача");
+  await expect(page.locator(".pin-title")).toHaveValue("Дописать главу");
+  await expect(page.locator(".pin-text")).toHaveValue("план на вечер");
+  // вкладок «Задача/Заметка» здесь нет — это не форма создания
+  await expect(page.locator(".seg")).toHaveCount(0);
+
+  await page.locator(".pin-text").fill("план на вечер\n+ сверить цитаты");
+  await page.getByRole("button", { name: "Сохранить" }).click();
+
+  await expect(page.locator(".pin-saved")).toBeVisible();
+  const desc = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("__mock_db")!).tasks[0].description);
+  expect(desc).toBe("план на вечер\n+ сверить цитаты");
+});
+
+// Пустой слот — штатное состояние (ещё ничего не закрепляли), а не ошибка:
+// окно должно объяснить, как закрепить, а не показать пустую форму.
+test("быстрый слот: пустой слот объясняет, как закрепить, вместо пустой формы", async ({ page }) => {
+  await seedDb(page, { tasks: [], notes: [], projects: [], quickMode: "pinned" });
+  await withMock(page);
+  await page.goto("/quick-task.html");
+
+  await expect(page.locator(".pin-empty-title")).toBeVisible();
+  await expect(page.locator(".pin-empty-hint")).toContainText("Закрепите задачу или заметку");
+  await expect(page.locator(".error")).toHaveCount(0);
+  // сохранять нечего — кнопки «Сохранить» быть не должно
+  await expect(page.getByRole("button", { name: "Сохранить" })).toHaveCount(0);
+});
+
+// Задача, отправленная в Корзину, не должна открываться хоткеем на правку:
+// пользователь её выбросил. Удаление у задач мягкое (deleted_at), поэтому без
+// явного фильтра запись бы «жила» в слоте.
+test("быстрый слот: задача из Корзины читается как пустой слот", async ({ page }) => {
+  await seedDb(page, {
+    tasks: [{
+      id: "t1", title: "выброшенная", description: "текст",
+      status: "Todo", priority: "Medium", category: "Work", deadline: null,
+      tags: [], recurrence: null, hidden: false, sort_order: 1,
+      deleted_at: new Date().toISOString(),
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    }],
+    notes: [], projects: [],
+    quickMode: "pinned", pinnedKind: "task", pinnedId: "t1",
+  });
+  await withMock(page);
+  await page.goto("/quick-task.html");
+
+  await expect(page.locator(".pin-empty-title")).toBeVisible();
+  await expect(page.locator(".pin-title")).toHaveCount(0);
+});
+
+// В списке заметок рядом стоят две похожие кнопки: пин (наверх списка, v0.9.02)
+// и молния (быстрый слот). Тест держит их раздельными: нажатие на одну не
+// должно менять состояние другой.
+test("быстрый слот: молния в заметках не путается с закреплением наверх", async ({ page }) => {
+  await seedDb(page, {
+    tasks: [], projects: [],
+    notes: [{
+      id: "n1", title: "заметка для слота", content: "текст",
+      tags: [], linked_task_id: null, project_id: null, pinned: false,
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    }],
+    settings: { onboarding_complete: true },
+  });
+  await withMock(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Заметки" }).click();
+
+  const row = page.locator(".note-row").first();
+  await row.getByTitle("В быстрый слот (Ctrl+Shift+J)").click();
+
+  // в слот легла заметка, а закрепление наверх осталось выключенным
+  const db = await page.evaluate(() => JSON.parse(localStorage.getItem("__mock_db")!));
+  expect(db.pinnedKind).toBe("note");
+  expect(db.pinnedId).toBe("n1");
+  expect(db.notes[0].pinned).toBeFalsy();
+
+  // повторное нажатие — открепление из слота
+  await row.getByTitle("Убрать из быстрого слота").click();
+  const after = await page.evaluate(() => JSON.parse(localStorage.getItem("__mock_db")!));
+  expect(after.pinnedId).toBe("");
 });

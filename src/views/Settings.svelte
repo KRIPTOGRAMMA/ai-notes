@@ -9,6 +9,8 @@
   import ModelDownloader from "../lib/components/ModelDownloader.svelte";
   import Icon from "../lib/components/Icon.svelte";
   import { HELP_TOPICS } from "../lib/help";
+  import { LANGS, type Lang } from "../lib/i18n";
+  import { i18n, t } from "../lib/i18n.svelte";
   import {
     KEYBIND_ACTIONS, type Keybinds,
     parseKeybinds, comboFor, comboFromEvent, formatCombo, findConflicts,
@@ -88,6 +90,7 @@
     keybinds: "",
     focus_mode_auto: true,
     track_domains: false,
+    language: "",
     history_cleanup_months: 0,
   });
 
@@ -186,6 +189,10 @@
   onMount(async () => {
     try {
       settings = await api.getSettings();
+      // Пустая настройка = язык не выбирался явно. В селекте показываем
+      // фактически действующий язык (его определил i18n.init по локали),
+      // иначе поле выглядело бы пустым при работающем переводе.
+      if (!settings.language) settings.language = i18n.lang;
       appRules = parseRules(settings.app_category_rules);
       appLimits = Object.fromEntries(
         parseLimits(settings.app_limits).map(l => [l.category, l.daily_mins])
@@ -421,10 +428,22 @@
   {/if}
 
   <section class="card panel" class:hidden-by-search={sectionMatches[0] === false} class:hidden-by-tab={SECTION_TAB[0] !== activeTab} bind:this={sectionEls[0]}>
-    <h3 class="section-title">Внешний вид</h3>
+    <h3 class="section-title">{t("Внешний вид")}</h3>
+
+    <!-- Язык (v0.9.32): применяется сразу, без «Сохранить» — как и тема.
+         Для языка это важнее, чем для темы: увидеть результат до сохранения
+         единственный способ понять, что выбрал правильно. -->
+    <label class="field">
+      {t("Язык")}
+      <select bind:value={settings.language} onchange={() => i18n.set(settings.language as Lang)}>
+        {#each LANGS as l (l.id)}
+          <option value={l.id}>{l.label}</option>
+        {/each}
+      </select>
+    </label>
 
     <div class="radio-row">
-      {#each [["light","Светлая"],["dark","Тёмная"],["system","Системная"]] as [val, label]}
+      {#each [["light", t("Светлая")], ["dark", t("Тёмная")], ["system", t("Системная")]] as [val, label]}
         <label class="check">
           <input type="radio" name="theme_mode" value={val} bind:group={settings.theme_mode} onchange={previewTheme} />
           {label}

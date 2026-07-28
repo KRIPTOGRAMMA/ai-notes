@@ -90,6 +90,10 @@ pub struct AppSettings {
     // только явно. Сам заголовок в БД не попадает ни при каких настройках,
     // сохраняется лишь извлечённый из него домен (см. monitor/domain.rs).
     pub track_domains: bool,
+    // v0.9.32: язык интерфейса ("ru" | "en"). Пустая строка — язык не выбран
+    // явно, фронт определит по системной локали. Пустой дефолт, а не "ru":
+    // иначе у нероссийского пользователя при первом запуске был бы русский.
+    pub language: String,
     #[serde(default)]
     pub history_cleanup_months: u64,  // v0.9.19: выполненные старше N мес. → авто-Корзина; 0 — выкл
 }
@@ -139,6 +143,7 @@ impl Default for AppSettings {
             keybinds: String::new(),
             focus_mode_auto: true,
             track_domains: false,
+            language: String::new(),
             history_cleanup_months: 0,
         }
     }
@@ -253,6 +258,7 @@ pub async fn load_settings_raw(pool: &SqlitePool) -> AppResult<AppSettings> {
     if let Some(v) = get_setting(pool, "keybinds").await { s.keybinds = v; }
     s.focus_mode_auto = get_bool_setting(pool, "focus_mode_auto", true).await;
     s.track_domains = get_bool_setting(pool, "track_domains", false).await;
+    s.language = get_setting(pool, "language").await.unwrap_or_default();
     s.history_cleanup_months = get_u64_setting(pool, "history_cleanup_months", 0).await;
     // Ключи: сначала keyring, затем legacy-значение из БД
     let openai_from_keyring = keyring_get("openai_key");
@@ -339,6 +345,7 @@ pub async fn save_settings(
     set_setting(pool.inner(), "keybinds", &settings.keybinds).await?;
     set_setting(pool.inner(), "focus_mode_auto", if settings.focus_mode_auto { "true" } else { "false" }).await?;
     set_setting(pool.inner(), "track_domains", if settings.track_domains { "true" } else { "false" }).await?;
+    set_setting(pool.inner(), "language", &settings.language).await?;
     // 0 = выключено; иначе минимум 1 месяц (не даём случайно выставить 0 через долю)
     set_setting(pool.inner(), "history_cleanup_months", &(if settings.history_cleanup_months == 0 { 0 } else { settings.history_cleanup_months.max(1) }).to_string()).await?;
 

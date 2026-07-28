@@ -6,6 +6,7 @@
   import { categoryStore } from "../lib/stores/categories.svelte";
   import { statusStore } from "../lib/stores/statuses.svelte";
   import { smartListStore } from "../lib/stores/smartLists.svelte";
+  import { pinnedStore } from "../lib/stores/pinned.svelte";
   import { api } from "../lib/api/tauri";
   import { parseComposer, parseTaskText, matchCategoryQuery, SUBTASK_PREFIX } from "../lib/composer";
   import TaskModal from "../lib/components/TaskModal.svelte";
@@ -76,6 +77,7 @@
     categoryStore.load();
     statusStore.load();
     smartListStore.load();
+    pinnedStore.load();
     // Капабилити-детект: при выключенном ИИ кнопка «Что сейчас?» просто скрыта
     api.getSettings().then(s => {
       aiEnabled = s.ai_provider !== "none";
@@ -864,6 +866,9 @@
       <button class="btn-icon" title={trackingId === task.id ? "Остановить трекинг" : "Начать трекинг"}
         onclick={() => toggleTracking(task.id)} class:active={trackingId === task.id}>
         {#if trackingId === task.id}<Icon name="stop" />{:else}<Icon name="play" />{/if}</button>
+      <button class="btn-icon" class:active={pinnedStore.is("task", task.id)}
+        title={pinnedStore.is("task", task.id) ? "Убрать из быстрого слота" : "В быстрый слот (Ctrl+Shift+J)"}
+        onclick={() => pinnedStore.toggle("task", task.id)}><Icon name="zap" /></button>
       <button class="btn-icon btn-danger" title="Удалить"
         onclick={() => taskStore.remove(task.id)}>✕</button>
     </div>

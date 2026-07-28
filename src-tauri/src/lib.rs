@@ -54,6 +54,9 @@ fn normalize_quick_mode(mode: &str) -> &'static str {
         // "note": окно должно открыться уже с текстом и не требовать вставки
         // руками, но всё равно дать отредактировать и подтвердить.
         "clipboard" => "clipboard",
+        // v0.9.33: правка закреплённой задачи/заметки. Не «создать», а
+        // «открыть уже существующее», поэтому отдельный режим, а не флаг.
+        "pinned" => "pinned",
         _ => "task",
     }
 }
@@ -91,7 +94,9 @@ fn read_clipboard_text(app: tauri::AppHandle) -> String {
 // Общий парсер для первого запуска и для аргументов, пересланных вторым
 // экземпляром через single-instance (биндами WM на Wayland).
 fn quick_mode_from_args(args: &[String]) -> Option<&'static str> {
-    if args.iter().any(|a| a == "--quick-clip") {
+    if args.iter().any(|a| a == "--quick-pinned") {
+        Some("pinned")
+    } else if args.iter().any(|a| a == "--quick-clip") {
         Some("clipboard")
     } else if args.iter().any(|a| a == "--quick-note") {
         Some("note")
@@ -257,6 +262,8 @@ pub fn run() {
                         commands::statuses::create_status,
                         commands::statuses::update_status,
                         commands::statuses::delete_status,
+                        commands::pinned::get_pinned_item,
+                        commands::pinned::set_pinned_item,
                         commands::pomodoro::get_pomodoro_state,
                         commands::pomodoro::pomodoro_toggle_pause,
                         commands::pomodoro::pomodoro_skip,
@@ -481,7 +488,8 @@ pub fn run() {
                     }
 
                     // Глобальные хоткеи: Ctrl+Shift+N — задача, Ctrl+Shift+M — заметка,
-                    // Ctrl+Shift+B — заметка из буфера обмена (v0.9.26).
+                    // Ctrl+Shift+B — заметка из буфера обмена (v0.9.26),
+                    // Ctrl+Shift+J — правка закреплённой задачи/заметки (v0.9.33).
                     // Не V: Ctrl+Shift+V почти везде занят «вставить без
                     // форматирования», перехват сломал бы его в терминале и
                     // браузере. B — от «буфер».
@@ -489,15 +497,22 @@ pub fn run() {
                     let task_shortcut = "Ctrl+Shift+N".parse::<Shortcut>().unwrap();
                     let note_shortcut = "Ctrl+Shift+M".parse::<Shortcut>().unwrap();
                     let clip_shortcut = "Ctrl+Shift+B".parse::<Shortcut>().unwrap();
+                    // v0.9.33: J — от «jump», к закреплённому. Свободна: N/M/B
+                    // уже заняты своими режимами, а J нигде в системе не
+                    // перехватывается так же массово, как V.
+                    let pinned_shortcut = "Ctrl+Shift+J".parse::<Shortcut>().unwrap();
                     let note_id = note_shortcut.id();
                     let clip_id = clip_shortcut.id();
+                    let pinned_id = pinned_shortcut.id();
 
                     app.global_shortcut().on_shortcuts(
-                        [task_shortcut, note_shortcut, clip_shortcut],
+                        [task_shortcut, note_shortcut, clip_shortcut, pinned_shortcut],
                         move |app, shortcut, event| {
                             if event.state == ShortcutState::Pressed {
                                 let id = shortcut.id();
-                                let mode = if id == clip_id {
+                                let mode = if id == pinned_id {
+                                    "pinned"
+                                } else if id == clip_id {
                                     "clipboard"
                                 } else if id == note_id {
                                     "note"
@@ -668,12 +683,21 @@ mod tests {
             quick_mode_from_args(&args(&["ai-notes", "--quick-note", "--quick-clip"])),
             Some("clipboard")
         );
+        // v0.9.33: правка закреплённого — единственный режим, который ничего не
+        // создаёт, поэтому стоит выше всех: если явно просили открыть слот,
+        // случайный второй флаг не должен подменить это созданием новой записи.
+        assert_eq!(quick_mode_from_args(&args(&["ai-notes", "--quick-pinned"])), Some("pinned"));
+        assert_eq!(
+            quick_mode_from_args(&args(&["ai-notes", "--quick-clip", "--quick-pinned"])),
+            Some("pinned")
+        );
     }
 
     #[test]
     fn normalize_quick_mode_keeps_known_modes_and_falls_back() {
         assert_eq!(normalize_quick_mode("note"), "note");
         assert_eq!(normalize_quick_mode("clipboard"), "clipboard");
+        assert_eq!(normalize_quick_mode("pinned"), "pinned");
         assert_eq!(normalize_quick_mode("task"), "task");
         // неизвестный режим — не паника и не пустая строка, а безопасный фолбэк
         assert_eq!(normalize_quick_mode("мусор"), "task");

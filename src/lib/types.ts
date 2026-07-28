@@ -213,6 +213,7 @@ export interface AppSettings {
   keybinds: string; // JSON {action_id: combo} (v0.8.9); отсутствие ключа = дефолт действия
   focus_mode_auto: boolean; // авто-пауза уведомлений на время помодоро-работы/тайм-блока (v0.9.12)
   track_domains: boolean; // разбивка браузерного времени по сайтам; выкл по умолчанию (v0.9.31)
+  language: string; // "ru" | "en"; пусто — определить по системной локали (v0.9.32)
   history_cleanup_months: number; // выполненные старше N мес. → авто-Корзина; 0 — выкл (v0.9.19)
 }
 
@@ -297,7 +298,18 @@ export interface ModelOption {
 // Режим окна быстрого ввода. "clipboard" (v0.9.26) — та же форма заметки,
 // но предзаполненная текстом из буфера обмена; зеркало normalize_quick_mode
 // в lib.rs, где неизвестный режим схлопывается в "task".
-export type QuickMode = "task" | "note" | "clipboard";
+// "pinned" (v0.9.33) — единственный режим, который не создаёт запись, а
+// открывает существующую на правку текста.
+export type QuickMode = "task" | "note" | "clipboard" | "pinned";
+
+// Содержимое «быстрого слота» (v0.9.33). `text` — description задачи или
+// content заметки: окно правит только текст, поэтому поле одно.
+export interface PinnedItem {
+  kind: "task" | "note";
+  id: string;
+  title: string;
+  text: string;
+}
 
 // Простой внутри запланированного тайм-блока (v0.9.30): план из задачи,
 // факт — из мониторинга активности.

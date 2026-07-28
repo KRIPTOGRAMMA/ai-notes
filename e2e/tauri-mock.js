@@ -46,6 +46,11 @@
     keybinds: "",
     focus_mode_auto: true,
     track_domains: false,
+    // v0.9.32: в e2e язык прибит к русскому намеренно. Тесты ищут элементы
+    // по текстам, и это проверка логики, а не перевода — иначе каждая
+    // строка словаря ломала бы десятки тестов. Само переключение языка
+    // покрыто отдельным тестом, который задаёт language явно.
+    language: "ru",
     history_cleanup_months: 0,
   };
 
@@ -131,6 +136,27 @@
     // v0.9.26: реального буфера в e2e нет — тест кладёт текст в
     // window.__mockClipboard, мок отдаёт его как Rust-команда.
     read_clipboard_text: () => window.__mockClipboard ?? "",
+
+    // v0.9.33: быстрый слот. Зеркалит commands/pinned.rs, включая главное:
+    // задача из Корзины (deleted_at) читается как пустой слот, а не как
+    // живая запись — иначе хоткей открывал бы выброшенное на правку.
+    get_pinned_item: () => {
+      const kind = db.pinnedKind;
+      const id = db.pinnedId;
+      if ((kind !== "task" && kind !== "note") || !id) return null;
+      if (kind === "task") {
+        const t = db.tasks.find((t) => t.id === id && !t.deleted_at);
+        return t ? { kind, id, title: t.title, text: t.description ?? "" } : null;
+      }
+      const n = db.notes.find((n) => n.id === id);
+      return n ? { kind, id, title: n.title, text: n.content ?? "" } : null;
+    },
+    set_pinned_item: ({ kind, id }) => {
+      const valid = (kind === "task" || kind === "note") && id;
+      db.pinnedKind = valid ? kind : "";
+      db.pinnedId = valid ? id : "";
+      persist();
+    },
 
     // --- задачи ---
     get_tasks: () =>
