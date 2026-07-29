@@ -238,8 +238,8 @@ pub async fn ai_plan_day(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 // Контекст «Что делать сейчас»: текущий/следующий блок, просрочки, топ-приоритеты.
-pub async fn what_now_context(pool: &SqlitePool, now: DateTime<Utc>) -> Result<String, String> {
-    let mut lines = vec![format!("Сейчас {}.", fmt_hm(local_mins(now)))];
+pub async fn what_now_context(pool: &SqlitePool, now: DateTime<Utc>, lang: crate::i18n::Lang) -> Result<String, String> {
+    let mut lines = vec![crate::i18n::tr_args("Сейчас {time}.", lang, &[("time", fmt_hm(local_mins(now)))])];
 
     let rows = sqlx::query(
         "SELECT title, scheduled_at, COALESCE(scheduled_mins, 60) AS mins
@@ -259,14 +259,14 @@ pub async fn what_now_context(pool: &SqlitePool, now: DateTime<Utc>) -> Result<S
         let title: String = r.get("title");
         if start <= now && now < start + chrono::Duration::minutes(mins) {
             let end = local_mins(start) + mins;
-            current = Some(format!("Идёт блок «{}» до {}.", title, fmt_hm(end)));
+            current = Some(crate::i18n::tr_args("Идёт блок «{task}» до {time}.", lang, &[("task", title.clone()), ("time", fmt_hm(end))]));
         } else if start > now && next.as_ref().is_none_or(|(n, _)| start < *n) {
             next = Some((start, title));
         }
     }
     if let Some(c) = current { lines.push(c); }
     if let Some((start, title)) = next {
-        lines.push(format!("Следующий блок: {} «{}».", fmt_hm(local_mins(start)), title));
+        lines.push(crate::i18n::tr_args("Следующий блок: {time} «{task}».", lang, &[("time", fmt_hm(local_mins(start))), ("task", title)]));
     }
 
     let overdue: Vec<String> = sqlx::query(
@@ -281,7 +281,7 @@ pub async fn what_now_context(pool: &SqlitePool, now: DateTime<Utc>) -> Result<S
     .map(|r| r.get::<String, _>("title"))
     .collect();
     if !overdue.is_empty() {
-        lines.push(format!("Просрочено: {}.", overdue.join(", ")));
+        lines.push(crate::i18n::tr_args("Просрочено: {tasks}.", lang, &[("tasks", overdue.join(", "))]));
     }
 
     let top: Vec<String> = sqlx::query(
@@ -295,12 +295,12 @@ pub async fn what_now_context(pool: &SqlitePool, now: DateTime<Utc>) -> Result<S
     .await
     .map_err(|e| e.to_string())?
     .iter()
-    .map(|r| format!("{} (приоритет {})", r.get::<String, _>("title"), r.get::<String, _>("priority")))
+    .map(|r| crate::i18n::tr_args("{task} (приоритет {prio})", lang, &[("task", r.get::<String, _>("title")), ("prio", r.get::<String, _>("priority"))]))
     .collect();
     if top.is_empty() {
-        lines.push("Активных задач нет.".into());
+        lines.push(crate::i18n::tr("Активных задач нет.", lang));
     } else {
-        lines.push(format!("Важные задачи: {}.", top.join("; ")));
+        lines.push(crate::i18n::tr_args("Важные задачи: {tasks}.", lang, &[("tasks", top.join("; "))]));
     }
 
     Ok(lines.join(" "))
@@ -316,7 +316,9 @@ pub struct WhatNowPayload {
 pub async fn ai_what_now(app: tauri::AppHandle) -> Result<(), String> {
     tokio::spawn(async move {
         let r = async {
-            let ctx = what_now_context(app.state::<SqlitePool>().inner(), Utc::now()).await?;
+            let pool = app.state::<SqlitePool>();
+            let lang = crate::i18n::current_lang(pool.inner()).await;
+            let ctx = what_now_context(pool.inner(), Utc::now(), lang).await?;
             ask_ai_localized(&app, &SYSTEM_WHAT_NOW, &ctx).await
         }
         .await;
@@ -457,10 +459,36 @@ mod tests {
         insert_task(&pool, "просроченная", "High",
             Some((now - chrono::Duration::hours(2)).to_rfc3339()), None).await;
 
-        let s = what_now_context(&pool, now).await.unwrap();
+        let s = what_now_context(&pool, now, crate::i18n::Lang::Ru).await.unwrap();
         assert!(s.contains("Идёт блок «фокус» до 12:30"), "{s}");
         assert!(s.contains("Следующий блок: 15:00 «созвон»"), "{s}");
         assert!(s.contains("Просрочено: просроченная"), "{s}");
         assert!(s.contains("Важные задачи:"), "{s}");
+    }
+
+    // См. english_context_has_no_russian_left в commands/ai.rs: контекст для
+    // модели обязан быть на языке интерфейса, иначе английский промпт тонет
+    // в русских данных и ответ приходит русским.
+    #[tokio::test]
+    async fn english_what_now_context_has_no_russian_left() {
+        let pool = test_pool().await;
+        let now = noon_utc();
+        // названия задач намеренно английские: проверяем строки-обёртки,
+        // а не пользовательские данные — их переводить нельзя
+        insert_task(&pool, "focus", "Medium", None,
+            Some((now - chrono::Duration::minutes(30)).to_rfc3339())).await;
+        insert_task(&pool, "call", "Medium", None,
+            Some((now + chrono::Duration::hours(3)).to_rfc3339())).await;
+        insert_task(&pool, "late one", "High",
+            Some((now - chrono::Duration::hours(2)).to_rfc3339()), None).await;
+
+        let s = what_now_context(&pool, now, crate::i18n::Lang::En).await.unwrap();
+        assert!(
+            !s.chars().any(|c| ('а'..='я').contains(&c) || ('А'..='Я').contains(&c)),
+            "кириллица в английском контексте: {s}"
+        );
+        assert!(s.contains("It is now"), "{s}");
+        assert!(s.contains("is running until"), "{s}");
+        assert!(s.contains("Overdue:"), "{s}");
     }
 }

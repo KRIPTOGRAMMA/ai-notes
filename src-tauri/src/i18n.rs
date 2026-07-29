@@ -112,6 +112,31 @@ fn en(key: &str) -> Option<&'static str> {
         "Задач на сегодня: {n}" => "Tasks due today: {n}",
         " (просрочено: {n})" => " (overdue: {n})",
         "Режим: {mode}" => "Mode: {mode}",
+        // --- Контекст для ИИ (v0.9.43) ---
+        // Это не интерфейс, а данные, которые уходят в промпт. Язык контекста
+        // обязан совпадать с языком промпта: английская инструкция поверх
+        // русского контекста не работает — модель отвечает на языке данных.
+        "{date}: {n} мин" => "{date}: {n} min",
+        "нет данных" => "no data",
+        "Активные минуты по дням: {mins}. Выполнено задач за последние дни: {done}. Топ-категория выполненных задач: {cat}." =>
+            "Active minutes per day: {mins}. Tasks completed in recent days: {done}. Top category of completed tasks: {cat}.",
+        "Период: {label}. Выполнено задач: {done}{titles}. Активное время: {mins} мин. Просрочено сейчас: {overdue}." =>
+            "Period: {label}. Tasks completed: {done}{titles}. Active time: {mins} min. Currently overdue: {overdue}.",
+        "последние сутки" => "the last 24 hours",
+        "последняя неделя" => "the last week",
+        "последний месяц" => "the last month",
+        "{done}/{total} задач" => "{done}/{total} tasks",
+        "{done}/{total} мин" => "{done}/{total} min",
+        " Цели проектов: {goals}." => " Project goals: {goals}.",
+        "{app} ({n} мин)" => "{app} ({n} min)",
+        " Топ приложений: {apps}." => " Top apps: {apps}.",
+        "Сейчас {time}." => "It is now {time}.",
+        "Идёт блок «{task}» до {time}." => "Block “{task}” is running until {time}.",
+        "Следующий блок: {time} «{task}»." => "Next block: {time} “{task}”.",
+        "Просрочено: {tasks}." => "Overdue: {tasks}.",
+        "{task} (приоритет {prio})" => "{task} (priority {prio})",
+        "Активных задач нет." => "There are no active tasks.",
+        "Важные задачи: {tasks}." => "Important tasks: {tasks}.",
         "Уведомления: выключены" => "Notifications: off",
         "Уведомления: пауза до {time}" => "Notifications: paused until {time}",
         _ => return None,
@@ -232,6 +257,9 @@ mod tests {
             include_str!("notifier/pomodoro.rs"),
             include_str!("monitor/activity.rs"),
             include_str!("lib.rs"),
+            // v0.9.43: контекст, уходящий в промпт ИИ, — тот же словарь
+            include_str!("commands/ai.rs"),
+            include_str!("commands/planner.rs"),
         ];
         let mut missing: Vec<String> = Vec::new();
         for src in sources {

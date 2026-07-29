@@ -464,7 +464,14 @@ pub struct InsightPayload {
 }
 
 // Краткая сводка активности за последние дни — вход для ИИ-инсайта.
-async fn insight_summary(pool: &SqlitePool) -> Result<String, String> {
+//
+// Язык контекста обязан совпадать с языком промпта (v0.9.43). Английская
+// инструкция поверх русского контекста не работает: модель видит стену
+// русских данных («Активные минуты по дням…», названия задач, категории) и
+// отвечает на её языке — проверено пользователем на локальной модели, где
+// инсайт и сводка оставались русскими, хотя короткий SMART-промпт без
+// контекста переводился нормально.
+async fn insight_summary(pool: &SqlitePool, lang: crate::i18n::Lang) -> Result<String, String> {
     use crate::commands::monitor::{
         get_activity_by_day_impl, get_category_distribution_impl, get_task_completions_by_day_impl,
     };
@@ -478,20 +485,24 @@ async fn insight_summary(pool: &SqlitePool) -> Result<String, String> {
         .rev()
         .take(7)
         .rev()
-        .map(|d| format!("{}: {} мин", d.date, d.minutes))
+        .map(|d| crate::i18n::tr_args("{date}: {n} мин", lang, &[("date", d.date.clone()), ("n", d.minutes.to_string())]))
         .collect();
     let done_recent: i64 = completions.iter().rev().take(7).map(|c| c.completed).sum();
+    let no_data = crate::i18n::tr("нет данных", lang);
     let top_cat = cats
         .iter()
         .max_by_key(|c| c.count)
         .map(|c| c.category.clone())
-        .unwrap_or_else(|| "нет данных".into());
+        .unwrap_or_else(|| no_data.clone());
 
-    Ok(format!(
-        "Активные минуты по дням: {}. Выполнено задач за последние дни: {}. Топ-категория выполненных задач: {}.",
-        if minutes.is_empty() { "нет данных".into() } else { minutes.join(", ") },
-        done_recent,
-        top_cat
+    Ok(crate::i18n::tr_args(
+        "Активные минуты по дням: {mins}. Выполнено задач за последние дни: {done}. Топ-категория выполненных задач: {cat}.",
+        lang,
+        &[
+            ("mins", if minutes.is_empty() { no_data.clone() } else { minutes.join(", ") }),
+            ("done", done_recent.to_string()),
+            ("cat", top_cat),
+        ],
     ))
 }
 
@@ -499,7 +510,9 @@ async fn insight_summary(pool: &SqlitePool) -> Result<String, String> {
 pub async fn dashboard_insight(app: tauri::AppHandle) -> Result<(), String> {
     tokio::spawn(async move {
         let r = async {
-            let summary = insight_summary(app.state::<SqlitePool>().inner()).await?;
+            let pool = app.state::<SqlitePool>();
+            let lang = crate::i18n::current_lang(pool.inner()).await;
+            let summary = insight_summary(pool.inner(), lang).await?;
             ask_ai_localized(&app, &SYSTEM_INSIGHT, &summary).await
         }
         .await;
@@ -520,7 +533,7 @@ pub struct SummaryPayload {
 }
 
 // Данные за период для резюме: выполненные задачи, активные минуты, просрочки.
-async fn period_summary(pool: &SqlitePool, days: i64, label: &str) -> Result<String, String> {
+async fn period_summary(pool: &SqlitePool, days: i64, label: &str, lang: crate::i18n::Lang) -> Result<String, String> {
     use sqlx::Row;
     let since = (chrono::Utc::now() - chrono::Duration::days(days)).to_rfc3339();
 
@@ -547,13 +560,16 @@ async fn period_summary(pool: &SqlitePool, days: i64, label: &str) -> Result<Str
 
     let overdue = crate::notifier::triggers::overdue_count(pool, &chrono::Utc::now().to_rfc3339()).await;
 
-    let mut summary = format!(
-        "Период: {}. Выполнено задач: {}{}. Активное время: {} мин. Просрочено сейчас: {}.",
-        label,
-        done.len(),
-        if done.is_empty() { String::new() } else { format!(" ({})", done.join(", ")) },
-        active_mins,
-        overdue
+    let mut summary = crate::i18n::tr_args(
+        "Период: {label}. Выполнено задач: {done}{titles}. Активное время: {mins} мин. Просрочено сейчас: {overdue}.",
+        lang,
+        &[
+            ("label", crate::i18n::tr(label, lang)),
+            ("done", done.len().to_string()),
+            ("titles", if done.is_empty() { String::new() } else { format!(" ({})", done.join(", ")) }),
+            ("mins", active_mins.to_string()),
+            ("overdue", overdue.to_string()),
+        ],
     );
 
     // Недельное ревью (v0.5.6): цели проектов и топ приложений — данные фаз 1–2
@@ -564,21 +580,25 @@ async fn period_summary(pool: &SqlitePool, days: i64, label: &str) -> Result<Str
             .filter(|p| !p.archived && (p.goal_tasks.is_some() || p.goal_mins.is_some()))
             .map(|p| {
                 let mut parts = vec![];
-                if let Some(n) = p.goal_tasks { parts.push(format!("{}/{} задач", p.goal_done_tasks, n)); }
-                if let Some(n) = p.goal_mins { parts.push(format!("{}/{} мин", p.goal_done_mins, n)); }
+                if let Some(n) = p.goal_tasks {
+                    parts.push(crate::i18n::tr_args("{done}/{total} задач", lang, &[("done", p.goal_done_tasks.to_string()), ("total", n.to_string())]));
+                }
+                if let Some(n) = p.goal_mins {
+                    parts.push(crate::i18n::tr_args("{done}/{total} мин", lang, &[("done", p.goal_done_mins.to_string()), ("total", n.to_string())]));
+                }
                 format!("{}: {}", p.name, parts.join(", "))
             })
             .collect();
         if !goals.is_empty() {
-            summary.push_str(&format!(" Цели проектов: {}.", goals.join("; ")));
+            summary.push_str(&crate::i18n::tr_args(" Цели проектов: {goals}.", lang, &[("goals", goals.join("; "))]));
         }
 
         let apps = crate::commands::monitor::get_app_usage_impl(pool, 7).await.unwrap_or_default();
         let top: Vec<String> = apps.iter().take(3)
-            .map(|a| format!("{} ({} мин)", a.app, a.minutes))
+            .map(|a| crate::i18n::tr_args("{app} ({n} мин)", lang, &[("app", a.app.clone()), ("n", a.minutes.to_string())]))
             .collect();
         if !top.is_empty() {
-            summary.push_str(&format!(" Топ приложений: {}.", top.join(", ")));
+            summary.push_str(&crate::i18n::tr_args(" Топ приложений: {apps}.", lang, &[("apps", top.join(", "))]));
         }
     }
 
@@ -588,7 +608,9 @@ async fn period_summary(pool: &SqlitePool, days: i64, label: &str) -> Result<Str
 fn spawn_summary(app: tauri::AppHandle, days: i64, label: &'static str, kind: &'static str) {
     tokio::spawn(async move {
         let r = async {
-            let summary = period_summary(app.state::<SqlitePool>().inner(), days, label).await?;
+            let pool = app.state::<SqlitePool>();
+            let lang = crate::i18n::current_lang(pool.inner()).await;
+            let summary = period_summary(pool.inner(), days, label, lang).await?;
             ask_ai_localized(&app, &SYSTEM_SUMMARY, &summary).await
         }
         .await;
@@ -795,7 +817,7 @@ mod tests {
     #[tokio::test]
     async fn insight_summary_empty_db_reports_no_data() {
         let pool = test_pool().await;
-        let s = insight_summary(&pool).await.unwrap();
+        let s = insight_summary(&pool, crate::i18n::Lang::Ru).await.unwrap();
         assert!(s.contains("Активные минуты по дням: нет данных"), "{s}");
         assert!(s.contains("Выполнено задач за последние дни: 0"), "{s}");
         assert!(s.contains("Топ-категория выполненных задач: нет данных"), "{s}");
@@ -808,16 +830,43 @@ mod tests {
         insert_activity(&pool, &now, "Active", 600).await;
         insert_completed_task(&pool, "готово", &now).await;
 
-        let s = insight_summary(&pool).await.unwrap();
+        let s = insight_summary(&pool, crate::i18n::Lang::Ru).await.unwrap();
         assert!(s.contains("10 мин"), "{s}");
         assert!(s.contains("Выполнено задач за последние дни: 1"), "{s}");
         assert!(s.contains("Топ-категория выполненных задач: Work"), "{s}");
     }
 
+    // Главный инвариант v0.9.43: контекст, уходящий в промпт, обязан быть на
+    // языке интерфейса. Английская инструкция поверх русского контекста не
+    // работает — проверено пользователем на локальной модели: инсайт и сводка
+    // оставались русскими, хотя короткий SMART-промпт (там контекста нет)
+    // переводился нормально. Модель следует языку данных, а не инструкции.
+    #[tokio::test]
+    async fn english_context_has_no_russian_left() {
+        let pool = test_pool().await;
+        let now = chrono::Utc::now().to_rfc3339();
+        insert_activity(&pool, &now, "Active", 600).await;
+        insert_completed_task(&pool, "task done", &now).await;
+
+        let has_cyrillic =
+            |s: &str| s.chars().any(|c| ('а'..='я').contains(&c) || ('А'..='Я').contains(&c));
+
+        let insight = insight_summary(&pool, crate::i18n::Lang::En).await.unwrap();
+        assert!(!has_cyrillic(&insight), "кириллица в английском инсайте: {insight}");
+
+        // days >= 7 включает ветки целей проектов и топа приложений
+        let period = period_summary(&pool, 7, "последняя неделя", crate::i18n::Lang::En)
+            .await
+            .unwrap();
+        assert!(!has_cyrillic(&period), "кириллица в английской сводке: {period}");
+        // метка периода тоже переведена, а не оставлена ключом
+        assert!(period.contains("the last week"), "{period}");
+    }
+
     #[tokio::test]
     async fn period_summary_empty_db() {
         let pool = test_pool().await;
-        let s = period_summary(&pool, 1, "день").await.unwrap();
+        let s = period_summary(&pool, 1, "день", crate::i18n::Lang::Ru).await.unwrap();
         assert!(s.contains("Период: день"), "{s}");
         assert!(s.contains("Выполнено задач: 0."), "{s}");
         assert!(s.contains("Активное время: 0 мин"), "{s}");
@@ -837,7 +886,7 @@ mod tests {
         insert_activity(&pool, &recent, "Idle", 3600).await; // Idle не считается
         insert_activity(&pool, &old, "Active", 3600).await; // вне периода
 
-        let s = period_summary(&pool, 7, "неделя").await.unwrap();
+        let s = period_summary(&pool, 7, "неделя", crate::i18n::Lang::Ru).await.unwrap();
         assert!(s.contains("Выполнено задач: 1 (свежая)"), "{s}");
         assert!(!s.contains("старая"), "{s}");
         assert!(s.contains("Активное время: 5 мин"), "{s}");
