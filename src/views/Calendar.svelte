@@ -584,6 +584,8 @@
     align-items: center;
     gap: 6px;
     margin-bottom: 12px;
+    /* см. Tasks.svelte: место под кнопки окна (v0.9.40) */
+    padding-right: var(--wincontrols-w);
   }
 
   .month-label {

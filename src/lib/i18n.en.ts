@@ -45,6 +45,8 @@ export const EN: Record<string, string> = {
   "Закрыть": "Close",
   "Удалить": "Delete",
   "Восстановить": "Restore",
+  "Свернуть": "Minimize",
+  "Развернуть": "Maximize",
   "Добавить": "Add",
   "Загрузка…": "Loading…",
   "Думаю…": "Thinking…",

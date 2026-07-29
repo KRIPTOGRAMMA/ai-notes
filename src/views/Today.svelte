@@ -204,6 +204,8 @@
     justify-content: space-between;
     flex-wrap: wrap;
     gap: 10px;
+    /* см. Tasks.svelte: место под кнопки окна (v0.9.40) */
+    padding-right: var(--wincontrols-w);
   }
 
   .today-header h2 {

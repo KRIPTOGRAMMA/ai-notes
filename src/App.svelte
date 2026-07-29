@@ -22,6 +22,7 @@
   import TrackingWidget from "./lib/components/TrackingWidget.svelte";
   import NotificationPanel from "./lib/components/NotificationPanel.svelte";
   import Icon from "./lib/components/Icon.svelte";
+  import WindowControls from "./lib/components/WindowControls.svelte";
   import "./app.css";
 
   type View = "today" | "tasks" | "notes" | "graph" | "dashboard" | "calendar" | "settings";
@@ -177,6 +178,10 @@
     onSelectNote={(id) => { activeView = "notes"; noteStore.requestFocus(id); showSearch = false; }}
   />
 {/if}
+
+<!-- Вне {#if}: без декораций окно нечем закрыть и не за что тащить, а
+     онбординг — такой же полноэкранный вид, как и остальные. -->
+<WindowControls />
 
 {#if showOnboarding && loadedSettings}
   <Onboarding

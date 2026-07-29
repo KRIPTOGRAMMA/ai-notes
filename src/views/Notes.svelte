@@ -1226,6 +1226,9 @@ ${bodyHtml}
     align-items: center;
     gap: 8px;
     padding: 8px 12px;
+    /* см. Tasks.svelte: место под кнопки окна (v0.9.40) — редактор занимает
+       правую часть окна, его шапка упирается прямо в них. */
+    padding-right: var(--wincontrols-w);
     border-bottom: 1px solid var(--border);
   }
 

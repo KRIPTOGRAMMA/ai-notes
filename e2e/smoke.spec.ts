@@ -993,7 +993,8 @@ test("проекты: создание, назначение задаче, гр�
   await page.getByRole("button", { name: "Проекты" }).click();
   await page.getByPlaceholder("Название нового проекта").fill("Ремонт");
   await page.getByRole("button", { name: "Создать" }).click();
-  await page.getByRole("button", { name: "Закрыть" }).click();
+  // Именно кнопка модалки: с v0.9.40 «Закрыть» есть ещё и у кнопок окна.
+  await page.locator(".modal").getByRole("button", { name: "Закрыть" }).click();
 
   // задача в проект через модал
   await page.getByRole("button", { name: "+ Новая", exact: true }).click();
@@ -1024,7 +1025,8 @@ test("цель проекта: прогресс в заголовке групп
   await page.locator(".proj-goal .goal-num").first().blur();
   // чип прогресса появился в модале
   await expect(page.locator(".proj-goal .goal-chip")).toHaveText("0/1 задач");
-  await page.getByRole("button", { name: "Закрыть" }).click();
+  // см. выше: кнопка модалки, не кнопка окна
+  await page.locator(".modal").getByRole("button", { name: "Закрыть" }).click();
 
   // задача в проекте → в заголовке группы виден прогресс цели
   await page.getByRole("button", { name: "+ Новая", exact: true }).click();
@@ -1041,7 +1043,8 @@ test("цель проекта: прогресс в заголовке групп
   await page.getByRole("button", { name: "Проекты" }).click();
   await expect(page.locator(".proj-goal .goal-chip")).toHaveText("1/1 задач");
   await expect(page.locator(".proj-goal .goal-chip")).toHaveClass(/met/);
-  await page.getByRole("button", { name: "Закрыть" }).click();
+  // см. выше: кнопка модалки, не кнопка окна
+  await page.locator(".modal").getByRole("button", { name: "Закрыть" }).click();
 
   // карта «Цели проектов» на дашборде
   await page.getByRole("button", { name: "Дашборд" }).click();
@@ -3155,4 +3158,33 @@ test("язык: экран «Сегодня», палитра и уведомл�
   if (await panel.count()) {
     expect(await panel.innerText()).not.toMatch(/[а-яА-ЯёЁ]/);
   }
+});
+
+// v0.9.40: системный заголовок окна убран, вместо него — свои кнопки
+// в правом верхнем углу.
+test("кнопки окна: свои вместо системного заголовка, не перекрывают контент", async ({ page }) => {
+  await seedDb(page, { tasks: [], notes: [], settings: { onboarding_complete: true } });
+  await withMock(page);
+  await page.goto("/");
+
+  // Три кнопки в правом верхнем углу
+  const controls = page.locator(".titlebar .win-btn");
+  await expect(controls).toHaveCount(3);
+
+  // Прижаты к правому краю окна
+  const box = (await page.locator(".titlebar .controls").boundingBox())!;
+  const vw = page.viewportSize()!.width;
+  expect(vw - (box.x + box.width)).toBeLessThan(20);
+
+  // Шапка не съедает клики по контенту под собой: полоса тянется во всю
+  // ширину, и без pointer-events:none левая часть верхней строки стала бы
+  // мёртвой зоной. Проверяем именно кликом, а не чтением стиля.
+  await page.getByRole("button", { name: "Заметки" }).click();
+  await expect(page.locator(".notes")).toBeVisible();
+  await page.getByRole("button", { name: "Задачи", exact: true }).click();
+
+  // Поиск в шапке Задач не оказывается под кнопками окна
+  const search = (await page.getByPlaceholder("Поиск задач…").boundingBox())!;
+  const btns = (await page.locator(".titlebar .controls").boundingBox())!;
+  expect(search.x + search.width).toBeLessThanOrEqual(btns.x + 1);
 });
