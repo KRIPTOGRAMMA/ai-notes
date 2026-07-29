@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use tauri::{Emitter, Manager};
-use crate::commands::ai::ask_ai;
+use crate::commands::ai::ask_ai_verbatim;
 
 const SYSTEM_LINKS: &str = "Ты помогаешь связывать заметки в вики. Дан текст заметки и список \
 названий других существующих заметок. Выбери до 5 заголовков из списка, которые тематически \
@@ -86,7 +86,9 @@ pub async fn ai_suggest_links(app: tauri::AppHandle, note_id: String) -> Result<
         let r: Result<Vec<String>, String> = async {
             let pool = app.state::<SqlitePool>();
             let (prompt, others) = build_prompt(pool.inner(), &note_id).await?;
-            let raw = ask_ai(&app, SYSTEM_LINKS, &prompt).await?;
+            // verbatim: модель выбирает заголовки из готового списка, а не
+            // сочиняет текст — язык задаёт список, не интерфейс.
+            let raw = ask_ai_verbatim(&app, SYSTEM_LINKS, &prompt).await?;
             Ok(parse_link_suggestions(&raw, &others))
         }.await;
 

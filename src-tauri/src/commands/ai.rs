@@ -6,17 +6,29 @@ use crate::ai::sidecar::{SharedSidecar, ensure_running};
 use crate::ai::engine::ask;
 use crate::ai::cloud::{ask_openai, ask_anthropic};
 
-const SYSTEM_REWRITE: &str =
-    "Перепиши задачу в SMART-формат: чёткая цель, измеримый результат, срок. Только результат, без пояснений.";
+// Промпты, чей ответ читает пользователь, существуют парами: русской и
+// английской (v0.9.42). Приписать требование языка к русскому промпту, как
+// делал v0.9.41, оказалось недостаточно — проверено на живой модели: ответ
+// приходил русским и при английском интерфейсе. Основной текст промпта
+// перевешивает одну строку-требование в конце, поэтому язык задаёт сам
+// промпт целиком.
+const SYSTEM_REWRITE: Prompt = Prompt {
+    ru: "Перепиши задачу в SMART-формат: чёткая цель, измеримый результат, срок. Только результат, без пояснений.",
+    en: "Rewrite the task in SMART format: a clear goal, a measurable result, a deadline. Reply with the result only, no explanations.",
+};
 
 const SYSTEM_SUBTASKS: &str =
     "You are a task planner. Split the task into 3-7 subtasks. Reply ONLY with a JSON array of strings, nothing else. Example: [\"subtask 1\", \"subtask 2\", \"subtask 3\"]";
 
-const SYSTEM_INSIGHT: &str =
-    "Ты ассистент по продуктивности. Дай 1–3 коротких предложения про продуктивность пользователя, по-русски. Только текст, без пояснений и списков.";
+const SYSTEM_INSIGHT: Prompt = Prompt {
+    ru: "Ты ассистент по продуктивности. Дай 1–3 коротких предложения про продуктивность пользователя. Только текст, без пояснений и списков.",
+    en: "You are a productivity assistant. Give 1-3 short sentences about the user's productivity. Text only, no explanations and no lists.",
+};
 
-const SYSTEM_SUMMARY: &str =
-    "Ты ассистент по продуктивности. Составь краткое резюме периода (3–5 предложений): что сделано, сколько активного времени, прогресс целей (если есть), что требует внимания. По-русски, только текст.";
+const SYSTEM_SUMMARY: Prompt = Prompt {
+    ru: "Ты ассистент по продуктивности. Составь краткое резюме периода (3–5 предложений): что сделано, сколько активного времени, прогресс целей (если есть), что требует внимания. Только текст.",
+    en: "You are a productivity assistant. Write a short summary of the period (3-5 sentences): what was done, how much active time, progress on goals (if any), what needs attention. Text only.",
+};
 
 // ИИ по выделению в редакторе заметок (v0.9.09): выделил текст -> одно из
 // действий ниже -> модель возвращает только заменяющий текст, без пояснений
@@ -58,7 +70,10 @@ pub async fn ai_edit_selection(
     tokio::spawn(async move {
         let r = async {
             let system = selection_system_prompt(&mode)?;
-            ask_ai(&app, system, &text).await
+            // verbatim: промпты выделения сами требуют «сохранив язык
+            // оригинала». Навязать сюда язык интерфейса значило бы
+            // переводить чужой текст по нажатию «сократить».
+            ask_ai_verbatim(&app, system, &text).await
         }.await;
         let payload = match r {
             Ok(result) => SelectionEditPayload { request_id, result: Some(strip_wrapping(&result).to_string()), error: None },
@@ -86,7 +101,9 @@ pub struct NoteSummaryPayload {
 #[tauri::command]
 pub async fn ai_summarize_note(app: tauri::AppHandle, request_id: String, text: String) -> Result<(), String> {
     tokio::spawn(async move {
-        let r = ask_ai(&app, SYSTEM_NOTE_SUMMARY, &text).await;
+        // verbatim: промпт требует «на языке заметки» — резюме русской
+        // заметки не должно приходить по-английски из-за языка интерфейса.
+        let r = ask_ai_verbatim(&app, SYSTEM_NOTE_SUMMARY, &text).await;
         let payload = match r {
             Ok(result) => NoteSummaryPayload { request_id, result: Some(result.trim().to_string()), error: None },
             Err(e) => NoteSummaryPayload { request_id, result: None, error: Some(e) },
@@ -286,7 +303,68 @@ async fn ask_provider(
     }
 }
 
+// Язык ответа модели (v0.9.41 → переделано в v0.9.42).
+//
+// v0.9.41 дописывала к русскому промпту строку «Reply in English.» и на этом
+// останавливалась. На живой модели это не сработало: ответ приходил русским
+// и при английском интерфейсе. Причина в том, что модель ориентируется на
+// язык основного текста инструкции, а не на одну строку в конце — особенно
+// малые локальные GGUF. Поэтому язык теперь задаёт сам промпт целиком:
+// промпты для человека объявлены парами _RU/_EN.
+//
+// Приписка сохранена как второй, дублирующий сигнал — она ничего не стоит и
+// помогает в пограничных случаях (например, русские названия задач внутри
+// английского промпта).
+//
+// ВАЖНО: промпты, работающие с текстом заметки (резюме, переписать, сжать,
+// исправить грамматику), сюда не попадают — они обязаны отвечать на языке
+// самого текста. Менять язык чужой заметки при нажатии «сократить» — баг, а
+// не локализация. Такие вызовы идут через ask_ai_verbatim.
+fn with_lang(system: &str, lang: crate::i18n::Lang) -> String {
+    let req = match lang {
+        crate::i18n::Lang::Ru => "Отвечай на русском языке.",
+        crate::i18n::Lang::En => "Reply in English.",
+    };
+    format!("{system}\n{req}")
+}
+
+/// Пара промптов «русский / английский» для одного действия.
+pub struct Prompt {
+    pub ru: &'static str,
+    pub en: &'static str,
+}
+
+impl Prompt {
+    fn pick(&self, lang: crate::i18n::Lang) -> &'static str {
+        match lang {
+            crate::i18n::Lang::Ru => self.ru,
+            crate::i18n::Lang::En => self.en,
+        }
+    }
+}
+
+/// Спросить модель, не навязывая язык ответа. Для промптов, где язык задаёт
+/// содержимое запроса (текст заметки), а не интерфейс.
+pub async fn ask_ai_verbatim(app: &tauri::AppHandle, system: &str, user: &str) -> Result<String, String> {
+    ask_ai_inner(app, system.to_string(), user).await
+}
+
+/// Спросить модель на языке интерфейса: выбирается промпт нужного языка,
+/// плюс дублирующее требование в конце.
+pub async fn ask_ai_localized(app: &tauri::AppHandle, prompt: &Prompt, user: &str) -> Result<String, String> {
+    let lang = crate::i18n::current_lang(app.state::<SqlitePool>().inner()).await;
+    ask_ai_inner(app, with_lang(prompt.pick(lang), lang), user).await
+}
+
+/// Промпт без языковой пары (машинный JSON, где текст один на все языки),
+/// но с требованием языка — содержимое ответа читает человек.
 pub async fn ask_ai(app: &tauri::AppHandle, system: &str, user: &str) -> Result<String, String> {
+    let lang = crate::i18n::current_lang(app.state::<SqlitePool>().inner()).await;
+    ask_ai_inner(app, with_lang(system, lang), user).await
+}
+
+async fn ask_ai_inner(app: &tauri::AppHandle, system: String, user: &str) -> Result<String, String> {
+    let system: &str = &system;
     let settings = crate::commands::settings::load_settings_raw(app.state::<SqlitePool>().inner())
         .await
         .map_err(|e| e.to_string())?;
@@ -332,7 +410,7 @@ pub async fn ask_ai(app: &tauri::AppHandle, system: &str, user: &str) -> Result<
 #[tauri::command]
 pub async fn ai_rewrite(app: tauri::AppHandle, task_id: String, title: String) -> Result<(), String> {
     tokio::spawn(async move {
-        let r = ask_ai(&app, SYSTEM_REWRITE, &title).await;
+        let r = ask_ai_localized(&app, &SYSTEM_REWRITE, &title).await;
         let _ = app.emit("ai-result", into_payload(task_id, "rewrite", r));
     });
     Ok(())
@@ -422,7 +500,7 @@ pub async fn dashboard_insight(app: tauri::AppHandle) -> Result<(), String> {
     tokio::spawn(async move {
         let r = async {
             let summary = insight_summary(app.state::<SqlitePool>().inner()).await?;
-            ask_ai(&app, SYSTEM_INSIGHT, &summary).await
+            ask_ai_localized(&app, &SYSTEM_INSIGHT, &summary).await
         }
         .await;
         let (result, error) = match r {
@@ -511,7 +589,7 @@ fn spawn_summary(app: tauri::AppHandle, days: i64, label: &'static str, kind: &'
     tokio::spawn(async move {
         let r = async {
             let summary = period_summary(app.state::<SqlitePool>().inner(), days, label).await?;
-            ask_ai(&app, SYSTEM_SUMMARY, &summary).await
+            ask_ai_localized(&app, &SYSTEM_SUMMARY, &summary).await
         }
         .await;
         let (result, error) = match r {
@@ -537,6 +615,118 @@ pub async fn summarize_week(app: tauri::AppHandle) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lang_requirement_appended_per_language() {
+        let ru = with_lang("Ты ассистент.", crate::i18n::Lang::Ru);
+        let en = with_lang("Ты ассистент.", crate::i18n::Lang::En);
+        assert!(ru.contains("Отвечай на русском языке."), "{ru}");
+        assert!(en.contains("Reply in English."), "{en}");
+        // исходный промпт не потерян
+        assert!(ru.starts_with("Ты ассистент."));
+        assert!(en.starts_with("Ты ассистент."));
+        // и языки не перепутаны
+        assert!(!en.contains("Отвечай на русском"));
+        assert!(!ru.contains("Reply in English"));
+    }
+
+    // verbatim-промпты обязаны молчать про язык: их язык задаёт содержимое
+    // запроса (текст заметки) или он вообще не важен (машинный JSON).
+    // Требование «по-русски» здесь сломало бы правку английской заметки.
+    #[test]
+    fn verbatim_prompts_do_not_demand_a_language() {
+        let sources = [
+            include_str!("ai.rs"),
+            include_str!("planner.rs"),
+            include_str!("note_links.rs"),
+        ];
+        for src in sources {
+            for (idx, _) in src.match_indices("const SYSTEM_") {
+                let rest = &src[idx..];
+                // пары _RU/_EN объявлены как `Prompt {` — они язык задают
+                // намеренно, проверка не про них
+                let head = rest.lines().next().unwrap_or("");
+                if head.contains("Prompt") {
+                    continue;
+                }
+                let end = rest.find("\";").map(|i| i + 2).unwrap_or(rest.len());
+                let decl = &rest[..end];
+                for banned in ["по-русски", "По-русски", "на русском", "in Russian", "in English"] {
+                    assert!(
+                        !decl.contains(banned),
+                        "verbatim-промпт задаёт язык: «{banned}» в {head}"
+                    );
+                }
+            }
+        }
+    }
+
+    // Главный инвариант v0.9.42: у каждой пары обе стороны заполнены и
+    // действительно различаются. Скопировать русский текст в поле en (или
+    // забыть его заполнить) — самый вероятный способ незаметно вернуть
+    // прежний баг: интерфейс английский, ответ русский.
+    #[test]
+    fn localized_prompt_pairs_are_filled_and_distinct() {
+        let pairs: [(&str, &Prompt); 4] = [
+            ("SYSTEM_REWRITE", &SYSTEM_REWRITE),
+            ("SYSTEM_INSIGHT", &SYSTEM_INSIGHT),
+            ("SYSTEM_SUMMARY", &SYSTEM_SUMMARY),
+            ("SYSTEM_WHAT_NOW", &crate::commands::planner::SYSTEM_WHAT_NOW),
+        ];
+        for (name, p) in pairs {
+            assert!(!p.ru.trim().is_empty(), "{name}: пустой русский промпт");
+            assert!(!p.en.trim().is_empty(), "{name}: пустой английский промпт");
+            assert_ne!(p.ru, p.en, "{name}: en скопирован с ru");
+            // русская сторона обязана быть русской, английская — без кириллицы
+            assert!(
+                p.ru.chars().any(|c| ('а'..='я').contains(&c) || ('А'..='Я').contains(&c)),
+                "{name}: в поле ru нет кириллицы"
+            );
+            assert!(
+                !p.en.chars().any(|c| ('а'..='я').contains(&c) || ('А'..='Я').contains(&c)),
+                "{name}: в поле en осталась кириллица"
+            );
+        }
+    }
+
+    // Пары мало объявить — их надо и вызывать через ask_ai_localized.
+    // Обращение к `.ru`/`.en` на месте вызова прибивает язык намертво, минуя
+    // настройку, и это ровно тот баг, который чинит версия: объявленная
+    // пара при этом выглядит корректной, а пользователь всё равно получает
+    // один язык. Проверка по исходникам, потому что вызовы асинхронные и
+    // требуют живого AppHandle.
+    #[test]
+    fn localized_prompts_are_not_pinned_to_one_side_at_call_sites() {
+        let sources = [
+            ("ai.rs", include_str!("ai.rs")),
+            ("planner.rs", include_str!("planner.rs")),
+        ];
+        for (name, src) in sources {
+            for (idx, _) in src.match_indices("SYSTEM_") {
+                let rest = &src[idx..];
+                let end = rest.find(|c: char| c == ')' || c == ',' || c == '\n').unwrap_or(rest.len());
+                let frag = &rest[..end];
+                // объявление пары (`ru:`/`en:` внутри Prompt {}) — не вызов
+                if frag.contains("Prompt") {
+                    continue;
+                }
+                for pinned in [".ru", ".en"] {
+                    // в тестах обращение к полям законно — там сверяют пары
+                    let in_test_mod = idx > src.find("#[cfg(test)]").unwrap_or(usize::MAX);
+                    assert!(
+                        !frag.contains(pinned) || in_test_mod,
+                        "{name}: язык прибит на месте вызова — «{frag}»"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn prompt_pick_follows_language() {
+        assert_eq!(SYSTEM_INSIGHT.pick(crate::i18n::Lang::Ru), SYSTEM_INSIGHT.ru);
+        assert_eq!(SYSTEM_INSIGHT.pick(crate::i18n::Lang::En), SYSTEM_INSIGHT.en);
+    }
 
     #[test]
     fn fallback_order_from_cloud_primary() {

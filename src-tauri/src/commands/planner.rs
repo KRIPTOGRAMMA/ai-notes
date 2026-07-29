@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::{Row, SqlitePool};
 use std::collections::HashMap;
 use tauri::{Emitter, Manager};
-use crate::commands::ai::ask_ai;
+use crate::commands::ai::{ask_ai_localized, ask_ai_verbatim, Prompt};
 use crate::commands::routines;
 
 const SYSTEM_PLAN: &str = "Ты планировщик дня. Разложи самые важные задачи по свободному окну: \
@@ -20,8 +20,15 @@ const SYSTEM_PLAN: &str = "Ты планировщик дня. Разложи с
 Планировать все задачи не обязательно — только что реально успеть. \
 Ответь ТОЛЬКО JSON-массивом объектов вида {\"id\": \"...\", \"start\": \"HH:MM\", \"mins\": N}, без пояснений.";
 
-const SYSTEM_WHAT_NOW: &str = "Ты коуч по продуктивности. По контексту посоветуй, чем заняться \
-прямо сейчас, и почему — одним-двумя предложениями, по-русски, без списков и вступлений.";
+// Пара промптов по языку интерфейса (v0.9.42): ответ читает пользователь.
+// Одной приписки «Reply in English» к русскому промпту оказалось мало —
+// см. комментарий у Prompt в commands/ai.rs.
+pub const SYSTEM_WHAT_NOW: Prompt = Prompt {
+    ru: "Ты коуч по продуктивности. По контексту посоветуй, чем заняться \
+прямо сейчас, и почему — одним-двумя предложениями, без списков и вступлений.",
+    en: "You are a productivity coach. Based on the context, advise what to work on \
+right now and why — in one or two sentences, no lists and no preambles.",
+};
 
 const PLAN_END_HOUR: u32 = 22; // до скольки планируем день
 const MAX_CANDIDATES: i64 = 15;
@@ -194,7 +201,10 @@ pub async fn ai_plan_day(app: tauri::AppHandle) -> Result<(), String> {
         let r = async {
             let pool = app.state::<SqlitePool>();
             let ctx = plan_day_context(pool.inner(), now).await?;
-            let raw = ask_ai(&app, SYSTEM_PLAN, &ctx.prompt).await?;
+            // verbatim: ответ — чистый JSON из id и времён, ни одного слова
+            // для человека. Требование языка здесь бессмысленно и только
+            // повышает шанс, что модель добавит пояснение вместо массива.
+            let raw = ask_ai_verbatim(&app, SYSTEM_PLAN, &ctx.prompt).await?;
             let plan = parse_plan(&raw, &ctx);
             if plan.is_empty() {
                 return Err(format!("Не удалось разобрать план модели: {}", raw.trim()));
@@ -307,7 +317,7 @@ pub async fn ai_what_now(app: tauri::AppHandle) -> Result<(), String> {
     tokio::spawn(async move {
         let r = async {
             let ctx = what_now_context(app.state::<SqlitePool>().inner(), Utc::now()).await?;
-            ask_ai(&app, SYSTEM_WHAT_NOW, &ctx).await
+            ask_ai_localized(&app, &SYSTEM_WHAT_NOW, &ctx).await
         }
         .await;
         let (result, error) = match r {
