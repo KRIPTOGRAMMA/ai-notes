@@ -1882,7 +1882,7 @@ test("ИИ: резюме заметки — кнопка открывает ок
   await expect(page.locator(".summary-dialog")).toHaveCount(0);
 });
 
-test("ИИ: извлечение задач из заметки — предпросмотр списка, клик по пункту создаёт задачу, «Принять все» создаёт остальные", async ({ page }) => {
+test("ИИ: извлечение задач из заметки — список с галочками, текст правится до создания, создаётся только отмеченное", async ({ page }) => {
   await seedDb(page, {
     tasks: [],
     notes: [{
@@ -1902,20 +1902,37 @@ test("ИИ: извлечение задач из заметки — предпр
   await expect(extractBtn).toBeVisible();
   await extractBtn.click();
 
-  const ticketsChip = page.locator(".link-chip", { hasText: "Купить билеты" });
-  const hotelChip = page.locator(".link-chip", { hasText: "Забронировать отель" });
-  await expect(ticketsChip).toBeVisible();
-  await expect(hotelChip).toBeVisible();
+  // v0.9.44: список строк с галочками вместо ряда чипов
+  const rows = page.locator(".extracted-row");
+  await expect(rows).toHaveCount(2);
 
-  await ticketsChip.click();
-  await expect(ticketsChip).toHaveCount(0); // принятая задача пропадает из предпросмотра
+  // value задан свойством, а не атрибутом — сверяем через toHaveValue
+  const titles = page.locator(".extracted-title");
+  await expect(titles.nth(0)).toHaveValue("Купить билеты");
+  await expect(titles.nth(1)).toHaveValue("Забронировать отель");
+  const tickets = rows.nth(0);
+  const hotel = rows.nth(1);
 
-  await page.getByRole("button", { name: "Принять все" }).click();
-  await expect(hotelChip).toHaveCount(0);
+  // отмечены по умолчанию — обычный сценарий «принять почти всё»
+  await expect(page.getByRole("button", { name: "Создать: 2" })).toBeVisible();
+
+  // снятая галочка убирает пункт из счётчика, но строка остаётся видимой
+  await hotel.locator('input[type="checkbox"]').uncheck();
+  await expect(page.getByRole("button", { name: "Создать: 1" })).toBeVisible();
+  await expect(hotel).toBeVisible();
+
+  // текст правится до создания — формулировки модели черновые
+  await tickets.locator(".extracted-title").fill("Купить билеты на поезд");
+
+  await page.getByRole("button", { name: "Создать: 1" }).click();
+
+  // создана только отмеченная, с правкой; неотмеченная осталась в панели
+  await expect(rows).toHaveCount(1);
+  await expect(page.locator(".extracted-title")).toHaveValue("Забронировать отель");
 
   await page.getByRole("button", { name: "Задачи", exact: true }).click();
-  await expect(page.locator(".task-row", { hasText: "Купить билеты" })).toBeVisible();
-  await expect(page.locator(".task-row", { hasText: "Забронировать отель" })).toBeVisible();
+  await expect(page.locator(".task-row", { hasText: "Купить билеты на поезд" })).toBeVisible();
+  await expect(page.locator(".task-row", { hasText: "Забронировать отель" })).toHaveCount(0);
 });
 
 test("экспорт заметки в HTML: кнопка сохраняет самодостаточный HTML-файл с заголовком и контентом", async ({ page }) => {

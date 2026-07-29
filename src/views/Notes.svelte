@@ -470,9 +470,24 @@
   // создаётся отдельным явным кликом (или разом через «Принять все»), ничего
   // не создаётся автоматически.
   let extractingTasks = $state(false);
-  let extractedTasks: { requestId: string; items: string[]; error: string | null } | null = $state(null);
+  // v0.9.44: список строк заменён на строки с состоянием. Каждый пункт —
+  // свой id, галочка и редактируемый текст.
+  //
+  // id, а не текст, как ключ: модель нередко выдаёт два похожих пункта, и
+  // прежний фильтр `items.filter(t => t !== title)` удалял оба сразу.
+  //
+  // Формулировки модели черновые почти всегда («позвонить в сервис» вместо
+  // «позвонить в сервис и записаться на четверг»), поэтому текст правится
+  // здесь же — до создания, а не потом через модалку задачи.
+  type ExtractedTask = { id: string; title: string; checked: boolean };
+  type ExtractedState = { requestId: string; items: ExtractedTask[]; error: string | null };
+  let extractedTasks = $state<ExtractedState | null>(null);
   let extractRequestId: string | null = null;
   let creatingExtractedTask = $state(false);
+
+  const extractedChecked = $derived(
+    extractedTasks?.items.filter((i: ExtractedTask) => i.checked && i.title.trim()) ?? [],
+  );
 
   async function extractTasks() {
     if (!selected) return;
@@ -488,28 +503,55 @@
     }
   }
 
-  async function acceptExtractedTask(title: string) {
+  // Создаёт только отмеченное. Пункты уходят из списка по мере создания,
+  // поэтому прерванная на середине операция не создаёт дублей при повторе.
+  async function createSelectedExtracted() {
+    if (!extractedTasks || creatingExtractedTask) return;
     creatingExtractedTask = true;
     try {
-      await api.createTask({
-        title, description: null, status: "Todo", priority: "Medium",
-        category: "Other", deadline: null, tags: [], recurrence: "None",
-        project_id: editProjectId,
-      });
+      for (const item of [...extractedTasks.items]) {
+        const title = item.title.trim();
+        if (!item.checked || !title) continue;
+        await api.createTask({
+          title, description: null, status: "Todo", priority: "Medium",
+          category: "Other", deadline: null, tags: [], recurrence: "None",
+          project_id: editProjectId,
+        });
+        extractedTasks = extractedTasks
+          ? { ...extractedTasks, items: extractedTasks.items.filter((i) => i.id !== item.id) }
+          : null;
+      }
       await taskStore.load();
-      extractedTasks = extractedTasks
-        ? { ...extractedTasks, items: extractedTasks.items.filter(t => t !== title) }
-        : null;
+      // Пустой список закрывается сам: держать панель «создано 0 из 0» незачем.
+      if (extractedTasks && extractedTasks.items.length === 0) extractedTasks = null;
     } finally {
       creatingExtractedTask = false;
     }
   }
 
-  async function acceptAllExtractedTasks() {
+  function toggleExtracted(id: string) {
     if (!extractedTasks) return;
-    for (const title of [...extractedTasks.items]) {
-      await acceptExtractedTask(title);
-    }
+    extractedTasks = {
+      ...extractedTasks,
+      items: extractedTasks.items.map((i) => (i.id === id ? { ...i, checked: !i.checked } : i)),
+    };
+  }
+
+  function setExtractedTitle(id: string, title: string) {
+    if (!extractedTasks) return;
+    extractedTasks = {
+      ...extractedTasks,
+      items: extractedTasks.items.map((i) => (i.id === id ? { ...i, title } : i)),
+    };
+  }
+
+  function toggleAllExtracted() {
+    if (!extractedTasks) return;
+    const allOn = extractedTasks.items.every((i) => i.checked);
+    extractedTasks = {
+      ...extractedTasks,
+      items: extractedTasks.items.map((i) => ({ ...i, checked: !allOn })),
+    };
   }
 
   function closeExtractedTasks() {
@@ -672,7 +714,13 @@ ${bodyHtml}
       unlisteners.push(await listen<{ request_id: string; items: string[]; error: string | null }>("ai-extract-tasks", (e) => {
         if (e.payload.request_id !== extractRequestId) return;
         extractingTasks = false;
-        extractedTasks = { requestId: e.payload.request_id, items: e.payload.items, error: e.payload.error };
+        extractedTasks = {
+          requestId: e.payload.request_id,
+          // отмечены по умолчанию: обычный сценарий — принять почти всё,
+          // а не отбирать по одному
+          items: e.payload.items.map((title) => ({ id: crypto.randomUUID(), title, checked: true })),
+          error: e.payload.error,
+        };
       }));
     })();
     return () => unlisteners.forEach(u => u());
@@ -820,22 +868,60 @@ ${bodyHtml}
         </div>
       {/if}
 
+      <!-- v0.9.44: не чипы, а список строк — формулировки модели длинные и
+           почти всегда требуют правки, в чип они не помещались. -->
       {#if !zenMode && extractedTasks}
-        <div class="link-suggest">
+        <div class="extracted">
           {#if extractedTasks.error}
             <span class="alert" style="margin:0;">{extractedTasks.error}</span>
+            <button class="btn-icon" title={t("Закрыть")} onclick={closeExtractedTasks}>✕</button>
           {:else if extractedTasks.items.length === 0}
             <span class="muted">{t("Задач в заметке не найдено")}</span>
+            <button class="btn-icon" title={t("Закрыть")} onclick={closeExtractedTasks}>✕</button>
           {:else}
-            <span class="muted">{t("Задачи из заметки:")}</span>
-            {#each extractedTasks.items as t (t)}
-              <button class="chip link-chip" disabled={creatingExtractedTask} onclick={() => acceptExtractedTask(t)} title="Создать задачу «{t}»">
-                + {t}
+            <div class="extracted-head">
+              <span class="muted">{t("Задачи из заметки:")}</span>
+              <button class="btn-sm" onclick={toggleAllExtracted} disabled={creatingExtractedTask}>
+                {extractedTasks.items.every((i) => i.checked) ? t("Снять все") : t("Выбрать все")}
               </button>
-            {/each}
-            <button class="btn-sm btn-primary" disabled={creatingExtractedTask} onclick={acceptAllExtractedTasks}>{t("Принять все")}</button>
+              <span style="flex:1;"></span>
+              <button class="btn-icon" title={t("Закрыть")} onclick={closeExtractedTasks}>✕</button>
+            </div>
+
+            <ul class="extracted-list">
+              {#each extractedTasks.items as item (item.id)}
+                <li class="extracted-row" class:off={!item.checked}>
+                  <input
+                    type="checkbox"
+                    checked={item.checked}
+                    disabled={creatingExtractedTask}
+                    onchange={() => toggleExtracted(item.id)}
+                    aria-label={t("Создать эту задачу")}
+                  />
+                  <input
+                    class="extracted-title"
+                    value={item.title}
+                    disabled={creatingExtractedTask}
+                    oninput={(e) => setExtractedTitle(item.id, e.currentTarget.value)}
+                    placeholder={t("Название задачи")}
+                  />
+                </li>
+              {/each}
+            </ul>
+
+            <div class="extracted-foot">
+              <button
+                class="btn-sm btn-primary"
+                disabled={creatingExtractedTask || extractedChecked.length === 0}
+                onclick={createSelectedExtracted}
+              >
+                {t("Создать: {n}", { n: extractedChecked.length })}
+              </button>
+              {#if editProjectId}
+                <span class="muted extracted-hint">{t("в проект заметки")}</span>
+              {/if}
+            </div>
           {/if}
-          <button class="btn-icon" title={t("Закрыть")} onclick={closeExtractedTasks}>✕</button>
         </div>
       {/if}
 
@@ -1257,6 +1343,75 @@ ${bodyHtml}
     cursor: pointer;
     color: var(--accent);
     background: color-mix(in srgb, var(--accent) 12%, transparent);
+  }
+
+  /* Извлечённые задачи (v0.9.44): вертикальный список вместо ряда чипов —
+     формулировки модели длинные, и в строке их видно целиком. */
+  .extracted {
+    padding: 6px 12px 8px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .extracted-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .extracted-list {
+    list-style: none;
+    margin: 6px 0;
+    padding: 0;
+    /* панель делит высоту с редактором: длинный список прокручивается сам,
+       а не выдавливает текст заметки за пределы окна */
+    max-height: 30vh;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .extracted-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* Снятая галочка гасит строку, но текст остаётся читаемым и правится:
+     пользователь может передумать, не набирая заново. */
+  .extracted-row.off .extracted-title {
+    opacity: .5;
+  }
+
+  .extracted-title {
+    flex: 1;
+    min-width: 0;
+    padding: 3px 6px;
+    font-size: 13px;
+    border: 1px solid transparent;
+    border-radius: var(--radius);
+    background: transparent;
+    color: var(--text-primary);
+  }
+
+  .extracted-title:hover {
+    border-color: var(--border);
+  }
+
+  .extracted-title:focus {
+    border-color: var(--accent);
+    background: var(--bg-primary);
+    outline: none;
+  }
+
+  .extracted-foot {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .extracted-hint {
+    font-size: 11px;
   }
   .link-chip:hover { background: color-mix(in srgb, var(--accent) 20%, transparent); }
 

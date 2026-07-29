@@ -160,6 +160,12 @@ export const EN: Record<string, string> = {
   "Авто-категория": "Auto category",
   "ИИ предлагает подзадачи": "AI suggests subtasks",
   "Принять все": "Accept all",
+  // v0.9.44: панель извлечённых задач — список с правкой вместо чипов
+  "Выбрать все": "Select all",
+  "Снять все": "Clear all",
+  "Создать эту задачу": "Create this task",
+  "Создать: {n}": "Create: {n}",
+  "в проект заметки": "into the note's project",
   "+ Добавить": "+ Add",
   "+ подзадача (Enter)": "+ subtask (Enter)",
   "Идёт трекинг": "Tracking in progress",
