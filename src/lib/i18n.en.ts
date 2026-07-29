@@ -335,7 +335,7 @@ export const EN: Record<string, string> = {
   "При выполнении задача не закрывается — дедлайн сам сдвинется на следующий срок, задача останется активной.":
     "Completing it doesn’t close the task — the deadline shifts to the next occurrence and the task stays active.",
   "Подзадачи": "Subtasks",
-  "Удалить подзадачу": "Delete subtask",
+  "Подзадача на строку (Enter — ещё строка)": "One subtask per line (Enter — new line)",
   "Из шаблона…": "From template…",
   "Сохранить как шаблон": "Save as template",
   "Название шаблона": "Template name",

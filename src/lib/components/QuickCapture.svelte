@@ -5,6 +5,8 @@
   import { api } from "../api/tauri";
   import { categoryStore } from "../stores/categories.svelte";
   import { parseClipboardNote } from "../clipboardNote";
+  import { parseChecklist, formatChecklist } from "../checklistText";
+  import ChecklistEditor from "./ChecklistEditor.svelte";
   import { applyCachedTheme } from "../theme";
   import type { PinnedItem, Subtask } from "../types";
   import { t } from "../i18n.svelte";
@@ -25,10 +27,16 @@
   // копятся и уезжают diff'ом по «Сохранить», здесь каждый клик уходит в БД
   // сразу — слот открывают, чтобы отметить сделанное и закрыть, и потерять
   // галочку на Escape было бы обиднее, чем в форме редактирования.
+  //
+  // v0.9.45: чек-лист стал текстовым полем (как в TaskModal), поэтому «сразу»
+  // уточняется — на каждую букву в БД не пишем. Правка уезжает через паузу
+  // набора, а также при закрытии окна и по «Сохранить»: мгновенность нужна
+  // против потери галочки на Escape, а не буквально на каждый keypress.
   let subs = $state<Subtask[]>([]);
-  let newSub = $state("");
+  let subsText = $state("");
   let subsBusy = $state(false);
-  const subsDone = $derived(subs.filter((s) => s.done).length);
+  let subsTimer: ReturnType<typeof setTimeout> | null = null;
+  const SUBS_DEBOUNCE_MS = 600;
   // v0.9.26: подсказка «текст взят из буфера» — только для режима clipboard,
   // снимается при первой же правке, чтобы не висеть над отредактированным
   // текстом. Сам "clipboard" в Mode не входит: это не третья вкладка, а
@@ -65,7 +73,7 @@
       pinnedTitle = pinned?.title ?? "";
       pinnedText = pinned?.text ?? "";
       subs = pinned?.subtasks ?? [];
-      newSub = "";
+      subsText = formatChecklist(subs.map((s) => ({ title: s.title, done: s.done })));
       return;
     }
     if (m !== "clipboard") {
@@ -102,8 +110,7 @@
     fromClipboard = false;
     // Сам слот (pinned) и его чек-лист не сбрасываем: reset чистит черновики
     // создания, а закреплённое — не черновик, оно живёт в БД и переживает
-    // закрытие окна. Чистится только недописанная строка новой подзадачи.
-    newSub = "";
+    // закрытие окна.
     saved = false;
   }
 
@@ -165,6 +172,7 @@
     errorMsg = null;
     try {
       if (pinned.kind === "task") {
+        await flushSubs();
         await api.updateTask(pinned.id, { title, description: pinnedText });
         await emit("task-updated");
       } else {
@@ -184,48 +192,50 @@
   // остаётся то, что реально лежит в БД, а не оптимистично отрисованное.
   // Перечитывать слот целиком после каждого клика не нужно: заголовок и текст
   // могут быть отредактированы прямо сейчас, и перечитывание затёрло бы правку.
-  async function toggleSub(s: Subtask) {
-    if (subsBusy) return;
-    subsBusy = true;
-    errorMsg = null;
-    try {
-      await api.toggleSubtask(s.id);
-      subs = subs.map((x) => (x.id === s.id ? { ...x, done: !x.done } : x));
-      await emit("task-updated");
-    } catch (e) {
-      errorMsg = typeof e === "string" ? e : (e as Error)?.message ?? "Не удалось отметить подзадачу";
-    } finally {
-      subsBusy = false;
-    }
+  // Правка чек-листа: откладываем запись, пока пользователь печатает. Таймер
+  // перезапускается на каждое изменение, поэтому в БД уходит уже готовая
+  // строка, а не по букве на подзадачу.
+  function scheduleSubsFlush() {
+    if (subsTimer) clearTimeout(subsTimer);
+    subsTimer = setTimeout(() => { subsTimer = null; flushSubs(); }, SUBS_DEBOUNCE_MS);
   }
 
-  async function addSub() {
-    const title = newSub.trim();
-    if (!title || !pinned || pinned.kind !== "task" || subsBusy) return;
+  // Тот же позиционный diff, что в TaskModal: i-я строка правит i-ю подзадачу.
+  // Локальный subs — то, что реально лежит в БД; при ошибке он не трогается,
+  // и следующий flush попробует применить ту же правку заново.
+  async function flushSubs() {
+    if (subsTimer) { clearTimeout(subsTimer); subsTimer = null; }
+    if (!pinned || pinned.kind !== "task" || subsBusy) return;
+    const current = parseChecklist(subsText);
+    const orig = subs;
+    const same =
+      current.length === orig.length &&
+      current.every((c, i) => c.title === orig[i].title && c.done === orig[i].done);
+    if (same) return;
     subsBusy = true;
     errorMsg = null;
     try {
-      const created = await api.addSubtask(pinned.id, title);
-      subs = [...subs, created];
-      newSub = "";
+      const next: Subtask[] = [];
+      for (let i = current.length; i < orig.length; i++) {
+        await api.deleteSubtask(orig[i].id);
+      }
+      for (let i = 0; i < current.length; i++) {
+        const c = current[i];
+        const o = orig[i];
+        if (!o) {
+          const added = await api.addSubtask(pinned.id, c.title);
+          if (c.done) await api.toggleSubtask(added.id);
+          next.push({ ...added, done: c.done });
+        } else {
+          if (o.title !== c.title) await api.renameSubtask(o.id, c.title);
+          if (o.done !== c.done) await api.toggleSubtask(o.id);
+          next.push({ ...o, title: c.title, done: c.done });
+        }
+      }
+      subs = next;
       await emit("task-updated");
     } catch (e) {
-      errorMsg = typeof e === "string" ? e : (e as Error)?.message ?? "Не удалось добавить подзадачу";
-    } finally {
-      subsBusy = false;
-    }
-  }
-
-  async function removeSub(s: Subtask) {
-    if (subsBusy) return;
-    subsBusy = true;
-    errorMsg = null;
-    try {
-      await api.deleteSubtask(s.id);
-      subs = subs.filter((x) => x.id !== s.id);
-      await emit("task-updated");
-    } catch (e) {
-      errorMsg = typeof e === "string" ? e : (e as Error)?.message ?? "Не удалось удалить подзадачу";
+      errorMsg = typeof e === "string" ? e : (e as Error)?.message ?? "Не удалось сохранить подзадачи";
     } finally {
       subsBusy = false;
     }
@@ -238,6 +248,9 @@
   }
 
   async function cancel() {
+    // Отложенную правку чек-листа дописываем ДО скрытия окна: Escape здесь —
+    // штатный способ закрыть слот, и потерять на нём набранное нельзя.
+    await flushSubs();
     await getCurrentWindow().hide();
     reset();
   }
@@ -293,28 +306,18 @@
         rows={pinned.kind === "task" ? 3 : 6} autofocus oninput={() => saved = false}></textarea>
 
       <!-- Чек-лист — только у задачи: у заметки подзадач не бывает. Правки
-           здесь уходят в БД сразу, поэтому кнопка «Сохранить» ниже их не
-           касается — она про заголовок и текст. -->
+           здесь уходят в БД сами (через паузу набора, а также по Escape и
+           «Сохранить»), поэтому кнопка «Сохранить» ниже про заголовок и текст. -->
       {#if pinned.kind === "task"}
         <div class="subs">
           <div class="subs-head">
             <span class="subs-label">{t("Подзадачи")}</span>
-            {#if subs.length}<span class="subs-count">{subsDone} / {subs.length}</span>{/if}
           </div>
-          {#each subs as s (s.id)}
-            <div class="sub-row" class:done={s.done}>
-              <input type="checkbox" checked={s.done} disabled={subsBusy}
-                onchange={() => toggleSub(s)} aria-label={s.title} />
-              <span class="sub-title">{s.title}</span>
-              <button class="sub-del" onclick={() => removeSub(s)} disabled={subsBusy}
-                title={t("Удалить подзадачу")} aria-label="Удалить подзадачу {s.title}">✕</button>
-            </div>
-          {/each}
-          <input class="sub-new" bind:value={newSub} placeholder={t("+ подзадача (Enter)")}
-            disabled={subsBusy}
-            onkeydown={(e) => {
-              if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); addSub(); }
-            }} />
+          <ChecklistEditor
+            bind:value={subsText}
+            placeholder={t("Подзадача на строку (Enter — ещё строка)")}
+            onchange={scheduleSubsFlush}
+          />
         </div>
       {/if}
 
@@ -477,58 +480,8 @@
     font-weight: 600;
     color: var(--text-muted, #888);
   }
-  .subs-count {
-    font-size: 11px;
-    color: var(--text-muted, #888);
-    margin-left: auto;
-  }
-  .sub-row {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 13px;
-  }
-  .sub-row input[type="checkbox"] {
-    flex-shrink: 0;
-    margin: 0;
-    cursor: pointer;
-  }
-  .sub-title {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .sub-row.done .sub-title {
-    text-decoration: line-through;
-    color: var(--text-muted, #888);
-  }
-  /* Крестик проявляется по наведению на строку: в списке из пяти подзадач
-     пять постоянных крестиков читаются как основное действие, хотя удаление
-     здесь — редкое. */
-  .sub-del {
-    flex-shrink: 0;
-    padding: 0 4px;
-    border: none;
-    background: transparent;
-    color: var(--text-muted, #888);
-    cursor: pointer;
-    opacity: 0;
-    font-size: 12px;
-    line-height: 1;
-  }
-  .sub-row:hover .sub-del,
-  .sub-del:focus-visible {
-    opacity: 1;
-  }
-  .sub-del:hover {
-    color: var(--danger);
-  }
-  .sub-new {
-    font-size: 13px;
-    margin-top: 2px;
-  }
+  /* Строки чек-листа и счётчик переехали в ChecklistEditor (v0.9.45):
+     удаление строки — это удаление текста, отдельный крестик не нужен. */
   .pin-empty {
     flex: 1;
     display: flex;

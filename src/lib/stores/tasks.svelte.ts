@@ -34,6 +34,13 @@ export const taskStore = {
   get deletedTasks() { return deletedTasks; },
   get error() { return error; },
   clearError() { error = null; },
+  // Произвольная операция под тем же баннером ошибок, что и остальной стор
+  // (v0.9.45): чек-лист в панели строки шлёт свой diff несколькими вызовами
+  // api и не укладывается в готовые методы, но ошибку показывать обязан там
+  // же, где её ждёт пользователь.
+  async guarded(op: () => Promise<void>): Promise<void> {
+    await guard(async () => { await op(); }, undefined);
+  },
   get focusTaskId() { return focusTaskId; },
   requestFocus(id: string) { focusTaskId = id; },
   clearFocus() { focusTaskId = null; },

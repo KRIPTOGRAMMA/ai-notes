@@ -11,6 +11,8 @@
   import { parseComposer, parseTaskText, matchCategoryQuery, SUBTASK_PREFIX } from "../lib/composer";
   import { t } from "../lib/i18n.svelte";
   import TaskModal from "../lib/components/TaskModal.svelte";
+  import ChecklistEditor from "../lib/components/ChecklistEditor.svelte";
+  import { parseChecklist, formatChecklist } from "../lib/checklistText";
   import TaskHistoryDetail from "../lib/components/TaskHistoryDetail.svelte";
   import Icon from "../lib/components/Icon.svelte";
   import type { Task, Subtask, Category, CreateTaskPayload, UpdateTaskPayload, Project, GoalSnapshot, ActiveSession, SmartListFilter } from "../lib/types";
@@ -494,54 +496,64 @@
     await taskStore.load();
   }
 
-  // --- Инлайн-чеклист в панели строки (v0.8.3, стиль Xiaomi Notes):
-  // существующие подзадачи редактируются на месте (Enter/blur — commit,
-  // Backspace на пустой — удалить), последняя строка — драфт новой.
-  let subDraft = $state<Record<string, string>>({});
-  let draftEls = $state<Record<string, HTMLInputElement>>({});
+  // --- Чек-лист в панели строки (v0.8.3 → переписан на текст в v0.9.45).
+  // Разметка `[x] ` скрыта чекбоксом внутри строки, как в модалке и быстром
+  // слоте — требование «изменить везде так».
+  //
+  // Запись здесь мгновенная (панель открывают, чтобы отметить и закрыть), но
+  // на каждую букву в БД писать нельзя, поэтому — пауза набора, как в слоте.
+  // Своя пауза на каждую задачу: развернуть можно несколько строк сразу.
+  const SUBS_DEBOUNCE_MS = 600;
+  let subsText = $state<Record<string, string>>({});
+  let subsTimers: Record<string, ReturnType<typeof setTimeout>> = {};
+  let subsBusy = $state<Record<string, boolean>>({});
 
-  async function commitDraft(taskId: string, refocus = true) {
-    const title = (subDraft[taskId] ?? "").trim();
-    if (!title) return;
-    await api.addSubtask(taskId, title);
-    subDraft[taskId] = "";
-    await taskStore.load();
-    if (refocus) { await tick(); draftEls[taskId]?.focus(); }
+  // Текст панели ведём отдельно от store: пока пользователь печатает, store
+  // перечитывается (например, соседней задачей) и затирал бы правку.
+  // Инициализируем при разворачивании, а не в $derived.
+  function subsTextFor(task: Task): string {
+    return subsText[task.id]
+      ?? formatChecklist(task.subtasks.map(s => ({ title: s.title, done: s.done })));
   }
 
-  async function commitRename(sub: Subtask, value: string) {
-    const t = value.trim();
-    if (!t) { // очистил и ушёл — считаем удалением (симметрично Backspace)
-      await api.deleteSubtask(sub.id);
-      await taskStore.load();
-      return;
-    }
-    if (t !== sub.title) {
-      await api.renameSubtask(sub.id, t);
-      await taskStore.load();
-    }
+  function scheduleSubsFlush(task: Task) {
+    clearTimeout(subsTimers[task.id]);
+    subsTimers[task.id] = setTimeout(() => flushSubs(task), SUBS_DEBOUNCE_MS);
   }
 
-  async function onSubRowKeydown(e: KeyboardEvent, taskId: string, sub: Subtask) {
-    const input = e.currentTarget as HTMLInputElement;
-    if (e.key === "Enter") {
-      e.preventDefault();
-      await commitRename(sub, input.value);
-      await tick();
-      draftEls[taskId]?.focus();
-    } else if (e.key === "Backspace" && input.value === "") {
-      e.preventDefault();
-      await api.deleteSubtask(sub.id);
+  // Тот же позиционный diff, что в модалке и слоте: i-я строка правит i-ю
+  // подзадачу. Ошибку показываем баннером (v0.9.25) и оставляем текст как есть,
+  // чтобы правка не пропала молча.
+  async function flushSubs(task: Task) {
+    clearTimeout(subsTimers[task.id]);
+    if (subsBusy[task.id]) return;
+    const current = parseChecklist(subsText[task.id] ?? "");
+    const orig = task.subtasks;
+    const same =
+      current.length === orig.length &&
+      current.every((c, i) => c.title === orig[i].title && c.done === orig[i].done);
+    if (same) return;
+    subsBusy[task.id] = true;
+    try {
+      await taskStore.guarded(async () => {
+        for (let i = current.length; i < orig.length; i++) {
+          await api.deleteSubtask(orig[i].id);
+        }
+        for (let i = 0; i < current.length; i++) {
+          const c = current[i];
+          const o = orig[i];
+          if (!o) {
+            const added = await api.addSubtask(task.id, c.title);
+            if (c.done) await api.toggleSubtask(added.id);
+          } else {
+            if (o.title !== c.title) await api.renameSubtask(o.id, c.title);
+            if (o.done !== c.done) await api.toggleSubtask(o.id);
+          }
+        }
+      });
       await taskStore.load();
-      await tick();
-      draftEls[taskId]?.focus();
-    }
-  }
-
-  function onDraftKeydown(e: KeyboardEvent, taskId: string) {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      commitDraft(taskId);
+    } finally {
+      subsBusy[task.id] = false;
     }
   }
 
@@ -895,28 +907,11 @@
 
   {#if isExpanded(task)}
     <li class="task-sub-panel">
-      {#each task.subtasks as sub (sub.id)}
-        <div class="sub-line">
-          <input type="checkbox" checked={sub.done} onchange={() => toggleSubtask(sub.id)} />
-          <input
-            class="check-input"
-            class:sub-done={sub.done}
-            value={sub.title}
-            onblur={(e) => commitRename(sub, e.currentTarget.value)}
-            onkeydown={(e) => onSubRowKeydown(e, task.id, sub)}
-          />
-        </div>
-      {/each}
-      <div class="sub-line">
-        <input
-          class="check-input"
-          placeholder={t("+ подзадача (Enter)")}
-          bind:value={subDraft[task.id]}
-          bind:this={draftEls[task.id]}
-          onkeydown={(e) => onDraftKeydown(e, task.id)}
-          onblur={() => commitDraft(task.id, false)}
-        />
-      </div>
+      <ChecklistEditor
+        value={subsTextFor(task)}
+        placeholder={t("Подзадача на строку (Enter — ещё строка)")}
+        onchange={(text) => { subsText[task.id] = text; scheduleSubsFlush(task); }}
+      />
     </li>
   {/if}
 {/snippet}
@@ -2043,25 +2038,9 @@
     font-size: 13px;
   }
 
-  .sub-done {
-    text-decoration: line-through;
-    color: var(--text-secondary);
-  }
-
-  /* Инлайн-чеклист панели (v0.8.3): borderless-строки, как в модалке */
-  .check-input {
-    flex: 1;
-    border: none;
-    background: transparent;
-    padding: 3px 4px;
-    font-size: 13px;
-    border-bottom: 1px solid transparent;
-    border-radius: 0;
-  }
-  .check-input:focus {
-    outline: none;
-    border-bottom-color: var(--accent);
-  }
+  /* Строки чек-листа переехали в ChecklistEditor (v0.9.45): зачёркивание
+     выполненного и стиль полей живут там же. .sub-line осталась — её
+     используют строки ИИ-предложений выше. */
 
   .history .task-row {
     opacity: 0.75;

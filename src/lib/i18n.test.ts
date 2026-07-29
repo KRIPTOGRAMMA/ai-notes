@@ -120,6 +120,7 @@ describe("покрытие словаря по размеченным файла
     "/src/views/NotesGraph.svelte",
     "/src/lib/components/TaskHistoryDetail.svelte",
     "/src/lib/components/WindowControls.svelte",
+    "/src/lib/components/ChecklistEditor.svelte",
   ];
 
   it("все объявленные файлы найдены — путь не устарел", () => {

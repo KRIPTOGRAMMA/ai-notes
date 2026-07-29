@@ -81,13 +81,14 @@ test("задача: создание, редактирование, выполн
 
   // подзадача добавляется у задачи без подзадач (чип «+» виден всегда — v0.6.1)
   await page.locator(".chip-sub").click();
-  await page.getByPlaceholder("+ подзадача").fill("первый шаг");
-  await page.keyboard.press("Enter");
+  await page.locator(".task-sub-panel .checklist-editor").click();
+  await page.keyboard.insertText("первый шаг");
+  // v0.9.45: запись отложена на паузу набора
   await expect(page.locator(".chip-sub")).toHaveText(/0\/1/);
 
   // v0.8.2: чип с подзадачами визуально выделен; все выполнены — зеленеет
   await expect(page.locator(".chip-sub")).toHaveClass(/has-subs/);
-  await page.locator(".task-sub-panel input[type='checkbox']").check();
+  await page.locator(".task-sub-panel .cm-sub-checkbox").click();
   await expect(page.locator(".chip-sub")).toHaveClass(/subs-done/);
   await expect(page.locator(".chip-sub")).toHaveText(/1\/1/);
 
@@ -115,11 +116,10 @@ test("завершение задачи проставляет done всем е�
   await expect(page.getByText("уборка")).toBeVisible();
 
   await page.locator(".chip-sub").click();
-  const draft = page.getByPlaceholder("+ подзадача (Enter)");
-  await draft.fill("пропылесосить");
-  await draft.press("Enter");
-  await page.locator(".check-input").last().fill("вынести мусор");
-  await page.locator(".check-input").last().press("Enter");
+  await page.locator(".task-sub-panel .checklist-editor").click();
+  await page.keyboard.insertText("пропылесосить");
+  await page.keyboard.press("Enter");
+  await page.keyboard.insertText("вынести мусор");
   // ни одна не отмечена вручную
   await expect(page.locator(".chip-sub")).toHaveText(/0\/2/);
 
@@ -417,12 +417,12 @@ test("история: клик по строке открывает read-only д
 
   await createTask(page, "поход в горы");
   await page.locator(".chip-sub").click();
-  const draft = page.getByPlaceholder("+ подзадача (Enter)");
-  await draft.fill("рюкзак");
-  await draft.press("Enter");
-  await page.locator(".check-input").last().fill("палатка");
-  await page.locator(".check-input").last().press("Enter");
-  await page.locator(".task-sub-panel input[type='checkbox']").first().check();
+  await page.locator(".task-sub-panel .checklist-editor").click();
+  await page.keyboard.insertText("рюкзак");
+  await page.keyboard.press("Enter");
+  await page.keyboard.insertText("палатка");
+  await expect(page.locator(".chip-sub")).toHaveText(/0\/2/);
+  await page.locator(".task-sub-panel .cm-sub-checkbox").first().click();
 
   await page.locator(".task-check").click();
   await page.getByRole("button", { name: "История" }).click();
@@ -441,34 +441,70 @@ test("история: клик по строке открывает read-only д
   await expect(page.locator(".modal")).toHaveCount(0);
 });
 
-test("модалка: инлайн-чеклист подзадач — Enter добавляет строку, сохранение применяет diff", async ({ page }) => {
+test("модалка: чек-лист подзадач — разметка скрыта чекбоксом, Enter продолжает список, сохранение применяет diff", async ({ page }) => {
   await withMock(page);
   await page.goto("/");
 
-  // создание: две строки чеклиста через Enter (скоуп .modal — в панели строки
-  // задач те же .check-input, глобальный локатор был бы неоднозначным)
+  // v0.9.45: чеклист — один редактор, а не набор инпутов, и разметка `[x] `
+  // пользователю не видна (как в Xiaomi Notes) — вместо неё чекбокс в строке.
   await page.getByRole("button", { name: "+ Новая", exact: true }).click();
   await page.getByPlaceholder("Название задачи").fill("поездка");
-  const inputs = page.locator(".modal .check-input");
-  await inputs.nth(0).fill("паспорт");
-  await inputs.nth(0).press("Enter");
-  await inputs.nth(1).fill("билеты");
+  const editor = page.locator(".modal .checklist-editor");
+  await editor.click();
+  await page.keyboard.insertText("[ ] паспорт");
+  // скобки скрыты виджетом: на экране чекбокс, а не текст разметки
+  await expect(editor.locator(".cm-sub-checkbox")).toHaveCount(1);
+  await expect(editor).toHaveText("паспорт");
+
+  // Enter продолжает список — префикс печатать не нужно
+  await page.keyboard.press("Enter");
+  await page.keyboard.insertText("билеты");
+  await expect(editor.locator(".cm-sub-checkbox")).toHaveCount(2);
+  // Строка, набранная БЕЗ разметки, — тоже подзадача, и чекбокс у неё есть.
+  // Раньше здесь был рассинхрон: parseChecklist считал такую строку подзадачей
+  // (нужно для вставки готового списка), а декорация её не рисовала — на
+  // экране часть строк выглядела подзадачами, часть просто текстом. Enter
+  // после такой строки тоже не продолжал список.
+  await page.keyboard.press("ControlOrMeta+a");
+  await page.keyboard.insertText("без разметки");
+  await expect(editor.locator(".cm-sub-checkbox")).toHaveCount(1);
+  await page.keyboard.press("Enter");
+  await page.keyboard.insertText("вторая");
+  await expect(editor.locator(".cm-sub-checkbox")).toHaveCount(2);
+  // Отметить можно любую из них, в том числе набранную без разметки:
+  // toggleLine дописывает `[x]` такой строке.
+  await editor.locator(".cm-sub-checkbox").nth(1).click();
+  await expect(editor.locator(".cm-sub-checkbox").nth(1)).toBeChecked();
+  await expect(editor.locator(".cm-sub-checkbox").nth(0)).not.toBeChecked();
+
+  // возвращаем исходный чек-лист для проверки diff ниже
+  await page.keyboard.press("ControlOrMeta+a");
+  await page.keyboard.insertText("[ ] паспорт\n[ ] билеты");
+
   await page.getByRole("button", { name: "Создать" }).click();
   await expect(page.locator(".chip-sub")).toHaveText(/0\/2/);
 
-  // редактирование: rename + удаление строки Backspace-ом на пустой
+  // id первой подзадачи до правки — сравниваем с ним же после
+  const subsOf = () => page.evaluate(() =>
+    JSON.parse(localStorage.getItem("__mock_db")!).tasks
+      .find((t: any) => t.title === "поездка").subtasks.map((s: any) => [s.id, s.title]));
+  const before = await subsOf();
+  expect(before.map((s: string[]) => s[1])).toEqual(["паспорт", "билеты"]);
+
+  // редактирование: правка формулировки + удаление строки
   await page.locator(".task-main", { hasText: "поездка" }).click();
-  await expect(inputs.nth(0)).toHaveValue("паспорт");
-  await expect(inputs.nth(1)).toHaveValue("билеты");
-  await inputs.nth(0).fill("загранпаспорт");
-  await inputs.nth(1).fill("");
-  await inputs.nth(1).press("Backspace");
+  await expect(editor).toHaveText("паспортбилеты"); // две строки без разметки
+  await editor.click();
+  await page.keyboard.press("ControlOrMeta+a");
+  await page.keyboard.insertText("[ ] загранпаспорт");
   // exact — иначе матчится и «Сохранить как шаблон» в авто-развёрнутой панели
   await page.locator(".modal").getByRole("button", { name: "Сохранить", exact: true }).click();
 
   await expect(page.locator(".chip-sub")).toHaveText(/0\/1/);
-  // v0.8.3: панель авто-развёрнута (show_subtasks_expanded по умолчанию)
-  await expect(page.locator(".task-sub-panel .check-input").nth(0)).toHaveValue("загранпаспорт");
+  // Правка формулировки — переименование, а не пересоздание: id тот же самый.
+  // Если бы diff пересоздавал подзадачу, отметка «выполнено» слетала бы при
+  // каждой правке текста.
+  expect(await subsOf()).toEqual([[before[0][0], "загранпаспорт"]]);
 });
 
 test("композер: Shift+Enter — подзадачи, Ctrl+Enter — создать", async ({ page }) => {
@@ -488,10 +524,42 @@ test("композер: Shift+Enter — подзадачи, Ctrl+Enter — со�
   await expect(page.locator(".chip-sub")).toHaveText(/0\/2/);
   await expect(page.locator(".composer-input")).toHaveValue("");
 
-  // v0.8.3: панель авто-развёрнута, подзадачи — инлайн-инпуты чеклиста
-  const panelInputs = page.locator(".task-sub-panel .check-input");
-  await expect(panelInputs.nth(0)).toHaveValue("шаг раз");
-  await expect(panelInputs.nth(1)).toHaveValue("шаг два");
+  // v0.8.3: панель авто-развёрнута; v0.9.45: чек-лист текстом, разметка скрыта
+  const panel = page.locator(".task-sub-panel .checklist-editor");
+  await expect(panel.locator(".cm-sub-checkbox")).toHaveCount(2);
+  await expect(panel).toHaveText("шаг разшаг два");
+});
+
+// v0.9.45: панель в строке задачи получила тот же чек-лист-редактор, что
+// модалка и быстрый слот. Здесь запись мгновенная (через паузу набора), а diff
+// позиционный — правка формулировки обязана остаться переименованием, иначе на
+// каждой букве подзадача пересоздавалась бы и теряла отметку «выполнено».
+test("панель задачи: правка подзадачи — переименование, отметка не слетает", async ({ page }) => {
+  await seedDb(page, {
+    tasks: [{
+      id: "t1", title: "Отчёт", description: "",
+      status: "Todo", priority: "Medium", category: "Work", deadline: null,
+      tags: [], recurrence: null, hidden: false, sort_order: 1,
+      subtasks: [{ id: "s1", task_id: "t1", title: "собрать цифры", done: true, position: 0 }],
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    }],
+    notes: [], projects: [],
+  });
+  await withMock(page);
+  await page.goto("/");
+
+  const panel = page.locator(".task-sub-panel .checklist-editor");
+  await expect(panel.locator(".cm-sub-checkbox")).toBeChecked();
+
+  // правим формулировку, отметку не трогаем
+  await panel.click();
+  await page.keyboard.press("ControlOrMeta+a");
+  await page.keyboard.insertText("[x] собрать цифры за квартал");
+
+  await expect.poll(() => page.evaluate(() =>
+    JSON.parse(localStorage.getItem("__mock_db")!).tasks[0].subtasks
+      .map((s: any) => [s.id, s.title, s.done]))
+  ).toEqual([["s1", "собрать цифры за квартал", true]]);
 });
 
 test("композер: двойное нажатие Enter не создаёт дубликат", async ({ page }) => {
@@ -2002,12 +2070,8 @@ test("шаблоны чеклистов: сохранить подзадачи �
   await page.getByRole("button", { name: "+ Новая", exact: true }).click();
   const modal = page.locator(".modal");
   await modal.getByPlaceholder("Название задачи").fill("поездка");
-  const draft = modal.locator(".check-input").last();
-  await draft.fill("паспорт");
-  await draft.press("Enter");
-  await modal.locator(".check-input").last().fill("билеты");
-  await modal.locator(".check-input").last().press("Enter");
-  await expect(modal.locator(".check-input")).toHaveCount(3); // паспорт, билеты, пустая заготовка
+  await modal.locator(".checklist-editor").click();
+  await page.keyboard.insertText("[ ] паспорт\n[ ] билеты");
 
   // Сохраняем как шаблон прямо из модалки создания
   await modal.getByRole("button", { name: "Сохранить как шаблон" }).click();
@@ -2024,7 +2088,7 @@ test("шаблоны чеклистов: сохранить подзадачи �
   await otherModal.getByRole("button", { name: "Из шаблона…" }).click();
   await expect(otherModal.getByText("Поездка")).toBeVisible();
   await otherModal.getByRole("button", { name: "Применить" }).click();
-  await expect(otherModal.locator(".check-input")).toHaveCount(3);
+  await expect(otherModal.locator(".checklist-editor")).toHaveText("паспортбилеты");
   await otherModal.getByRole("button", { name: "Сохранить", exact: true }).click();
 
   // Чип N/M совпадает: 2 подзадачи, 0 выполнено
@@ -2884,21 +2948,25 @@ test("быстрый слот: чек-лист задачи виден, отме
   await withMock(page);
   await page.goto("/quick-task.html");
 
-  await expect(page.locator(".sub-row")).toHaveCount(2);
-  await expect(page.locator(".subs-count")).toHaveText("1 / 2");
-  // выполненная подзадача отличается визуально, а не только чекбоксом
-  await expect(page.locator(".sub-row").first()).toHaveClass(/done/);
+  // v0.9.45: разметка скрыта, отметка — чекбокс внутри строки
+  const boxes = page.locator(".checklist-editor .cm-sub-checkbox");
+  await expect(boxes).toHaveCount(2);
+  await expect(boxes.nth(0)).toBeChecked();
+  await expect(boxes.nth(1)).not.toBeChecked();
+  await expect(page.locator(".checklist-editor")).toHaveText("собрать цифрыотправить");
 
   // отметка — без нажатия «Сохранить»
-  await page.locator(".sub-row").nth(1).locator("input[type=checkbox]").check();
-  await expect(page.locator(".subs-count")).toHaveText("2 / 2");
+  await boxes.nth(1).click();
+  await expect(boxes.nth(1)).toBeChecked();
 
-  const done = await page.evaluate(() =>
-    JSON.parse(localStorage.getItem("__mock_db")!).tasks[0].subtasks.map((s: any) => s.done));
-  expect(done).toEqual([true, true]);
+  // Запись отложена на паузу набора (v0.9.45), поэтому ждём её, а не читаем
+  // БД сразу: expect.poll перечитывает, пока не сойдётся.
+  await expect.poll(() => page.evaluate(() =>
+    JSON.parse(localStorage.getItem("__mock_db")!).tasks[0].subtasks.map((s: any) => s.done))
+  ).toEqual([true, true]);
 });
 
-test("быстрый слот: подзадача добавляется по Enter и удаляется крестиком", async ({ page }) => {
+test("быстрый слот: подзадача добавляется строкой и удаляется удалением строки", async ({ page }) => {
   await seedDb(page, {
     tasks: [{
       id: "t1", title: "Отчёт", description: "",
@@ -2913,19 +2981,57 @@ test("быстрый слот: подзадача добавляется по En
   await withMock(page);
   await page.goto("/quick-task.html");
 
-  // Enter в поле подзадачи добавляет строку, а НЕ сохраняет слот целиком
-  await page.locator(".sub-new").fill("сверить с бухгалтерией");
-  await page.locator(".sub-new").press("Enter");
-  await expect(page.locator(".sub-row")).toHaveCount(2);
-  await expect(page.locator(".sub-new")).toHaveValue("");
+  // v0.9.45: добавление и удаление — это правка текста. Enter внутри редактора
+  // добавляет строку и НЕ сохраняет слот целиком (иначе окно бы закрылось).
+  const editor = page.locator(".checklist-editor");
+  await editor.click();
+  await page.keyboard.press("ControlOrMeta+End");
+  await page.keyboard.press("Enter");
+  await page.keyboard.insertText("сверить с бухгалтерией");
+  await expect(editor.locator(".cm-sub-checkbox")).toHaveCount(2);
   await expect(page.locator(".pin-saved")).toHaveCount(0);
 
-  await page.locator(".sub-row").first().locator(".sub-del").click();
-  await expect(page.locator(".sub-row")).toHaveCount(1);
+  // удаление строки — обычное редактирование текста, отдельного крестика нет
+  await page.keyboard.press("ControlOrMeta+a");
+  await page.keyboard.insertText("[ ] сверить с бухгалтерией");
+  await expect(editor.locator(".cm-sub-checkbox")).toHaveCount(1);
+
+  await expect.poll(() => page.evaluate(() =>
+    JSON.parse(localStorage.getItem("__mock_db")!).tasks[0].subtasks.map((s: any) => s.title))
+  ).toEqual(["сверить с бухгалтерией"]);
+});
+
+// v0.9.45: запись чек-листа отложена на паузу набора, поэтому Escape обязан
+// её дописать. Это тот самый сценарий, ради которого v0.9.34 делала сохранение
+// мгновенным: набрал подзадачу и сразу закрыл окно — потерять её нельзя.
+test("быстрый слот: Escape сразу после правки чек-листа не теряет её", async ({ page }) => {
+  await seedDb(page, {
+    tasks: [{
+      id: "t1", title: "Отчёт", description: "",
+      status: "Todo", priority: "Medium", category: "Work", deadline: null,
+      tags: [], recurrence: null, hidden: false, sort_order: 1,
+      subtasks: [{ id: "s1", task_id: "t1", title: "старая", done: false, position: 0 }],
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    }],
+    notes: [], projects: [],
+    quickMode: "pinned", pinnedKind: "task", pinnedId: "t1",
+  });
+  await withMock(page);
+  await page.goto("/quick-task.html");
+
+  await page.locator(".checklist-editor").click();
+  await page.keyboard.press("ControlOrMeta+a");
+  await page.keyboard.insertText("[ ] старая\n[ ] дописать вывод");
+  // Escape немедленно, не дожидаясь паузы набора. Ждать записи через
+  // expect.poll здесь нельзя: в браузере окно не закрывается по-настоящему,
+  // отложенный таймер доживает до конца теста и дописал бы правку сам — тест
+  // прошёл бы и без flushSubs в cancel(). Поэтому проверяем сразу, пока пауза
+  // ещё не истекла: запись обязана быть уже сделанной самим Escape.
+  await page.keyboard.press("Escape");
 
   const titles = await page.evaluate(() =>
     JSON.parse(localStorage.getItem("__mock_db")!).tasks[0].subtasks.map((s: any) => s.title));
-  expect(titles).toEqual(["сверить с бухгалтерией"]);
+  expect(titles).toEqual(["старая", "дописать вывод"]);
 });
 
 // Чек-лист есть только у задач — у заметки его быть не должно ни в каком виде.
@@ -2943,7 +3049,7 @@ test("быстрый слот: у закреплённой заметки чек
 
   await expect(page.locator(".pin-badge")).toHaveText("⚡ Заметка");
   await expect(page.locator(".subs")).toHaveCount(0);
-  await expect(page.locator(".sub-new")).toHaveCount(0);
+  await expect(page.locator(".checklist-editor")).toHaveCount(0);
 });
 
 // v0.9.35: глобальные хоткеи стали переназначаемыми. До этой версии вкладка
