@@ -3445,3 +3445,273 @@ test("язык: дата в подсказке календаря идёт за 
   // остальное («empty») уже шло через t().
   await expect(tip).not.toContainText(/[а-яА-ЯёЁ]/);
 });
+
+// v0.9.48: разметка `[ ] ` спрятана виджетом, поэтому пользователь стирает
+// подзадачу как обычный текст — и раньше упирался в невидимые скобки: строка
+// оставалась на экране (пустая, с чекбоксом), а в данных её уже не было.
+test("чек-лист: подзадача стирается текстом, пустая строка не остаётся", async ({ page }) => {
+  await seedDb(page, {
+    tasks: [{
+      id: "t1", title: "Отчёт", description: "",
+      status: "Todo", priority: "Medium", category: "Work", deadline: null,
+      tags: [], recurrence: null, hidden: false, sort_order: 1,
+      subtasks: [
+        { id: "s1", task_id: "t1", title: "собрать цифры", done: false, position: 0 },
+        { id: "s2", task_id: "t1", title: "лишняя строка", done: false, position: 1 },
+      ],
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    }],
+    notes: [], projects: [],
+    quickMode: "pinned", pinnedKind: "task", pinnedId: "t1",
+  });
+  await withMock(page);
+  await page.goto("/quick-task.html");
+
+  const editor = page.locator(".checklist-editor");
+  await expect(editor.locator(".cm-sub-checkbox")).toHaveCount(2);
+
+  // Стираем подзадачу с конца — так её удаляет пользователь. Ровно столько
+  // нажатий, сколько букв: строка обязана исчезнуть вместе с последней из
+  // них, без добивания невидимых скобок.
+  await editor.click();
+  await page.keyboard.press("ControlOrMeta+End");
+  for (let i = 0; i < "лишняя строка".length; i++) {
+    await page.keyboard.press("Backspace");
+  }
+
+  await expect(editor.locator(".cm-sub-checkbox")).toHaveCount(1);
+  expect(await editor.locator(".cm-line").count()).toBe(1);
+
+  await expect.poll(() => page.evaluate(() =>
+    JSON.parse(localStorage.getItem("__mock_db")!).tasks[0].subtasks.map((s: any) => s.title))
+  ).toEqual(["собрать цифры"]);
+
+  // Backspace внутри строки обязан остаться обычным удалением символа.
+  // Без этой проверки достаточно было бы сносить строку из любой позиции —
+  // тест выше прошёл бы, а редактор стал бы непригоден для правки текста.
+  await page.keyboard.press("ControlOrMeta+End");
+  await page.keyboard.press("Backspace");
+  await expect(editor.locator(".cm-sub-checkbox")).toHaveCount(1);
+  await expect.poll(() => page.evaluate(() =>
+    JSON.parse(localStorage.getItem("__mock_db")!).tasks[0].subtasks.map((s: any) => s.title))
+  ).toEqual(["собрать цифр"]);
+});
+
+// v0.9.49: пользователь показал скриншотом пустые строки в чек-листе —
+// Enter и Shift+Enter, после которых он не начал печатать. Они видны на
+// экране, но parseChecklist их выбрасывает: сохранено меньше, чем показано.
+test("чек-лист: пустые строки исчезают при уходе фокуса", async ({ page }) => {
+  await seedDb(page, {
+    tasks: [{
+      id: "t1", title: "Отчёт", description: "",
+      status: "Todo", priority: "Medium", category: "Work", deadline: null,
+      tags: [], recurrence: null, hidden: false, sort_order: 1,
+      subtasks: [{ id: "s1", task_id: "t1", title: "собрать цифры", done: false, position: 0 }],
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    }],
+    notes: [], projects: [],
+    quickMode: "pinned", pinnedKind: "task", pinnedId: "t1",
+  });
+  await withMock(page);
+  await page.goto("/quick-task.html");
+
+  const editor = page.locator(".checklist-editor");
+  await editor.click();
+  await page.keyboard.press("ControlOrMeta+End");
+
+  // Shift+Enter даёт такую же подзадачу, как Enter (проверено в браузере:
+  // defaultKeymap и так шлёт его в Enter, но привязка объявлена явно, чтобы
+  // поведение не держалось на его внутренней детали).
+  await page.keyboard.press("Shift+Enter");
+  await page.keyboard.insertText("вторая");
+  await expect(editor.locator(".cm-sub-checkbox")).toHaveCount(2);
+
+  // Мусор со скриншота: Enter и Shift+Enter, после которых не начали печатать
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Shift+Enter");
+  await expect(editor.locator(".cm-line")).toHaveCount(4);
+
+  // Уходим из редактора — пустые строки подчищаются
+  await page.locator("input").first().click();
+  await expect(editor.locator(".cm-line")).toHaveCount(2);
+  await expect(editor.locator(".cm-sub-checkbox")).toHaveCount(2);
+
+  await expect.poll(() => page.evaluate(() =>
+    JSON.parse(localStorage.getItem("__mock_db")!).tasks[0].subtasks.map((s: any) => s.title))
+  ).toEqual(["собрать цифры", "вторая"]);
+});
+
+// v0.9.50: два бага, найденные пользователем. Enter на пустой строке давал
+// строку БЕЗ чекбокса (newSubtaskLine выходил при пустой текущей строке, и
+// комбинация проваливалась в defaultKeymap). Ctrl+Backspace шёл мимо своего
+// Backspace и выедал скобки изнутри — в строке оставался видимый огрызок «[ ».
+test("чек-лист: Enter на пустой строке даёт подзадачу, Ctrl+Backspace не обнажает разметку", async ({ page }) => {
+  await seedDb(page, {
+    tasks: [{
+      id: "t1", title: "Отчёт", description: "",
+      status: "Todo", priority: "Medium", category: "Work", deadline: null,
+      tags: [], recurrence: null, hidden: false, sort_order: 1,
+      subtasks: [{ id: "s1", task_id: "t1", title: "первая", done: false, position: 0 }],
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    }],
+    notes: [], projects: [],
+    quickMode: "pinned", pinnedKind: "task", pinnedId: "t1",
+  });
+  await withMock(page);
+  await page.goto("/quick-task.html");
+
+  const editor = page.locator(".checklist-editor");
+  await editor.click();
+  await page.keyboard.press("ControlOrMeta+End");
+
+  // Enter на пустой строке: чекбокс обязан быть у КАЖДОЙ строки — в чек-листе
+  // строк без подзадач не бывает. Считаем именно чекбоксы: строк столько же,
+  // а вот виджета у неразмеченной строки раньше не было.
+  await page.keyboard.press("Enter");
+  await page.keyboard.press("Enter");
+  await expect(editor.locator(".cm-line")).toHaveCount(3);
+  await expect(editor.locator(".cm-sub-checkbox")).toHaveCount(3);
+
+  // Ctrl+Backspace: удаление слова не должно оставлять огрызок разметки.
+  // Проверяем сам текст строки — огрызок «[ » виден пользователю именно там.
+  await page.keyboard.insertText("вторая");
+  await page.keyboard.press("Control+Backspace");
+  await page.keyboard.press("Control+Backspace");
+  const texts = await editor.locator(".cm-line").allTextContents();
+  expect(texts.join("|"), "разметка обнажилась").not.toMatch(/[[\]]/);
+
+  await page.locator("input").first().click();
+  await expect.poll(() => page.evaluate(() =>
+    JSON.parse(localStorage.getItem("__mock_db")!).tasks[0].subtasks.map((s: any) => s.title))
+  ).toEqual(["первая"]);
+});
+
+// v0.9.51: Ctrl+Enter принадлежит окну («сохранить»), но в редакторе не был
+// привязан — проваливался в defaultKeymap и вставлял пустую строку БЕЗ
+// разметки. Список ломался, а сохранение при этом не срабатывало.
+test("чек-лист: Ctrl+Enter сохраняет слот, а не вставляет пустую строку", async ({ page }) => {
+  await seedDb(page, {
+    tasks: [{
+      id: "t1", title: "Отчёт", description: "",
+      status: "Todo", priority: "Medium", category: "Work", deadline: null,
+      tags: [], recurrence: null, hidden: false, sort_order: 1,
+      subtasks: [{ id: "s1", task_id: "t1", title: "первая", done: false, position: 0 }],
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    }],
+    notes: [], projects: [],
+    quickMode: "pinned", pinnedKind: "task", pinnedId: "t1",
+  });
+  await withMock(page);
+  await page.goto("/quick-task.html");
+
+  const editor = page.locator(".checklist-editor");
+  await editor.click();
+  await page.keyboard.press("ControlOrMeta+End");
+  await page.keyboard.press("ControlOrMeta+Enter");
+  await page.keyboard.press("ControlOrMeta+Enter");
+
+  // Ни одной новой строки: комбинация не редактирует текст вообще
+  await expect(editor.locator(".cm-line")).toHaveCount(1);
+  await expect(editor.locator(".cm-sub-checkbox")).toHaveCount(1);
+
+  // И при этом делает то, ради чего нажата: событие всплывает до окна,
+  // которое сохраняет слот. Без этого правка комбинации «починила» бы
+  // список ценой потери сохранения.
+  await expect(page.locator(".pin-saved")).toHaveCount(1);
+});
+
+// v0.9.52: баг из боевого использования. У повторяющейся задачи с чек-листом
+// пользователь отметил пару подзадач и нажал «выполнить» — задача уехала на
+// завтра, но отметки остались. Два разных дефекта в одном сценарии:
+// (1) отложенная запись панели прилетала ПОСЛЕ сброса и возвращала отметки в
+// БД; (2) панель держит свой текст отдельно от стора, поэтому даже при
+// корректной БД на экране оставались галочки.
+test("повтор: выполнение сбрасывает чек-лист и в БД, и на экране", async ({ page }) => {
+  await seedDb(page, {
+    tasks: [{
+      id: "t1", title: "Ежедневная", description: "",
+      status: "Todo", priority: "Medium", category: "Work",
+      deadline: new Date(Date.now() + 86400000).toISOString(),
+      tags: [], recurrence: "Daily", hidden: false, sort_order: 1,
+      subtasks: [
+        { id: "s1", task_id: "t1", title: "раз", done: false, position: 0 },
+        { id: "s2", task_id: "t1", title: "два", done: false, position: 1 },
+      ],
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    }],
+    notes: [], projects: [],
+  });
+  await withMock(page);
+  await page.goto("/");
+
+  // Панель подзадач раскрывается чипом; первый клик может уйти до готовности
+  // строки, поэтому ждём редактор и при необходимости кликаем ещё раз.
+  await page.waitForSelector(".chip-sub");
+  await page.locator(".chip-sub").first().click();
+  await page.waitForSelector(".task-sub-panel .checklist-editor", { timeout: 5000 })
+    .catch(async () => {
+      await page.locator(".chip-sub").first().click();
+      await page.waitForSelector(".task-sub-panel .checklist-editor");
+    });
+
+  const editor = page.locator(".task-sub-panel .checklist-editor");
+  await editor.locator(".cm-sub-checkbox").first().click();
+
+  // Выполняем СРАЗУ, не дожидаясь debounce: именно так это делает человек,
+  // и именно здесь отложенная запись обгоняла сброс.
+  await page.locator(".task-check").first().click();
+
+  await expect.poll(() => page.evaluate(() =>
+    JSON.parse(localStorage.getItem("__mock_db")!).tasks[0].subtasks.map((s: any) => s.done))
+  ).toEqual([false, false]);
+
+  // Ждём заведомо дольше debounce панели (600 мс) и проверяем ЕЩЁ РАЗ:
+  // без этого шага тест ловит момент до того, как отложенная запись успела
+  // прилететь, и гонка остаётся недоказанной — проверено поломкой (отметка
+  // возвращалась в БД на ~700 мс).
+  await page.waitForTimeout(1200);
+  expect(await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("__mock_db")!).tasks[0].subtasks.map((s: any) => s.done)),
+    "отложенная запись вернула отметки после сброса").toEqual([false, false]);
+
+  // Экран обязан совпасть с данными: панель не должна показывать отметки,
+  // которых в БД уже нет.
+  await expect(editor.locator(".cm-sub-checkbox:checked")).toHaveCount(0);
+});
+
+// Вторая половина той же правки (v0.9.52): выброс кэша панели при завершении
+// обязан идти ПОСЛЕ записи незаписанной правки. Иначе правка уходит вместе с
+// кэшем — и теряется не текст, а сама подзадача: в БД остаётся пустой список.
+test("выполнение не теряет незаписанную правку чек-листа", async ({ page }) => {
+  await seedDb(page, {
+    tasks: [{
+      id: "t1", title: "Разовая", description: "",
+      status: "Todo", priority: "Medium", category: "Work", deadline: null,
+      tags: [], recurrence: null, hidden: false, sort_order: 1,
+      subtasks: [{ id: "s1", task_id: "t1", title: "старое", done: false, position: 0 }],
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    }],
+    notes: [], projects: [],
+  });
+  await withMock(page);
+  await page.goto("/");
+
+  await page.waitForSelector(".chip-sub");
+  await page.locator(".chip-sub").first().click();
+  await page.waitForSelector(".task-sub-panel .checklist-editor", { timeout: 5000 })
+    .catch(async () => {
+      await page.locator(".chip-sub").first().click();
+      await page.waitForSelector(".task-sub-panel .checklist-editor");
+    });
+
+  await page.locator(".task-sub-panel .checklist-editor").click();
+  await page.keyboard.press("ControlOrMeta+End");
+  await page.keyboard.insertText(" ПРАВКА");
+  // Выполняем сразу, не дожидаясь debounce
+  await page.locator(".task-check").first().click();
+  await page.waitForTimeout(1200);
+
+  expect(await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("__mock_db")!).tasks[0].subtasks.map((s: any) => s.title)),
+    "правка потерялась вместе с кэшем панели").toEqual(["старое ПРАВКА"]);
+});
