@@ -1,4 +1,6 @@
 import { api } from "../api/tauri";
+import { seededName } from "../i18n";
+import { i18n } from "../i18n.svelte";
 import type { CategoryInfo } from "../types";
 
 let categories: CategoryInfo[] = $state([]);
@@ -15,9 +17,14 @@ export const categoryStore = {
   get error() { return error; },
   clearError() { error = null; },
 
-  // Отображение по id с фолбэком на сам id (задачи со старой/чужой категорией)
+  // Отображение по id с фолбэком на сам id (задачи со старой/чужой категорией).
+  // Посевные категории переводятся (v0.9.47) — их имена написали мы миграцией,
+  // и это такая же часть интерфейса, как надписи на кнопках. Пользовательские
+  // и переименованные отдаются как есть; решает seededName по id.
   name(id: string): string {
-    return categories.find(c => c.id === id)?.name ?? id;
+    const c = categories.find(c => c.id === id);
+    if (!c) return id;
+    return seededName("category", c.id, c.name, i18n.lang);
   },
   color(id: string): string {
     return categories.find(c => c.id === id)?.color ?? "#888888";

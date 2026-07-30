@@ -5,7 +5,7 @@
   import { projectStore } from "../lib/stores/projects.svelte";
   import { categoryStore } from "../lib/stores/categories.svelte";
   import type { AppSettings, DayCompletion } from "../lib/types";
-  import { t } from "../lib/i18n.svelte";
+  import { t, i18n } from "../lib/i18n.svelte";
 
   let { onOpenTask }: { onOpenTask: (id: string) => void } = $props();
 
@@ -89,20 +89,22 @@
 
   // Метки для КАТЕГОРИЙ ПРИЛОЖЕНИЙ (glob-правила трекинга — фиксированный набор).
   // Категории задач с v0.6.3 пользовательские и берутся из categoryStore.
-  const CATEGORY_LABELS: Record<string, string> = {
-    Work: "Работа",
-    Study: "Учёба",
-    Home: "Дом",
-    Health: "Здоровье",
-    Other: "Другое",
-  };
+  // Это ФИКСИРОВАННЫЙ набор в коде, а не строки из БД (в отличие от категорий
+  // задач, миграция 0015) — поэтому переводится, ключ = id категории.
+  const CATEGORY_LABELS: Record<string, string> = $derived({
+    Work: t("Работа"),
+    Study: t("Учёба"),
+    Home: t("Дом"),
+    Health: t("Здоровье"),
+    Other: t("Другое"),
+  });
 
   const donutData = $derived.by(() => {
     // Порядок и цвета — из таблицы категорий; легаси-значения (категория
     // удалена, задачи в истории остались) — в хвост серым.
     const known = categoryStore.categories.map(c => ({
       category: c.id,
-      label: c.name,
+      label: categoryStore.name(c.id),
       color: c.color,
       count: categories.find(x => x.category === c.id)?.count ?? 0,
     }));
@@ -172,8 +174,12 @@
     return r > 0.75 ? 4 : r > 0.5 ? 3 : r > 0.25 ? 2 : 1;
   }
 
+  // Локаль за выбранным языком, а не зашитая "ru-RU" (v0.9.47): в подсказке
+  // календаря дата оставалась русской — «20 июл. — empty». Тот же приём, что
+  // в Notes.svelte:345.
   function fmtDay(date: string): string {
-    return new Date(date + "T00:00:00").toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
+    return new Date(date + "T00:00:00")
+      .toLocaleDateString(i18n.lang === "en" ? "en-US" : "ru-RU", { day: "numeric", month: "short" });
   }
 
   // Тултип (hover, быстрый превью) и попап (клик, с переходом к задаче) —
@@ -217,7 +223,7 @@
   // --- Heatmap «час × день недели» (v0.6.5) ---
   let hourly: { weekday: number; hour: number; minutes: number }[] = $state([]);
   const HOURS = Array.from({ length: 24 }, (_, i) => i);
-  const WEEKDAY_LABELS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+  const WEEKDAY_LABELS = $derived([t("Пн"), t("Вт"), t("Ср"), t("Чт"), t("Пт"), t("Сб"), t("Вс")]);
   const heatMax = $derived(Math.max(1, ...hourly.map(c => c.minutes)));
 
   // row 0 = Пн; в данных weekday по strftime('%w'): 0 = Вс
@@ -406,7 +412,7 @@
       {:else}
         <div class="ai-row">
           <button onclick={refreshInsight} disabled={insightPending}>
-            {insightPending ? "Думаю…" : "Обновить"}
+            {insightPending ? t("Думаю…") : t("Обновить")}
           </button>
           <div class="ai-text">
             {#if insightError}
@@ -469,7 +475,7 @@
               <span style="color:var(--danger);">{summaryError}</span>
             {:else if summaryText}
               <span class="muted" style="font-size:11px;display:block;margin-bottom:2px;">
-                {summaryKind === "day" ? "За день" : "За неделю"}
+                {summaryKind === "day" ? t("За день") : t("За неделю")}
               </span>
               {summaryText}
             {:else if summaryPending === null}
@@ -489,7 +495,7 @@
             <li class="goal-item">
               <div class="goal-head">
                 <span class="goal-name">{p.name}</span>
-                <span class="muted">{p.goal_period === "month" ? "месяц" : "неделя"}</span>
+                <span class="muted">{p.goal_period === "month" ? t("месяц") : t("неделя")}</span>
               </div>
               {#if p.goal_tasks != null}
                 <div class="goal-row">
@@ -530,7 +536,7 @@
                 <span class="goal-name">{pt.name}</span>
               </div>
               <div class="goal-row">
-                <span class="goal-val muted">{pt.mins} мин</span>
+                <span class="goal-val muted">{t("{n} мин", { n: pt.mins })}</span>
               </div>
             </li>
           {/each}
@@ -555,7 +561,7 @@
               <div class="track tall">
                 <div class="fill" style="width:{Math.round((d.minutes / maxDomain) * 100)}%;"></div>
               </div>
-              <span class="bar-val">{d.minutes} мин</span>
+              <span class="bar-val">{t("{n} мин", { n: d.minutes })}</span>
             </div>
           {/each}
         </div>
@@ -582,7 +588,7 @@
                 <div class="track tall">
                   <div class="fill" style="width:{Math.round((a.minutes / maxApp) * 100)}%;"></div>
                 </div>
-                <span class="bar-val">{a.minutes} мин</span>
+                <span class="bar-val">{t("{n} мин", { n: a.minutes })}</span>
               </div>
             {/each}
           </div>
@@ -592,7 +598,7 @@
               <li>
                 <span class="swatch" style="background:var(--cat-{c.category.toLowerCase()});"></span>
                 <span>{CATEGORY_LABELS[c.category] ?? c.category}</span>
-                <span class="muted">{c.minutes} мин</span>
+                <span class="muted">{t("{n} мин", { n: c.minutes })}</span>
               </li>
             {/each}
           </ul>
@@ -619,7 +625,7 @@
               <div class="track tall">
                 <div class="fill" style="width:{Math.round((day.minutes / max) * 100)}%;"></div>
               </div>
-              <span class="bar-val">{day.minutes} мин</span>
+              <span class="bar-val">{t("{n} мин", { n: day.minutes })}</span>
             </div>
           {/each}
         </div>
@@ -655,7 +661,7 @@
           </div>
           {#if calTip}
             <div class="cal-tip" style="left:{Math.min(calTip.x, 640)}px; top:{calTip.y + 16}px;">
-              <div class="cal-tip-head">{fmtDay(calTip.date)} — {calTip.count > 0 ? `выполнено: ${calTip.count}` : "пусто"}</div>
+              <div class="cal-tip-head">{fmtDay(calTip.date)} — {calTip.count > 0 ? t("выполнено: {n}", { n: calTip.count }) : t("пусто")}</div>
               {#each calTip.completions as c (c.id)}
                 <div class="cal-tip-item">• {c.title}</div>
               {/each}
@@ -680,7 +686,7 @@
               <span
                 class="heat-cell"
                 style={heatStyle(mins)}
-                title="{label} {String(h).padStart(2, '0')}:00 — {mins} мин"
+                title="{label} {String(h).padStart(2, '0')}:00 — {t('{n} мин', { n: mins })}"
               ></span>
             {/each}
           {/each}
@@ -699,7 +705,7 @@
 {#if calPopup}
   <div role="dialog" aria-modal="true" class="overlay backdrop" onclick={(e) => { if (e.target === e.currentTarget) calPopup = null; }}>
     <div class="modal dialog cal-popup">
-      <h2 class="dialog-title">{fmtDay(calPopup.date)} — {calPopup.count > 0 ? `выполнено: ${calPopup.count}` : "пусто"}</h2>
+      <h2 class="dialog-title">{fmtDay(calPopup.date)} — {calPopup.count > 0 ? t("выполнено: {n}", { n: calPopup.count }) : t("пусто")}</h2>
       {#if calPopup.completions.length === 0}
         <div class="empty">{t("Нет выполненных задач в этот день")}</div>
       {:else}

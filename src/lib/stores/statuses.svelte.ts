@@ -1,4 +1,6 @@
 import { api } from "../api/tauri";
+import { seededName } from "../i18n";
+import { i18n } from "../i18n.svelte";
 import type { StatusInfo } from "../types";
 
 let statuses: StatusInfo[] = $state([]);
@@ -15,9 +17,12 @@ export const statusStore = {
   get error() { return error; },
   clearError() { error = null; },
 
-  // Отображение по id с фолбэком на сам id (задачи со старым/чужим статусом)
+  // Отображение по id с фолбэком на сам id (задачи со старым/чужим статусом).
+  // Посевные (is_reserved) переводятся — см. categories.svelte.ts
   name(id: string): string {
-    return statuses.find(s => s.id === id)?.name ?? id;
+    const s = statuses.find(s => s.id === id);
+    if (!s) return id;
+    return seededName("status", s.id, s.name, i18n.lang);
   },
   color(id: string): string {
     return statuses.find(s => s.id === id)?.color ?? "#888888";

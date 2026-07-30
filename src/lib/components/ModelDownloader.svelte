@@ -63,7 +63,7 @@
 
 <div class="model-picker">
   {#if exists}
-    <div class="status ok">✓ Модель загружена ({mb(sizeBytes)} МБ)</div>
+    <div class="status ok">✓ {t("Модель загружена ({mb} МБ)", { mb: mb(sizeBytes) })}</div>
   {:else}
     <div class="status">{t("Модель не найдена")}</div>
   {/if}
@@ -83,8 +83,14 @@
             {opt.name}
             {#if opt.recommended}<span class="chip-recommended">{t("рекомендуется")}</span>{/if}
           </div>
-          <div class="option-meta">~{gb(opt.size_bytes)} ГБ · от {opt.ram_gb} ГБ ОЗУ</div>
-          <div class="option-desc">{opt.description}</div>
+          <div class="option-meta">{t("~{gb} ГБ · от {ram} ГБ ОЗУ", { gb: gb(opt.size_bytes), ram: opt.ram_gb })}</div>
+          <!--
+            Описание приходит из Rust (commands/model.rs) фиксированной
+            строкой, а не из БД, — поэтому переводится при отрисовке
+            (v0.9.47), как справка и названия хоткеев. Полнота проверяется
+            тестом «описания моделей (model.rs) есть в словаре EN».
+          -->
+          <div class="option-desc">{t(opt.description)}</div>
         </div>
       </label>
     {/each}
@@ -115,10 +121,10 @@
     <div class="progress-track">
       <div class="progress-fill" style="width:{pct}%;"></div>
     </div>
-    <div class="progress-label">Загрузка… {pct}%</div>
+    <div class="progress-label">{t("Загрузка… {pct}%", { pct })}</div>
   {:else}
     <button class="btn-primary btn-sm" onclick={download} disabled={!selectedUrl}>
-      {exists ? "Перекачать" : "Скачать модель"}
+      {exists ? t("Перекачать") : t("Скачать модель")}
     </button>
   {/if}
 

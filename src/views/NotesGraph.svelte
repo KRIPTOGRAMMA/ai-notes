@@ -254,7 +254,7 @@
 <div class="graph-view">
   <div class="graph-header">
     <h2>{t("Граф заметок")}</h2>
-    <span class="muted">{nodes.length} заметок · {edges.length} связей</span>
+    <span class="muted">{t("{n} заметок", { n: nodes.length })} · {t("{n} связей", { n: edges.length })}</span>
   </div>
 
   {#if nodes.length === 0}

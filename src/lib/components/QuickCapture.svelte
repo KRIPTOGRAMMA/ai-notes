@@ -132,7 +132,7 @@
       await getCurrentWindow().hide();
       reset();
     } catch (e) {
-      errorMsg = typeof e === "string" ? e : (e as Error)?.message ?? "Не удалось создать задачу";
+      errorMsg = typeof e === "string" ? e : (e as Error)?.message ?? t("Не удалось создать задачу");
     } finally {
       busy = false;
     }
@@ -143,14 +143,14 @@
     busy = true;
     try {
       await api.createNote({
-        title: noteTitle.trim() || "Без названия",
+        title: noteTitle.trim() || t("Без названия"),
         content: noteContent,
       });
       await emit("note-created");
       await getCurrentWindow().hide();
       reset();
     } catch (e) {
-      errorMsg = typeof e === "string" ? e : (e as Error)?.message ?? "Не удалось создать заметку";
+      errorMsg = typeof e === "string" ? e : (e as Error)?.message ?? t("Не удалось создать заметку");
     } finally {
       busy = false;
     }
@@ -165,7 +165,7 @@
     // Пустой заголовок отклоняем: у задачи он обязателен на бэкенде, а у
     // заметки превратился бы в безымянную строку в списке.
     if (!title) {
-      errorMsg = "Заголовок не может быть пустым";
+      errorMsg = t("Заголовок не может быть пустым");
       return;
     }
     busy = true;
@@ -181,7 +181,7 @@
       }
       saved = true;
     } catch (e) {
-      errorMsg = typeof e === "string" ? e : (e as Error)?.message ?? "Не удалось сохранить";
+      errorMsg = typeof e === "string" ? e : (e as Error)?.message ?? t("Не удалось сохранить");
     } finally {
       busy = false;
     }
@@ -235,7 +235,7 @@
       subs = next;
       await emit("task-updated");
     } catch (e) {
-      errorMsg = typeof e === "string" ? e : (e as Error)?.message ?? "Не удалось сохранить подзадачи";
+      errorMsg = typeof e === "string" ? e : (e as Error)?.message ?? t("Не удалось сохранить подзадачи");
     } finally {
       subsBusy = false;
     }
@@ -296,7 +296,7 @@
   {#if mode === "pinned"}
     {#if pinned}
       <div class="pin-head">
-        <span class="pin-badge">⚡ {pinned.kind === "task" ? "Задача" : "Заметка"}</span>
+        <span class="pin-badge">⚡ {pinned.kind === "task" ? t("Задача") : t("Заметка")}</span>
         {#if saved}<span class="pin-saved">{t("Сохранено")}</span>{/if}
       </div>
       <!-- svelte-ignore a11y_autofocus -->
@@ -353,11 +353,11 @@
       </select>
       <select bind:value={category}>
         {#each categoryStore.categories as c (c.id)}
-          <option value={c.id}>{c.name}</option>
+          <option value={c.id}>{categoryStore.name(c.id)}</option>
         {/each}
       </select>
       <button class="desc-toggle" onclick={() => showDescription = !showDescription}>
-        {showDescription ? "−" : "+ описание"}
+        {showDescription ? "−" : t("+ описание")}
       </button>
     </div>
 

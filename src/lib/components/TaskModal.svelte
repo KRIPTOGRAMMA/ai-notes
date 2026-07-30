@@ -81,7 +81,7 @@
 
   // Дни недели для Recurrence::Weekdays — тот же паттерн, что days_mask у
   // рутин (RoutinesModal.svelte): бит 0 = Пн ... бит 6 = Вс.
-  const WEEKDAY_LABELS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+  const WEEKDAY_LABELS = $derived([t("Пн"), t("Вт"), t("Ср"), t("Чт"), t("Пт"), t("Сб"), t("Вс")]);
   function initWeekdays(): boolean[] {
     const r = task?.recurrence;
     if (typeof r === "object" && r !== null && "Weekdays" in r) {
@@ -200,9 +200,9 @@
   }
 
   async function handleSave() {
-    if (!title.trim()) { error = "Название не может быть пустым"; return; }
+    if (!title.trim()) { error = t("Название не может быть пустым"); return; }
     if (recurrenceKey === "Weekdays" && weekdaysMask() === 0) {
-      error = "Выберите хотя бы один день недели";
+      error = t("Выберите хотя бы один день недели");
       return;
     }
     saving = true;
@@ -254,7 +254,7 @@
       }
       onClose();
     } catch (e) {
-      error = typeof e === "string" ? e : "Ошибка при сохранении";
+      error = typeof e === "string" ? e : t("Ошибка при сохранении");
     } finally {
       saving = false;
     }
@@ -298,7 +298,7 @@
         <button type="button" class="btn-sm" onclick={toggleTemplatePicker}>{t("Из шаблона…")}</button>
         <button type="button" class="btn-sm" onclick={toggleSaveTemplate}
           disabled={!hasSubs}
-          title={hasSubs ? "" : "Сначала добавьте подзадачи"}>
+          title={hasSubs ? "" : t("Сначала добавьте подзадачи")}>
           {t("Сохранить как шаблон")}
         </button>
       </div>
@@ -349,7 +349,7 @@
         <span class="label">{t("Категория")}</span>
         <select bind:value={category}>
           {#each categoryStore.categories as c (c.id)}
-            <option value={c.id}>{c.name}</option>
+            <option value={c.id}>{categoryStore.name(c.id)}</option>
           {/each}
         </select>
       </label>
@@ -358,7 +358,7 @@
     {#if isEdit && totalTaskMins > 0}
       <div class="field">
         <span class="label">{t("Время всего")}</span>
-        <span class="muted" style="font-size:13px;">{totalTaskMins} мин</span>
+        <span class="muted" style="font-size:13px;">{t("{n} мин", { n: totalTaskMins })}</span>
       </div>
     {/if}
 
@@ -367,7 +367,7 @@
         <span class="label">{t("Статус")}</span>
         <select bind:value={status}>
           {#each statusStore.statuses as s (s.id)}
-            <option value={s.id}>{s.name}</option>
+            <option value={s.id}>{statusStore.name(s.id)}</option>
           {/each}
         </select>
       </label>
@@ -437,7 +437,7 @@
           {/each}
           <!-- задача может висеть на архивном проекте — не теряем привязку -->
           {#each projectStore.projects.filter(p => p.archived && p.id === projectId) as p (p.id)}
-            <option value={p.id}>{p.name} (архив)</option>
+            <option value={p.id}>{p.name} ({t("архив")})</option>
           {/each}
         </select>
       </label>

@@ -108,7 +108,7 @@
     <div class="results">
       {#if items.length === 0}
         <p class="empty" style="padding:16px;">
-          {query.trim() ? "Ничего не найдено" : "Начните вводить запрос"}
+          {query.trim() ? t("Ничего не найдено") : t("Начните вводить запрос")}
         </p>
       {:else}
         {#each items as item, i (item)}

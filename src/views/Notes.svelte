@@ -155,7 +155,7 @@
       if (count > 0) {
         await noteStore.load();
         if (renameToastTimeout) clearTimeout(renameToastTimeout);
-        renameToast = `Обновлено ссылок: ${count}`;
+        renameToast = t("Обновлено ссылок: {n}", { n: count });
         renameToastTimeout = setTimeout(() => { renameToast = null; }, 4000);
       }
     }
@@ -255,7 +255,7 @@
   });
 
   async function newNote() {
-    const note = await noteStore.create({ title: "Без названия", content: "" });
+    const note = await noteStore.create({ title: t("Без названия"), content: "" });
     if (note) selectNote(note);
   }
 
@@ -382,9 +382,9 @@
   // одного из 4 действий и предпросмотром результата вместо списка чипов.
   type SelectionMenu = { text: string; from: number; to: number; left: number; top: number };
   type SelectionAction = "rewrite" | "shorten" | "expand" | "grammar";
-  const SELECTION_ACTION_LABELS: Record<SelectionAction, string> = {
-    rewrite: "Переписать", shorten: "Сократить", expand: "Развернуть", grammar: "Грамматика",
-  };
+  const SELECTION_ACTION_LABELS: Record<SelectionAction, string> = $derived({
+    rewrite: t("Переписать"), shorten: t("Сократить"), expand: t("Развернуть"), grammar: t("Грамматика"),
+  });
   let selectionMenu: SelectionMenu | null = $state(null);
   let selectionBusy = $state(false);
   let selectionResult: { requestId: string; text: string; error: string | null } | null = $state(null);
@@ -612,7 +612,7 @@
   function exportHtmlDocument(title: string, bodyHtml: string): string {
     const escapedTitle = title.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     return `<!DOCTYPE html>
-<html lang="ru">
+<html lang="${i18n.lang}">
 <head>
 <meta charset="UTF-8">
 <title>${escapedTitle}</title>
@@ -646,7 +646,7 @@ ${bodyHtml}
       const withImages = await embedImages(rendered);
       const html = exportHtmlDocument(editTitle || selected.title, withImages);
       const path = await saveDialog({
-        defaultPath: `${(editTitle || selected.title || "Без названия").replace(/[/\\:*?"<>|]/g, "_")}.html`,
+        defaultPath: `${(editTitle || selected.title || t("Без названия")).replace(/[/\\:*?"<>|]/g, "_")}.html`,
         filters: [{ name: "HTML", extensions: ["html"] }],
       });
       if (!path) return;
@@ -676,7 +676,7 @@ ${bodyHtml}
 
   async function restoreRevision(rev: NoteRevision) {
     if (!selectedId) return;
-    if (!confirm("Восстановить эту версию? Текущий текст тоже сохранится в версиях.")) return;
+    if (!confirm(t("Восстановить эту версию? Текущий текст тоже сохранится в версиях."))) return;
     revisionsBusy = true;
     try {
       const updated = await api.restoreNoteRevision(rev.id);
@@ -754,7 +754,7 @@ ${bodyHtml}
 
     {#if selectedNoteIds.size > 0}
       <div class="bulk-notes-bar">
-        <span class="bulk-notes-count">{selectedNoteIds.size} выбрано</span>
+        <span class="bulk-notes-count">{t("{n} выбрано", { n: selectedNoteIds.size })}</span>
         <select bind:value={bulkNotesProjectId} disabled={bulkNotesBusy} title={t("Перенести в проект")}>
           <option value="" disabled selected>{t("В проект…")}</option>
           <option value="none">{t("Без проекта")}</option>
@@ -786,7 +786,7 @@ ${bodyHtml}
             <button
               class="pin-btn"
               class:pinned={note.pinned}
-              title={note.pinned ? "Открепить" : "Закрепить"}
+              title={note.pinned ? t("Открепить") : t("Закрепить")}
               onclick={(e) => togglePin(note, e)}
             >
               <Icon name="pin" size={13} />
@@ -798,7 +798,7 @@ ${bodyHtml}
             <button
               class="slot-btn"
               class:pinned={pinnedStore.is("note", note.id)}
-              title={pinnedStore.is("note", note.id) ? "Убрать из быстрого слота" : "В быстрый слот (Ctrl+Shift+J)"}
+              title={pinnedStore.is("note", note.id) ? t("Убрать из быстрого слота") : t("В быстрый слот (Ctrl+Shift+J)")}
               onclick={(e) => { e.stopPropagation(); pinnedStore.toggle("note", note.id); }}
             >
               <Icon name="zap" size={13} />
@@ -842,7 +842,7 @@ ${bodyHtml}
           {/if}
           <button class="btn-icon" disabled={exporting} title={t("Экспорт в HTML")} onclick={exportNoteAsHtml}><Icon name="export" /></button>
         {/if}
-        <button class="btn-icon" title={zenMode ? "Выйти из zen-режима (Esc)" : "Zen-режим (Ctrl+Shift+Z)"} onclick={toggleZen}>
+        <button class="btn-icon" title={zenMode ? t("Выйти из zen-режима (Esc)") : t("Zen-режим (Ctrl+Shift+Z)")} onclick={toggleZen}>
           <Icon name={zenMode ? "collapse" : "expand"} />
         </button>
         {#if !zenMode}
@@ -858,9 +858,11 @@ ${bodyHtml}
             <span class="muted">{t("Связей не найдено")}</span>
           {:else}
             <span class="muted">{t("Связанные:")}</span>
-            {#each linkSuggestions.titles as t (t)}
-              <button class="chip link-chip" onclick={() => acceptLinkSuggestion(t)} title="Добавить [[{t}]] в заметку">
-                + {t}
+            <!-- Переменная цикла названа title, а не t: короткое `t` затеняло бы
+                 функцию перевода внутри блока (v0.9.46). -->
+            {#each linkSuggestions.titles as title (title)}
+              <button class="chip link-chip" onclick={() => acceptLinkSuggestion(title)} title="{t('Добавить связь')}: [[{title}]]">
+                + {title}
               </button>
             {/each}
           {/if}
@@ -1062,7 +1064,7 @@ ${bodyHtml}
               <li>
                 <button class="revision-item" class:active={viewingRevisionId === rev.id} onclick={() => viewRevision(rev)}>
                   <span>{formatDate(rev.created_at)}</span>
-                  <span class="muted" style="font-size:11px;">{rev.size} симв.</span>
+                  <span class="muted" style="font-size:11px;">{t("{n} симв.", { n: rev.size })}</span>
                 </button>
               </li>
             {/each}
@@ -1072,7 +1074,7 @@ ${bodyHtml}
               <pre>{viewingRevisionContent}</pre>
               <button class="btn-primary btn-sm" disabled={revisionsBusy}
                 onclick={() => restoreRevision(revisions.find(r => r.id === viewingRevisionId)!)}>
-                {revisionsBusy ? "Восстановление…" : "Восстановить"}
+                {revisionsBusy ? t("Восстановление…") : t("Восстановить")}
               </button>
             {:else}
               <span class="muted">{t("Выберите версию слева для просмотра")}</span>
@@ -1104,7 +1106,7 @@ ${bodyHtml}
         <button class="summary-text" title={t("Скопировать и закрыть")} onclick={copySummaryAndClose}>
           {summaryResult.text}
         </button>
-        <p class="muted" style="font-size:11px;">{summaryCopied ? "Скопировано ✓" : "Клик по тексту — скопировать и закрыть"}</p>
+        <p class="muted" style="font-size:11px;">{summaryCopied ? t("Скопировано ✓") : t("Клик по тексту — скопировать и закрыть")}</p>
       {/if}
     </div>
   </div>

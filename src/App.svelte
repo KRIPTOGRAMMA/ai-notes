@@ -90,6 +90,8 @@
     unreadNotifications = await api.getUnreadNotificationCount().catch(() => 0);
   }
 
+  // Подписи переводятся при отрисовке (`{t(item.label)}` ниже), а не здесь:
+  // это данные, а не разметка. /* i18n-ok */
   const NAV: { view: View; label: string; icon: string; actionId: string }[] = [
     { view: "today",     label: "Сегодня",   actionId: "view_today",     icon: "M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10Z M12 1v2 M12 21v2 M4.22 4.22l1.42 1.42 M18.36 18.36l1.42 1.42 M1 12h2 M21 12h2 M4.22 19.78l1.42-1.42 M18.36 5.64l1.42-1.42" },
     { view: "tasks",     label: "Задачи",    actionId: "view_tasks",     icon: "M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z M9 12l2 2 4-4" },
@@ -112,6 +114,8 @@
   }
 
   let lastActivityPing = 0;
+  // label/hint переводятся в SearchOverlay (`{t(cmd.label)}`); keywords —
+  // строка для поиска, она намеренно двуязычная. /* i18n-ok */
   const paletteCommands = [
     { label: "Новая задача", hint: "Создать задачу", keywords: "новая задача create task", run: () => { activeView = "tasks"; taskStore.requestCreate(); } },
     { label: "Новая заметка", hint: "Создать заметку", keywords: "новая заметка create note", run: () => { activeView = "notes"; } },
@@ -215,18 +219,18 @@
 
     <PomodoroWidget />
 
-    <button class="nav-item search-item" onclick={() => showSearch = true} title="Поиск (Ctrl+K)">
+    <button class="nav-item search-item" onclick={() => showSearch = true} title="{t('Поиск')} (Ctrl+K)">
       <svg viewBox="0 0 24 24" width="16" height="16" fill="none"
         stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <path d="M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z M21 21l-4.35-4.35" />
       </svg>
-      <span>Поиск</span>
+      <span>{t("Поиск")}</span>
       <kbd>Ctrl K</kbd>
     </button>
 
     <button class="nav-item bell-item" onclick={() => showNotifications = true} title={t("Уведомления")}>
       <Icon name="bell" size={16} />
-      <span>Уведомления</span>
+      <span>{t("Уведомления")}</span>
       {#if unreadNotifications > 0}
         <span class="unread-badge">{unreadNotifications > 99 ? "99+" : unreadNotifications}</span>
       {/if}

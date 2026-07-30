@@ -54,7 +54,7 @@
 <div class="wrap">
   <div class="card box">
     <div class="progress">
-      <span class="muted" style="font-size:12px;">Шаг {stepIdx + 1} из {steps.length}</span>
+      <span class="muted" style="font-size:12px;">{t("Шаг {i} из {n}", { i: stepIdx + 1, n: steps.length })}</span>
       <div class="steps-track">
         {#each steps as _, i}
           <span class="step-dot" class:done={i <= stepIdx}></span>
@@ -140,9 +140,9 @@
       {/if}
       <span style="flex:1;"></span>
       {#if stepIdx < steps.length - 1}
-        <button class="btn-primary" onclick={next}>{step === 1 ? "Начать настройку" : "Далее"}</button>
+        <button class="btn-primary" onclick={next}>{step === 1 ? t("Начать настройку") : t("Далее")}</button>
       {:else}
-        <button class="btn-primary" onclick={finish} disabled={finishing}>{finishing ? "Сохранение..." : "Начать"}</button>
+        <button class="btn-primary" onclick={finish} disabled={finishing}>{finishing ? t("Сохранение...") : t("Начать")}</button>
       {/if}
     </div>
   </div>

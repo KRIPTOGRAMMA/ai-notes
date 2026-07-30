@@ -7,7 +7,7 @@
   import { t as tr } from "../i18n.svelte";
   let { onClose }: { onClose: () => void } = $props();
 
-  const DAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+  const DAYS = $derived([tr("Пн"), tr("Вт"), tr("Ср"), tr("Чт"), tr("Пт"), tr("Сб"), tr("Вс")]);
 
   let editingId = $state<string | null | undefined>(undefined);
   let editTitle = $state("");
@@ -85,7 +85,7 @@
             </span>
           </div>
           <div class="row-actions">
-            <button class="btn-icon" onclick={() => routineStore.update(r.id, { active: !r.active })} title={r.active ? "Выключить" : "Включить"}>
+            <button class="btn-icon" onclick={() => routineStore.update(r.id, { active: !r.active })} title={r.active ? tr("Выключить") : tr("Включить")}>
               {r.active ? "✓" : "○"}
             </button>
             <button class="btn-icon" onclick={() => openEdit(r)} title={tr("Редактировать")}><Icon name="pencil" /></button>
@@ -112,7 +112,7 @@
         </div>
         <div class="actions">
           <button class="btn-ghost" onclick={() => editingId = undefined}>{tr("Отмена")}</button>
-          <button class="btn-primary" onclick={save}>{editingId ? "Сохранить" : "Добавить"}</button>
+          <button class="btn-primary" onclick={save}>{editingId ? tr("Сохранить") : tr("Добавить")}</button>
         </div>
       </div>
     {:else}

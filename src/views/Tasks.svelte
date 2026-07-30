@@ -96,15 +96,15 @@
   // от текущей даты, поэтому целиком на фронте, в БД не хранятся; свои —
   // из smartListStore, предикат по category/priority/tag/наличию дедлайна.
   type BuiltinSmartList = { id: string; name: string; test: (t: Task) => boolean };
-  const BUILTIN_SMART_LISTS: BuiltinSmartList[] = [
+  const BUILTIN_SMART_LISTS: BuiltinSmartList[] = $derived([
     {
       id: "__overdue",
-      name: "Просроченные",
+      name: t("Просроченные"),
       test: (t) => !!t.deadline && new Date(t.deadline).getTime() < Date.now(),
     },
     {
       id: "__this_week",
-      name: "На этой неделе",
+      name: t("На этой неделе"),
       test: (t) => {
         if (!t.deadline) return false;
         const d = new Date(t.deadline).getTime();
@@ -112,7 +112,7 @@
         return d >= now && d <= now + 7 * 864e5;
       },
     },
-  ];
+  ]);
 
   let activeSmartListId: string | null = $state(null);
 
@@ -180,7 +180,7 @@
     }
     const orphan = filteredActive.filter(t => !t.project_id || !projectStore.projects.some(p => p.id === t.project_id));
     if (orphan.length > 0 && groups.length > 0) {
-      groups.push({ id: "", name: "Без проекта", done: 0, total: 0, tasks: orphan, project: null });
+      groups.push({ id: "", name: t("Без проекта"), done: 0, total: 0, tasks: orphan, project: null });
     }
     return groups.length > 0 ? groups : null;
   });
@@ -189,8 +189,8 @@
   function goalText(p: Project): string | null {
     if (p.goal_tasks == null && p.goal_mins == null) return null;
     const parts: string[] = [];
-    if (p.goal_tasks != null) parts.push(`${p.goal_done_tasks}/${p.goal_tasks} задач`);
-    if (p.goal_mins != null) parts.push(`${p.goal_done_mins}/${p.goal_mins} мин`);
+    if (p.goal_tasks != null) parts.push(t("{done}/{total} задач", { done: p.goal_done_tasks, total: p.goal_tasks }));
+    if (p.goal_mins != null) parts.push(t("{done}/{total} мин", { done: p.goal_done_mins, total: p.goal_mins }));
     return parts.join(" · ");
   }
 
@@ -445,7 +445,7 @@
       composerText = "";
       await taskStore.load();
     } catch (e) {
-      aiError = typeof e === "string" ? e : "Не удалось создать задачу";
+      aiError = typeof e === "string" ? e : t("Не удалось создать задачу");
     }
     composerBusy = false;
     composerEl?.focus();
@@ -707,28 +707,28 @@
     await api.aiClassify(id, title);
   }
 
-  const PRIORITY_LABELS: Record<string, string> = {
-    Low: "Низкий", Medium: "Средний", High: "Высокий", Critical: "Критический",
-  };
+  const PRIORITY_LABELS: Record<string, string> = $derived({
+    Low: t("Низкий"), Medium: t("Средний"), High: t("Высокий"), Critical: t("Критический"),
+  });
 
   function recurrenceLabel(r: unknown): string | null {
     if (!r || r === "None") return null;
-    if (r === "Hourly") return "Каждый час";
-    if (r === "Daily")  return "Каждый день";
-    if (r === "Weekly") return "Каждую неделю";
+    if (r === "Hourly") return t("Каждый час");
+    if (r === "Daily")  return t("Каждый день");
+    if (r === "Weekly") return t("Каждую неделю");
     if (typeof r === "object" && r !== null && "Custom" in r) {
       const [n, unit] = (r as any).Custom;
       const unitLabel =
-        unit === "Minutes" ? "мин." :
-        unit === "Hours"   ? "ч." :
-        unit === "Days"    ? "дн." : "нед.";
-      return `раз в ${n} ${unitLabel}`;
+        unit === "Minutes" ? t("мин.") :
+        unit === "Hours"   ? t("ч.") :
+        unit === "Days"    ? t("дн.") : t("нед.");
+      return t("раз в {n} {unit}", { n, unit: unitLabel });
     }
     if (typeof r === "object" && r !== null && "Weekdays" in r) {
-      const labels = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+      const labels = [t("Пн"), t("Вт"), t("Ср"), t("Чт"), t("Пт"), t("Сб"), t("Вс")];
       const mask = (r as any).Weekdays as number;
       const days = labels.filter((_, i) => mask & (1 << i));
-      return `по ${days.join(", ")}`;
+      return t("по {days}", { days: days.join(", ") });
     }
     return null;
   }
@@ -741,13 +741,13 @@
     const dayDiff = Math.round((startOfDay(d) - startOfDay(now)) / 864e5);
 
     if (d.getTime() < now.getTime()) {
-      return { label: dayDiff === 0 ? "просрочено" : `просрочено ${-dayDiff} дн`, overdue: true };
+      return { label: dayDiff === 0 ? t("просрочено") : t("просрочено {n} дн", { n: -dayDiff }), overdue: true };
     }
     if (dayDiff === 0) {
-      return { label: `сегодня ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`, overdue: false };
+      return { label: t("сегодня {time}", { time: d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) }), overdue: false };
     }
-    if (dayDiff === 1) return { label: "завтра", overdue: false };
-    if (dayDiff < 7) return { label: `${dayDiff} дн`, overdue: false };
+    if (dayDiff === 1) return { label: t("завтра"), overdue: false };
+    if (dayDiff < 7) return { label: t("{n} дн", { n: dayDiff }), overdue: false };
     return { label: d.toLocaleDateString([], { day: "numeric", month: "short" }), overdue: false };
   }
 
@@ -836,7 +836,7 @@
       tabindex="0"
     >
       <div class="task-title">
-        <span class="prio-dot" title="Приоритет: {PRIORITY_LABELS[task.priority]}"></span>
+        <span class="prio-dot" title="{t('Приоритет')}: {PRIORITY_LABELS[task.priority]}"></span>
         {task.title}
         {#if recurrenceLabel(task.recurrence)}
           <span class="muted" title={recurrenceLabel(task.recurrence)}>↻</span>
@@ -853,7 +853,7 @@
         class:has-subs={task.subtasks.length > 0}
         class:subs-done={task.subtasks.length > 0 && doneCount(task) === task.subtasks.length}
         onclick={() => expanded[task.id] = !isExpanded(task)}
-        title={task.subtasks.length > 0 ? "Подзадачи" : "Добавить подзадачу"}
+        title={task.subtasks.length > 0 ? t("Подзадачи") : t("Добавить подзадачу")}
       >{isExpanded(task) ? "▾" : "▸"}
         {#if task.subtasks.length > 0}
           <span class="sub-track"><span class="sub-fill" style="width:{Math.round(doneCount(task) / task.subtasks.length * 100)}%"></span></span>
@@ -876,11 +876,11 @@
         onclick={() => generateSubtasks(task.id, task.title)}>{#if busy}…{:else}<Icon name="shuffle" />{/if}</button>
       <button class="btn-icon" disabled={busy} title={t("Авто-категория")}
         onclick={() => classifyTask(task.id, task.title)}>{#if busy}…{:else}<Icon name="tag" />{/if}</button>
-      <button class="btn-icon" title={trackingId === task.id ? "Остановить трекинг" : "Начать трекинг"}
+      <button class="btn-icon" title={trackingId === task.id ? t("Остановить трекинг") : t("Начать трекинг")}
         onclick={() => toggleTracking(task.id)} class:active={trackingId === task.id}>
         {#if trackingId === task.id}<Icon name="stop" />{:else}<Icon name="play" />{/if}</button>
       <button class="btn-icon" class:active={pinnedStore.is("task", task.id)}
-        title={pinnedStore.is("task", task.id) ? "Убрать из быстрого слота" : "В быстрый слот (Ctrl+Shift+J)"}
+        title={pinnedStore.is("task", task.id) ? t("Убрать из быстрого слота") : t("В быстрый слот (Ctrl+Shift+J)")}
         onclick={() => pinnedStore.toggle("task", task.id)}><Icon name="zap" /></button>
       <button class="btn-icon btn-danger" title={t("Удалить")}
         onclick={() => taskStore.remove(task.id)}>✕</button>
@@ -957,9 +957,9 @@
             onchange={(e) => projectStore.update(p.id, { name: e.currentTarget.value })}
           />
           <span class="muted proj-progress">{p.task_done}/{p.task_total}</span>
-          <button class="btn-sm" title={p.archived ? "Разархивировать" : "В архив"}
+          <button class="btn-sm" title={p.archived ? t("Разархивировать") : t("В архив")}
             onclick={() => projectStore.update(p.id, { archived: !p.archived })}>
-            {p.archived ? "Вернуть" : "Архив"}
+            {p.archived ? t("Вернуть") : t("Архив")}
           </button>
           <button class="btn-icon btn-danger" title={t("Удалить проект (задачи останутся без проекта)")}
             onclick={() => projectStore.remove(p.id)}>✕</button>
@@ -987,7 +987,7 @@
             {#if goalText(p)}
               <span class="goal-chip" class:met={goalMet(p)}>{goalText(p)}</span>
               <button class="btn-sm" onclick={() => toggleGoalHistory(p.id)}>
-                {showGoalHistory[p.id] ? "Скрыть" : "История"}
+                {showGoalHistory[p.id] ? t("Скрыть") : t("История")}
               </button>
             {/if}
             {#if showGoalHistory[p.id]}
@@ -1000,9 +1000,9 @@
                   {#each showGoalHistory[p.id] as snap (snap.id)}
                     <div class="goal-history-row">
                       <span class="muted">{snap.recorded_at.slice(0, 16)}</span>
-                      <span>{snap.done_tasks}{snap.goal_tasks != null ? `/${snap.goal_tasks}` : ''} задач</span>
+                      <span>{snap.done_tasks}{snap.goal_tasks != null ? `/${snap.goal_tasks}` : ''} {t("задач")}</span>
                       <span>·</span>
-                      <span>{snap.done_mins}{snap.goal_mins != null ? `/${snap.goal_mins}` : ''} мин</span>
+                      <span>{snap.done_mins}{snap.goal_mins != null ? `/${snap.goal_mins}` : ''} {t("мин")}</span>
                     </div>
                   {/each}
                 {/if}
@@ -1051,7 +1051,7 @@
           <select bind:value={newSmartListCategory}>
             <option value="">{t("Любая")}</option>
             {#each categoryStore.categories as c (c.id)}
-              <option value={c.id}>{c.name}</option>
+              <option value={c.id}>{categoryStore.name(c.id)}</option>
             {/each}
           </select>
         </label>
@@ -1123,7 +1123,7 @@
     {#if aiEnabled}
       <button onclick={askWhatNow} disabled={whatNowPending}
         title={t("ИИ посоветует, чем заняться сейчас — по блокам, дедлайнам и приоритетам")}>
-        {#if whatNowPending}Думаю…{:else}<Icon name="target" size={12} /> Что сейчас?{/if}
+        {#if whatNowPending}{t("Думаю…")}{:else}<Icon name="target" size={12} /> {t("Что сейчас?")}{/if}
       </button>
     {/if}
     <button onclick={() => { showProjects = true; projectStore.load(); }}>{t("Проекты")}</button>
@@ -1149,7 +1149,7 @@
 
   {#if selectedIds.size > 0}
     <div class="bulk-bar card">
-      <span class="bulk-count">{selectedIds.size} выбрано</span>
+      <span class="bulk-count">{t("{n} выбрано", { n: selectedIds.size })}</span>
       <select bind:value={bulkProjectId} disabled={bulkBusy} title={t("Перенести в проект")}>
         <option value="" disabled selected>{t("В проект…")}</option>
         <option value="none">{t("Без проекта")}</option>
@@ -1163,7 +1163,7 @@
       <select bind:value={bulkCategory} disabled={bulkBusy} title={t("Сменить категорию")}>
         <option value="" disabled selected>{t("Категория…")}</option>
         {#each categoryStore.categories as c (c.id)}
-          <option value={c.id}>{c.name}</option>
+          <option value={c.id}>{categoryStore.name(c.id)}</option>
         {/each}
       </select>
       {#if bulkCategory}
@@ -1203,7 +1203,7 @@
           ondragleave={() => { if (boardDropTargetStatus === col.id) boardDropTargetStatus = null; }}
         >
           <div class="column-head">
-            <span class="column-title" style="--cat: {col.color}">{col.name}</span>
+            <span class="column-title" style="--cat: {col.color}">{statusStore.name(col.id)}</span>
             <span class="muted column-count">{boardTasksFor(col.id).length}</span>
             <button class="btn-icon" title={t("Новая задача")} onclick={() => openBoardCreate(col.id)}>+</button>
           </div>
@@ -1219,7 +1219,7 @@
                 onclick={() => editingTask = task}
               >
                 <div class="board-card-title">
-                  <span class="prio-dot" style="--prio: var(--prio-{task.priority.toLowerCase()});" title="Приоритет: {PRIORITY_LABELS[task.priority]}"></span>
+                  <span class="prio-dot" style="--prio: var(--prio-{task.priority.toLowerCase()});" title="{t('Приоритет')}: {PRIORITY_LABELS[task.priority]}"></span>
                   {task.title}
                   {#if trackingId === task.id}
                     <span class="tracking-dot" title={t("Идёт трекинг")}><Icon name="play" size={10} /></span>
@@ -1305,7 +1305,7 @@
       ></textarea>
       {#if composerDraft.title}
         <button class="btn-primary btn-sm composer-send" disabled={composerBusy} onclick={submitComposer}>
-          {composerBusy ? "…" : "Создать"}
+          {composerBusy ? "…" : t("Создать")}
         </button>
       {/if}
     </div>
@@ -1320,7 +1320,7 @@
           {#if composerCategoryId}
             <span class="chip chip-cat" style="--cat: {categoryStore.color(composerCategoryId)}">{categoryStore.name(composerCategoryId)}</span>
           {:else}
-            <span class="chip chip-danger" title="Категория «{composerMeta.categoryQuery}» не найдена — будет «Другое»">@{composerMeta.categoryQuery} ?</span>
+            <span class="chip chip-danger" title={t("Категория «{q}» не найдена — будет «Другое»", { q: composerMeta.categoryQuery })}>@{composerMeta.categoryQuery} ?</span>
           {/if}
         {/if}
         {#each composerMeta.tags as tag}
@@ -1353,7 +1353,7 @@
         <span class="muted">{t("Создайте первую: «+ Новая» или Ctrl+Shift+N")}</span>
       </div>
     {:else if filteredActive.length === 0}
-      <div class="empty card">{activeSmartListId ? "В этом списке нет задач" : "В этом проекте нет активных задач"}</div>
+      <div class="empty card">{activeSmartListId ? t("В этом списке нет задач") : t("В этом проекте нет активных задач")}</div>
     {:else if grouped}
       {#each grouped as group (group.id)}
         <div class="section-title project-head">
@@ -1365,7 +1365,7 @@
             {@const goal = goalText(group.project)}
             {#if goal}
               <span class="goal-chip" class:met={goalMet(group.project)}
-                title={group.project.goal_period === "month" ? "Цель месяца" : "Цель недели"}>
+                title={group.project.goal_period === "month" ? t("Цель месяца") : t("Цель недели")}>
                 {goal}
               </span>
             {/if}

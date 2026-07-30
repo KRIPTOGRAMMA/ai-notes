@@ -68,9 +68,9 @@
     const startOfDay = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
     const dayDiff = Math.round((startOfDay(d) - startOfDay(now)) / 864e5);
     if (d.getTime() < now.getTime()) {
-      return { label: dayDiff === 0 ? "просрочено" : `просрочено ${-dayDiff} дн`, overdue: true };
+      return { label: dayDiff === 0 ? tr("просрочено") : tr("просрочено {n} дн", { n: -dayDiff }), overdue: true };
     }
-    if (dayDiff === 0) return { label: `сегодня ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`, overdue: false };
+    if (dayDiff === 0) return { label: tr("сегодня {time}", { time: d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) }), overdue: false };
     return { label: "", overdue: false };
   }
 

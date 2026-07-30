@@ -388,9 +388,9 @@
       <button class:active-toggle={viewMode === "week"} onclick={() => viewMode = "week"}>{tr("Неделя")}</button>
     </div>
     <span style="flex:1;"></span>
-    <button class="btn-icon" onclick={() => shiftMonth(-1)} title={viewMode === "week" ? "Предыдущая неделя" : "Предыдущий месяц"}>←</button>
+    <button class="btn-icon" onclick={() => shiftMonth(-1)} title={viewMode === "week" ? tr("Предыдущая неделя") : tr("Предыдущий месяц")}>←</button>
     <span class="month-label">{viewMode === "week" ? weekLabel : `${MONTHS[month]} ${year}`}</span>
-    <button class="btn-icon" onclick={() => shiftMonth(1)} title={viewMode === "week" ? "Следующая неделя" : "Следующий месяц"}>→</button>
+    <button class="btn-icon" onclick={() => shiftMonth(1)} title={viewMode === "week" ? tr("Следующая неделя") : tr("Следующий месяц")}>→</button>
     <button class="btn-sm" onclick={goToday}>{tr("Сегодня")}</button>
     {#if viewMode === "week"}
       <button class="btn-sm" onclick={() => showRoutinesModal = true}>{tr("Рутины")}</button>
@@ -441,7 +441,7 @@
                          и «0 мин простоя» выглядело бы как утверждение о факте. -->
                     {#if blockIdle.get(t.id)}
                       <span class="block-idle" title={tr("Простой внутри блока по данным мониторинга")}>
-                        простой {blockIdle.get(t.id)} мин
+                        {tr("простой {n} мин", { n: blockIdle.get(t.id) ?? 0 })}
                       </span>
                     {/if}
                   </button>
@@ -469,7 +469,7 @@
                   class="block ghost"
                   role="listitem"
                   style="top:{ghostTop(b)}px; height:{Math.max((b.mins / 60) * HOUR_H, 18)}px;"
-                  title="Предложение ИИ: {ghostLabel(b)} · {b.title}"
+                  title="{tr('Предложение ИИ')}: {ghostLabel(b)} · {b.title}"
                 >
                   <div class="block-body">
                     <span class="block-time">{ghostLabel(b)}</span>
@@ -489,7 +489,7 @@
       {#if aiEnabled}
         {#if proposed}
           <div class="plan-bar">
-            <span class="plan-hint">ИИ предложил {proposed.length} блок(а) — пунктиром в сетке</span>
+            <span class="plan-hint">{tr("ИИ предложил {n} блок(а) — пунктиром в сетке", { n: proposed.length })}</span>
             <div class="plan-actions">
               <button class="btn-primary btn-sm" onclick={applyPlan}>{tr("Применить")}</button>
               <button class="btn-ghost btn-sm" onclick={() => proposed = null}>{tr("Отмена")}</button>
@@ -498,7 +498,7 @@
         {:else}
           <button class="btn-sm plan-btn" onclick={planDay} disabled={planning || backlog.length === 0}
             title={tr("ИИ разложит важные задачи из бэклога по свободному времени сегодня")}>
-            {#if planning}Планирую…{:else}<Icon name="zap" size={12} /> Спланировать день{/if}
+            {#if planning}{tr("Планирую…")}{:else}<Icon name="zap" size={12} /> {tr("Спланировать день")}{/if}
           </button>
         {/if}
         {#if planError}
@@ -523,8 +523,8 @@
         {/each}
       {/if}
       <p class="muted" style="font-size:11px;margin:10px 0 0 0;">
-        Перетащите задачу в сетку — блок встанет с шагом {SNAP_MIN} мин.
-        Нижняя кромка блока тянется мышью.
+        {tr("Перетащите задачу в сетку — блок встанет с шагом {n} мин.", { n: SNAP_MIN })}
+        {tr("Нижняя кромка блока тянется мышью.")}
       </p>
     </aside>
   </div>
@@ -553,7 +553,7 @@
             </button>
           {/each}
           {#if cell.tasks.length > MAX_CHIPS}
-            <span class="more">+{cell.tasks.length - MAX_CHIPS} ещё</span>
+            <span class="more">{tr("+{n} ещё", { n: cell.tasks.length - MAX_CHIPS })}</span>
           {/if}
         </div>
       </div>

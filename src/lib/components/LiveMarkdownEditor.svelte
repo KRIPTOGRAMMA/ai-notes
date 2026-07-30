@@ -113,7 +113,7 @@
       a.textContent = this.label;
       const exists = linkCtx.resolveExists(this.target);
       if (!exists) a.classList.add("missing");
-      a.title = exists ? this.target : `Создать «${this.target}»`;
+      a.title = exists ? this.target : tr("Создать «{title}»", { title: this.target });
       a.onmousedown = (e) => e.preventDefault();
       a.onclick = (e) => {
         e.preventDefault();
@@ -144,7 +144,7 @@
       a.textContent = this.label;
       const safe = isSafeUrl(this.href);
       if (!safe) a.classList.add("unsafe");
-      a.title = safe ? this.href : `Ссылка заблокирована: ${this.href}`;
+      a.title = safe ? this.href : tr("Ссылка заблокирована: {href}", { href: this.href });
       a.onmousedown = (e) => e.preventDefault();
       a.onclick = (e) => {
         e.preventDefault();
@@ -190,7 +190,7 @@
       }
       img.alt = this.filename;
       img.onerror = () => img.classList.add("broken");
-      img.title = "Клик — показать/скрыть ссылку";
+      img.title = tr("Клик — показать/скрыть ссылку");
       img.onmousedown = (e) => e.preventDefault();
       img.onclick = () => {
         if (revealedImages.has(this.key)) revealedImages.delete(this.key);
@@ -300,18 +300,18 @@
       const toolbar = document.createElement("div");
       toolbar.className = "cm-table-toolbar";
       const addRowBtn = document.createElement("button");
-      addRowBtn.textContent = "+ строка";
+      addRowBtn.textContent = tr("+ строка");
       addRowBtn.onmousedown = (e) => e.preventDefault();
       addRowBtn.onclick = () => {
         const next: ParsedTable = { ...this.table, rows: [...this.table.rows, this.table.header.map(() => "")] };
         this.commit(wrap, next);
       };
       const addColBtn = document.createElement("button");
-      addColBtn.textContent = "+ столбец";
+      addColBtn.textContent = tr("+ столбец");
       addColBtn.onmousedown = (e) => e.preventDefault();
       addColBtn.onclick = () => {
         const next: ParsedTable = {
-          header: [...this.table.header, `Колонка ${this.table.header.length + 1}`],
+          header: [...this.table.header, tr("Колонка {n}", { n: this.table.header.length + 1 })],
           align: [...this.table.align, null],
           rows: this.table.rows.map(r => [...r, ""]),
         };
@@ -1174,7 +1174,7 @@
         scrollIntoView: true,
       });
     } else {
-      const insert = "[текст](url)";
+      const insert = tr("[текст](url)");
       view.dispatch({
         changes: { from: range.from, insert },
         selection: EditorSelection.range(range.from + 1, range.from + 6),

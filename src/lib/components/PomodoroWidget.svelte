@@ -44,7 +44,7 @@
 
   // Иконка фазы — SVG (v0.8.1): timer для работы/паузы, coffee для перерыва
   const phaseLabel = $derived(
-    phase === "work" ? "Фокус" : phase === "break" ? "Перерыв" : phase === "paused" ? "Пауза" : ""
+    phase === "work" ? t("Фокус") : phase === "break" ? t("Перерыв") : phase === "paused" ? t("Пауза") : ""
   );
   const phaseIcon = $derived(phase === "break" ? "coffee" : "timer");
 
@@ -77,7 +77,7 @@
       <span class="pomo-time">{remainingLabel}</span>
     {/if}
     <div class="pomo-actions">
-      <button class="btn-icon" title={phase === "paused" ? "Продолжить" : "Пауза"} onclick={togglePause}>
+      <button class="btn-icon" title={phase === "paused" ? t("Продолжить") : t("Пауза")} onclick={togglePause}>
         {#if phase === "paused"}<Icon name="play" />{:else}<Icon name="pause" />{/if}
       </button>
       <button class="btn-icon" title={t("Пропустить фазу")} onclick={skip}><Icon name="skip" /></button>

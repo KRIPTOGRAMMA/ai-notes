@@ -3311,3 +3311,137 @@ test("кнопки окна: свои вместо системного заго
   const btns = (await page.locator(".titlebar .controls").boundingBox())!;
   expect(search.x + search.width).toBeLessThanOrEqual(btns.x + 1);
 });
+
+// v0.9.46: Настройки и Sidebar. Эти экраны существующие языковые тесты не
+// покрывали вовсе — там проверялись Задачи/Заметки/Календарь/Дашборд/Сегодня,
+// а Настройки оказались почти целиком русскими (136 строк), и пользователь
+// нашёл это глазами. Здесь тот же приём — ищем любой кириллический символ.
+test("язык: Настройки и Sidebar переведены целиком", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Настройки" }).click();
+  await page.locator("label", { hasText: "Язык" }).locator("select").selectOption("en");
+
+  // Sidebar: кнопки Поиск и Уведомления жили без t() до v0.9.46
+  await expect(page.getByRole("button", { name: /Search/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Notifications/ })).toBeVisible();
+
+  // Каждая вкладка Настроек — своя, потому что скрытые вкладки в DOM есть, но
+  // innerText их не отдаёт: проверять надо именно видимое.
+  for (const tab of ["General", "AI", "Categories", "Notifications", "Data", "Hotkeys", "Help"]) {
+    await page.locator(".settings-tab", { hasText: tab }).click();
+    // «Русский» — единственное законное исключение: селект языка называет
+    // каждый язык на нём самом (LANGS в i18n.ts), иначе выбрать родной язык
+    // в чужом интерфейсе было бы нельзя.
+    const shown = (await page.locator(".settings").innerText()).replace(/Русский/g, "");
+    expect(shown, `вкладка ${tab}`).not.toMatch(/[а-яА-ЯёЁ]/);
+  }
+
+  // Справка разворачивается — её текст лежит в help.ts и переводится при
+  // отрисовке, а не через t() в разметке.
+  await page.locator(".settings-tab", { hasText: "Help" }).click();
+  await page.locator(".help-topic summary").first().click();
+  const help = await page.locator(".help-topic").first().innerText();
+  expect(help).not.toMatch(/[а-яА-ЯёЁ]/);
+
+  // Sidebar целиком
+  const nav = await page.locator("nav, .sidebar").first().innerText();
+  expect(nav).not.toMatch(/[а-яА-ЯёЁ]/);
+});
+
+// v0.9.47: категории и статусы — строки из БД, а не из разметки, поэтому ни
+// один статический тест по исходникам их не видел. На английском интерфейсе
+// в списке задач, канбане, модалке, пончике Дашборда и Настройках оставались
+// «Работа» и «В работе». Проверяется сквозь интерфейс: модульные тесты
+// seededName не знают, подключён ли стор к разметке.
+test("язык: посевные категории и статусы переведены во всех местах", async ({ page }) => {
+  // seedDb строго до withMock: сид кладётся в localStorage, откуда его
+  // подхватывает tauri-mock.js при загрузке.
+  await seedDb(page, {
+    tasks: [
+      { id: "t-cat", title: "task with category", status: "InProgress", priority: "Medium",
+        category: "Work", tags: [], hidden: false, subtasks: [],
+        created_at: "2026-07-20T10:00:00Z", updated_at: "2026-07-20T10:00:00Z" },
+    ],
+    categoryDistribution: [{ category: "Work", count: 3 }, { category: "Health", count: 1 }],
+  });
+  await withMock(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Настройки" }).click();
+  await page.locator("label", { hasText: "Язык" }).locator("select").selectOption("en");
+
+  // Настройки: имена в полях переименования. Посевные показываются
+  // переведёнными и потому заблокированы — иначе правка соседнего поля
+  // записала бы перевод в БД поверх русского оригинала.
+  // inputValue(), а не селектор [value=…]: Svelte выставляет значение
+  // свойством, и в HTML-атрибуте его нет — селектор молча ничего не найдёт.
+  await page.locator(".settings-tab", { hasText: "Categories" }).click();
+  const catInputs = page.locator("section:has(.section-title) .rule-row input:not([type=color])");
+  const catNames = await catInputs.evaluateAll(
+    els => els.map(e => (e as HTMLInputElement).value).filter(Boolean));
+  expect(catNames).toContain("Work");
+  expect(catNames).not.toContain("Работа");
+
+  // Посевные заблокированы: поле показывает перевод, а уходит в БД то же
+  // значение — разрешённая правка записала бы английский поверх оригинала.
+  await expect(catInputs.nth(catNames.indexOf("Work"))).toBeDisabled();
+
+  // Статусы — на той же вкладке, секцией ниже (SECTION_TAB: обе → "tasks")
+  expect(catNames).toContain("In progress");
+  expect(catNames).not.toContain("В работе");
+
+  // Задачи: чип категории в списке и колонка канбана
+  await page.getByRole("button", { name: /^Tasks$/ }).click();
+  await expect(page.locator(".task-row", { hasText: "task with category" })).toContainText("Work");
+
+  await page.getByRole("button", { name: /^Board$/ }).click();
+  await expect(page.locator(".column-title", { hasText: "In progress" })).toBeVisible();
+  await expect(page.locator(".column-title", { hasText: "В работе" })).toHaveCount(0);
+
+  // Модалка задачи: выпадающие списки категории и статуса
+  await page.getByRole("button", { name: /^List$/ }).click();
+  await page.locator(".task-row", { hasText: "task with category" }).click();
+  const modal = page.locator(".modal, dialog").first();
+  await expect(modal.locator("option", { hasText: "Work" }).first()).toBeAttached();
+  await expect(modal.locator("option", { hasText: "In progress" }).first()).toBeAttached();
+  await expect(modal.locator("option", { hasText: "Работа" })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+
+  // Дашборд: легенда пончика «Выполнено по категориям»
+  await page.getByRole("button", { name: /^Dashboard$/ }).click();
+  const donut = page.locator(".legend").first();
+  await expect(donut).toContainText("Work");
+  await expect(donut).not.toContainText("Работа");
+});
+
+// Подсказка календаря выполненных задач звучала как «20 июл. — empty»:
+// половина строки переводилась через t(), а дата форматировалась жёстко
+// зашитой "ru-RU".
+test("язык: дата в подсказке календаря идёт за языком интерфейса", async ({ page }) => {
+  // Без единой выполненной задачи календарь показывает «Нет данных»,
+  // и наводить будет не на что. seedDb — строго до withMock.
+  await seedDb(page, {
+    tasks: [
+      { id: "t-done", title: "done task", status: "Done", priority: "Medium",
+        category: "Work", tags: [], hidden: true, subtasks: [],
+        created_at: "2026-07-20T10:00:00Z", updated_at: "2026-07-20T10:00:00Z",
+        completed_at: new Date().toISOString() },
+    ],
+  });
+  await withMock(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Настройки" }).click();
+  await page.locator("label", { hasText: "Язык" }).locator("select").selectOption("en");
+
+  await page.getByRole("button", { name: /^Dashboard$/ }).click();
+  await page.locator(".cal-cell:not(.lead)").last().hover();
+
+  const tip = page.locator(".cal-tip-head");
+  await expect(tip).toBeVisible();
+  // Месяц в дате — единственная кириллица, которая тут может остаться:
+  // остальное («empty») уже шло через t().
+  await expect(tip).not.toContainText(/[а-яА-ЯёЁ]/);
+});
