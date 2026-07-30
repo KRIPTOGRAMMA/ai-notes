@@ -260,7 +260,7 @@
     {/if}
 
     {#if activeView === "today"}
-      <Today onOpenTask={(id) => { activeView = "tasks"; taskStore.requestFocus(id); }} />
+      <Today />
     {:else if activeView === "tasks"}
       <Tasks />
     {:else if activeView === "notes"}
@@ -270,9 +270,9 @@
     {:else if activeView === "settings"}
       <Settings />
     {:else if activeView === "dashboard"}
-      <Dashboard onOpenTask={(id) => { activeView = "tasks"; taskStore.requestFocus(id); }} />
+      <Dashboard />
     {:else if activeView === "calendar"}
-      <Calendar onOpenTask={(id) => { activeView = "tasks"; taskStore.requestFocus(id); }} />
+      <Calendar />
     {/if}
   </main>
 </div>

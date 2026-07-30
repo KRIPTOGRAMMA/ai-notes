@@ -5,6 +5,7 @@
   import { routineStore } from "../lib/stores/routines.svelte";
   import { api } from "../lib/api/tauri";
   import TaskModal from "../lib/components/TaskModal.svelte";
+  import TaskOpener from "../lib/components/TaskOpener.svelte";
   import RoutinesModal from "../lib/components/RoutinesModal.svelte";
   import Icon from "../lib/components/Icon.svelte";
   import type { Task, CreateTaskPayload, RoutineBlock } from "../lib/types";
@@ -12,7 +13,10 @@
   // импортируется как `tr` — переименовывать циклы ради имени функции хуже.
   import { t as tr, i18n } from "../lib/i18n.svelte";
 
-  let { onOpenTask }: { onOpenTask: (id: string) => void } = $props();
+  // Задача открывается прямо здесь, а не переключением на экран Задач
+  // (v0.9.53): в календаре смотрят неделю целиком, и уход в другой раздел
+  // ради одной задачи ломал этот сценарий.
+  let openTaskId = $state<string | null>(null);
 
   const today = new Date();
   let year = $state(today.getFullYear());
@@ -433,7 +437,7 @@
                   style="top:{blockTop(t)}px; height:{Math.max((blockMins(t) / 60) * HOUR_H, 18)}px;"
                   title="{blockLabel(t)} · {t.title}"
                 >
-                  <button class="block-body" onclick={() => onOpenTask(t.id)}>
+                  <button class="block-body" onclick={() => openTaskId = t.id}>
                     <span class="block-time">{blockLabel(t)}</span>
                     <span class="block-title">{t.title}</span>
                     <!-- Простой (v0.9.30): показывается только когда он есть.
@@ -548,7 +552,7 @@
         <div class="day-num" class:today={cell.isToday}>{cell.day}</div>
         <div class="day-tasks">
           {#each cell.tasks.slice(0, MAX_CHIPS) as t (t.id)}
-            <button class="task-chip {chipClass(t)}" onclick={(e) => { e.stopPropagation(); onOpenTask(t.id); }} title={t.title}>
+            <button class="task-chip {chipClass(t)}" onclick={(e) => { e.stopPropagation(); openTaskId = t.id; }} title={t.title}>
               {t.title}
             </button>
           {/each}
@@ -572,6 +576,10 @@
     onSave={handleCreate}
     onClose={() => createFor = null}
   />
+{/if}
+
+{#if openTaskId}
+  <TaskOpener taskId={openTaskId} onClose={() => openTaskId = null} />
 {/if}
 
 {#if showRoutinesModal}

@@ -2628,7 +2628,13 @@ test("естественный язык в композере: !приорите
   await expect(preview.getByText("Высокий")).toBeVisible();
   await expect(preview.locator(".chip-cat", { hasText: "Работа" })).toBeVisible();
   await expect(preview.locator(".chip-tag", { hasText: "#важное" })).toBeVisible();
-  await expect(preview).toContainText("Jul");
+  // Месяц считаем от «завтра», а не пишем строкой: зашитый "Jul" ломался
+  // в первый же день следующего месяца — тест падал 31.07 → 01.08, хотя код
+  // был исправен. Формат совпадает с тем, чем превью рисует дату.
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const month = tomorrow.toLocaleDateString("en-US", { month: "short" });
+  await expect(preview).toContainText(month);
 
   await page.getByRole("button", { name: "Создать", exact: true }).click();
 
@@ -3714,4 +3720,65 @@ test("выполнение не теряет незаписанную правк
   expect(await page.evaluate(() =>
     JSON.parse(localStorage.getItem("__mock_db")!).tasks[0].subtasks.map((s: any) => s.title)),
     "правка потерялась вместе с кэшем панели").toEqual(["старое ПРАВКА"]);
+});
+
+// v0.9.53: клик по задаче в Календаре/Дашборде/«Сегодня» уводил на экран
+// Задач (`activeView = "tasks"` + requestFocus). Пользователь смотрел неделю,
+// кликал задачу — и оказывался в другом разделе, откуда надо возвращаться
+// вручную. Теперь задача открывается на месте.
+test("календарь: клик по задаче открывает её, не уводя с календаря", async ({ page }) => {
+  const due = new Date();
+  due.setHours(12, 0, 0, 0);
+  await seedDb(page, {
+    tasks: [{
+      id: "t1", title: "задача с дедлайном", description: "",
+      status: "Todo", priority: "Medium", category: "Work",
+      deadline: due.toISOString(),
+      tags: [], recurrence: null, hidden: false, sort_order: 1, subtasks: [],
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    }],
+    notes: [], projects: [],
+  });
+  await withMock(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Календарь" }).click();
+  await page.locator(".task-chip").first().click();
+
+  // Задача открыта на правку — и календарь никуда не делся
+  await expect(page.getByRole("button", { name: "Сохранить", exact: true })).toBeVisible();
+  await expect(page.locator(".page-head")).toContainText("Календарь");
+  await expect(page.locator(".task-chip")).toHaveCount(1);
+
+  // Закрытие возвращает ровно туда, где были: раздел не переключался
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("button", { name: "Сохранить", exact: true })).toHaveCount(0);
+  await expect(page.locator(".page-head")).toContainText("Календарь");
+});
+
+// Та же правка на Дашборде, где кликают ВЫПОЛНЕННЫЕ задачи из попапа дня.
+// Их надо открывать read-only: править дедлайн и повтор у сделанного незачем
+// (правило из v0.9.04, оно и живёт теперь в общем TaskOpener).
+test("дашборд: выполненная задача из попапа дня открывается read-only на месте", async ({ page }) => {
+  await seedDb(page, {
+    tasks: [{
+      id: "t1", title: "давно сделанная", description: "",
+      status: "Done", priority: "Medium", category: "Work", deadline: null,
+      tags: [], recurrence: null, hidden: true, sort_order: 1, subtasks: [],
+      completed_at: new Date().toISOString(),
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    }],
+    notes: [], projects: [],
+  });
+  await withMock(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Дашборд" }).click();
+  await page.locator(".cal-cell:not(.lead)").last().click();
+  await page.getByText("давно сделанная").first().click();
+
+  // Read-only: кнопки сохранения нет, а раздел прежний
+  await expect(page.getByText("давно сделанная").first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Сохранить", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Дашборд" })).toBeVisible();
 });

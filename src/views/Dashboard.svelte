@@ -5,9 +5,11 @@
   import { projectStore } from "../lib/stores/projects.svelte";
   import { categoryStore } from "../lib/stores/categories.svelte";
   import type { AppSettings, DayCompletion } from "../lib/types";
+  import TaskOpener from "../lib/components/TaskOpener.svelte";
   import { t, i18n } from "../lib/i18n.svelte";
 
-  let { onOpenTask }: { onOpenTask: (id: string) => void } = $props();
+  // Задача открывается прямо на дашборде, без ухода на экран Задач (v0.9.53)
+  let openTaskId = $state<string | null>(null);
 
   interface ActivityDay {
     date: string;
@@ -213,7 +215,7 @@
 
   function openTaskFromPopup(id: string) {
     calPopup = null;
-    onOpenTask(id);
+    openTaskId = id;
   }
 
   function handleKeydown(e: KeyboardEvent) {
@@ -722,6 +724,10 @@
       </div>
     </div>
   </div>
+{/if}
+
+{#if openTaskId}
+  <TaskOpener taskId={openTaskId} onClose={() => openTaskId = null} />
 {/if}
 
 <style>

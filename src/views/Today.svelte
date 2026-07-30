@@ -4,11 +4,13 @@
   import { categoryStore } from "../lib/stores/categories.svelte";
   import PomodoroWidget from "../lib/components/PomodoroWidget.svelte";
   import Icon from "../lib/components/Icon.svelte";
+  import TaskOpener from "../lib/components/TaskOpener.svelte";
   import type { Task } from "../lib/types";
 
   // `t` здесь занято локальной переменной, перевод импортируется как `tr`.
   import { t as tr, i18n } from "../lib/i18n.svelte";
-  let { onOpenTask }: { onOpenTask: (id: string) => void } = $props();
+  // Задача открывается прямо здесь, без ухода на экран Задач (v0.9.53)
+  let openTaskId = $state<string | null>(null);
 
   const HOUR_H = 48; // px на час — компактнее недельной сетки Календаря, но хватает на 2 строки блока
   const DAY_START_H = 6;
@@ -142,7 +144,7 @@
               class="tl-block"
               class:compact={blockCompact(t)}
               style="top:{blockTop(t)}px; height:{blockHeight(t)}px;"
-              onclick={() => onOpenTask(t.id)}
+              onclick={() => openTaskId = t.id}
               title="{blockRange(t)} — {t.title}"
             >
               <span class="tl-block-time">{blockRange(t)}</span>
@@ -173,7 +175,7 @@
                   title={tr("Выполнить")}
                   aria-label={tr("Выполнить задачу")}
                 ></button>
-                <button class="due-main" onclick={() => onOpenTask(t.id)}>
+                <button class="due-main" onclick={() => openTaskId = t.id}>
                   <span class="prio-dot" style="--prio: var(--prio-{t.priority.toLowerCase()});"></span>
                   <span class="due-title">{t.title}</span>
                 </button>
@@ -187,6 +189,10 @@
     </section>
   </div>
 </div>
+
+{#if openTaskId}
+  <TaskOpener taskId={openTaskId} onClose={() => openTaskId = null} />
+{/if}
 
 <style>
   .today-view {
