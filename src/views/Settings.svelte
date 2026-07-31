@@ -509,7 +509,10 @@
     oninput={recomputeSearch}
   />
 
-  <div class="settings-tabs" role="tablist">
+  <!-- v0.9.54: seg + seg--tabs дают вид, .settings-tabs остаётся ради своих
+       отступов и переноса на вторую строку. Имя .settings-tab не трогаем —
+       по нему выбирают ~25 e2e-тестов, а правка чисто косметическая. -->
+  <div class="settings-tabs seg seg--tabs" role="tablist">
     {#each TABS as tab (tab.id)}
       <button
         type="button"
@@ -1039,33 +1042,25 @@
     display: none;
   }
 
+  /* v0.9.54: вид задаёт общий .seg, здесь остаётся только раскладка.
+     Вкладок семь, в узком окне они не влезают в строку, поэтому перенос
+     обязателен — а вместе с ним и align-self: flex-start, иначе сегменты
+     первого ряда растянутся по высоте второго. */
   .settings-tabs {
-    display: flex;
-    gap: 4px;
     margin-bottom: 14px;
     flex-wrap: wrap;
-    border-bottom: 1px solid var(--border);
+    align-self: flex-start;
+    max-width: 100%;
+  }
+
+  /* Перенесённый ряд упирался бы в рамку вплотную: у .seg она одна на всех,
+     а разделители рисуют только вертикальные стыки. */
+  .settings-tabs .settings-tab {
+    border-top: 1px solid transparent;
   }
 
   .settings-tab {
-    background: transparent;
-    border: none;
-    border-bottom: 2px solid transparent;
-    border-radius: 0;
-    padding: 8px 12px;
-    font-size: 13px;
-    color: var(--text-secondary);
     cursor: pointer;
-  }
-
-  .settings-tab:hover {
-    color: var(--text-primary);
-  }
-
-  .settings-tab.active {
-    color: var(--text-primary);
-    border-bottom-color: var(--accent);
-    font-weight: 500;
   }
 
   .panel {

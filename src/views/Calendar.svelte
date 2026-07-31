@@ -387,9 +387,9 @@
 <div class="cal">
   <div class="page-head">
     <h2 class="page-title">{tr("Календарь")}</h2>
-    <div class="mode-toggle">
-      <button class:active-toggle={viewMode === "month"} onclick={() => viewMode = "month"}>{tr("Месяц")}</button>
-      <button class:active-toggle={viewMode === "week"} onclick={() => viewMode = "week"}>{tr("Неделя")}</button>
+    <div class="seg mode-toggle">
+      <button class:active={viewMode === "month"} onclick={() => viewMode = "month"}>{tr("Месяц")}</button>
+      <button class:active={viewMode === "week"} onclick={() => viewMode = "week"}>{tr("Неделя")}</button>
     </div>
     <span style="flex:1;"></span>
     <button class="btn-icon" onclick={() => shiftMonth(-1)} title={viewMode === "week" ? tr("Предыдущая неделя") : tr("Предыдущий месяц")}>←</button>
@@ -698,16 +698,9 @@
   }
 
   /* ===== Неделя ===== */
+  /* v0.9.54: вид — общий .seg в app.css, здесь только отступ от заголовка. */
   .mode-toggle {
-    display: flex;
-    gap: 4px;
     margin-left: 12px;
-  }
-
-  .active-toggle {
-    background: color-mix(in srgb, var(--accent) 12%, transparent);
-    color: var(--accent);
-    font-weight: 600;
   }
 
   .week-layout {

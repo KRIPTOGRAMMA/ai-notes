@@ -614,7 +614,10 @@
       persist();
       return n;
     },
-    get_app_usage: () => [],
+    // v0.9.54: сид, а не пустой список. Раньше панель приложений не
+    // рендерилась вообще ({#if appUsage.length > 0}), и переключатель периода
+    // внутри неё был недосягаем для тестов.
+    get_app_usage: () => db.appUsage ?? [],
     get_app_category_time: () => [],
     dashboard_insight: () => {},
     summarize_day: () => {},

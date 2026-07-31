@@ -1017,7 +1017,8 @@ test("командная палитра: «Спланировать день» �
   await page.locator(".result", { hasText: "Спланировать день" }).click();
 
   await expect(page.getByRole("heading", { name: "Календарь" })).toBeVisible();
-  await expect(page.locator("button.active-toggle", { hasText: "Неделя" })).toBeVisible();
+  // v0.9.54: выбранный режим помечается .active в общем .seg (был .active-toggle)
+  await expect(page.locator(".seg button.active", { hasText: "Неделя" })).toBeVisible();
 });
 
 test("командная палитра: «Сменить тему» переключает и сохраняет тему", async ({ page }) => {
@@ -3781,4 +3782,62 @@ test("дашборд: выполненная задача из попапа дн
   await expect(page.getByText("давно сделанная").first()).toBeVisible();
   await expect(page.getByRole("button", { name: "Сохранить", exact: true })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Дашборд" })).toBeVisible();
+});
+
+// ===== v0.9.54: единый стиль переключателей =====
+
+// Смысл набора: раньше один и тот же элемент был реализован трижды —
+// заливка в Задачах, подчёркивание в Настройках, мягкая подсветка в Календаре
+// и Дашборде. Проверяем не «как выглядит», а что реализация ОДНА: у всех
+// переключателей общая рамка .seg и общий признак выбранного .active.
+
+test("переключатели: во всех разделах один компонент .seg", async ({ page }) => {
+  await seedDb(page, {
+    tasks: [], notes: [], projects: [],
+    appUsage: [{ app: "Firefox", minutes: 92 }],
+  });
+  await withMock(page);
+  await page.goto("/");
+
+  // Задачи — две группы в шапке
+  await expect(page.locator(".page-head .seg")).toHaveCount(2);
+
+  // Календарь — режим месяц/неделя
+  await page.getByRole("button", { name: "Календарь" }).click();
+  const cal = page.locator(".page-head .seg");
+  await expect(cal.locator("button.active")).toHaveText("Месяц");
+  await page.getByRole("button", { name: "Неделя" }).click();
+  await expect(cal.locator("button.active")).toHaveText("Неделя");
+
+  // Дашборд — период приложений
+  await page.getByRole("button", { name: "Дашборд" }).click();
+  const apps = page.locator(".apps-head .seg");
+  await expect(apps.locator("button.active")).toHaveText("Сегодня");
+  await apps.getByRole("button", { name: "Неделя" }).click();
+  await expect(apps.locator("button.active")).toHaveText("Неделя");
+
+  // Настройки — вкладки разделов
+  await page.getByRole("button", { name: "Настройки" }).click();
+  await expect(page.locator(".settings-tabs.seg")).toHaveCount(1);
+  await expect(page.locator(".settings-tabs button.active")).toHaveText("Общее");
+});
+
+// Чипы смарт-списков носят класс .active-toggle — то же имя, что у снятых
+// переключателей, но это другой элемент: он красится в --bg-hover, а не в
+// акцент. Тест держит границу: механическая замена по имени класса его уронит.
+test("переключатели: чипы смарт-списков не превратились в .seg", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+
+  const chip = page.locator(".smart-list-chip", { hasText: "Все" });
+  await expect(chip).toHaveClass(/active-toggle/);
+  // И сам контейнер, и всё внутри: .seg на любом из них означает, что чипы
+  // затянуло в общий переключатель.
+  await expect(page.locator(".smart-lists.seg, .smart-lists .seg")).toHaveCount(0);
+
+  // Отличие не только в разметке: выбранный чип красится в --bg-hover, а
+  // сегмент — в акцент белым текстом. Совпадение цвета текста с белым значило
+  // бы, что чип получил вид сегмента.
+  const color = await chip.evaluate(el => getComputedStyle(el).color);
+  expect(color).not.toBe("rgb(255, 255, 255)");
 });

@@ -576,9 +576,9 @@
       <section class="card panel wide">
         <div class="apps-head">
           <h3 class="section-title" style="margin:0;">{t("Приложения")}</h3>
-          <div class="btn-group">
-            <button class:active-toggle={appPeriod === 1} onclick={() => loadAppUsage(1)}>{t("Сегодня")}</button>
-            <button class:active-toggle={appPeriod === 7} onclick={() => loadAppUsage(7)}>{t("Неделя")}</button>
+          <div class="seg">
+            <button class:active={appPeriod === 1} onclick={() => loadAppUsage(1)}>{t("Сегодня")}</button>
+            <button class:active={appPeriod === 7} onclick={() => loadAppUsage(7)}>{t("Неделя")}</button>
           </div>
         </div>
 
@@ -957,11 +957,9 @@
     align-items: flex-start;
   }
 
-  .active-toggle {
-    background: color-mix(in srgb, var(--accent) 12%, transparent);
-    color: var(--accent);
-  }
-
+  /* v0.9.54: .active-toggle убран — период приложений теперь общий .seg.
+     .btn-group остаётся: под ним кнопки резюме ИИ, а это не переключатель —
+     они запускают действие, а не выбирают состояние. */
   .btn-group {
     display: flex;
     gap: 6px;
