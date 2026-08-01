@@ -65,19 +65,19 @@ async fn check_deadlines(app: &tauri::AppHandle, pool: &SqlitePool, muted: bool)
         let deadline = deadline.with_timezone(&Utc);
 
         if !notified_24h && deadline <= early_at && deadline > late_at {
-            if !muted { send_notification(app, pool, "deadline", &title, early_msg).await; }
+            if !muted { send_deadline_notification(app, pool, &id, &title, early_msg).await; }
             let _ = sqlx::query("UPDATE tasks SET notified_24h = 1 WHERE id = ?")
                 .bind(&id).execute(pool).await;
         }
 
         if !notified_1h && deadline <= late_at && deadline > now {
-            if !muted { send_notification(app, pool, "deadline", &title, late_msg).await; }
+            if !muted { send_deadline_notification(app, pool, &id, &title, late_msg).await; }
             let _ = sqlx::query("UPDATE tasks SET notified_1h = 1 WHERE id = ?")
                 .bind(&id).execute(pool).await;
         }
 
         if !notified_deadline && deadline <= now {
-            if !muted { send_notification(app, pool, "deadline", &title, &crate::i18n::tr("Дедлайн наступил!", lang)).await; }
+            if !muted { send_deadline_notification(app, pool, &id, &title, &crate::i18n::tr("Дедлайн наступил!", lang)).await; }
             let _ = sqlx::query("UPDATE tasks SET notified_deadline = 1 WHERE id = ?")
                 .bind(&id).execute(pool).await;
         }
@@ -486,6 +486,69 @@ async fn morning_digest_due(pool: &SqlitePool, now: chrono::DateTime<Utc>) -> bo
 // send_notification_for).
 pub async fn send_notification(app: &tauri::AppHandle, pool: &SqlitePool, kind: &str, title: &str, body: &str) {
     send_notification_for(app, pool, kind, title, body, None, None).await;
+}
+
+// A deadline push carrying "Done" and "Snooze for an hour" buttons.
+//
+// On Linux it goes through notify_rust directly, because the notification plugin
+// ignores actions on desktop (see notifier/actions.rs for the whole reasoning).
+// Everywhere else — and whenever the direct path fails (no D-Bus session, a daemon
+// that refuses actions) — we fall back to the ordinary push: a notification without
+// buttons is worth far more than no notification at all.
+//
+// The feed entry is written in either case, so the Notification Centre does not
+// depend on which path was taken.
+pub async fn send_deadline_notification(
+    app: &tauri::AppHandle,
+    pool: &SqlitePool,
+    task_id: &str,
+    title: &str,
+    body: &str,
+) {
+    let lang = crate::i18n::current_lang(pool).await;
+
+    #[cfg(target_os = "linux")]
+    let shown = crate::notifier::actions::show_with_actions(
+        app.clone(),
+        pool.clone(),
+        task_id.to_string(),
+        title,
+        body,
+        &crate::i18n::tr("Выполнено", lang),
+        &crate::i18n::tr("Отложить на час", lang),
+    );
+    #[cfg(not(target_os = "linux"))]
+    let shown = false;
+
+    if shown {
+        log_notification(pool, "deadline", title, body, Some("task"), Some(task_id)).await;
+    } else {
+        send_notification_for(app, pool, "deadline", title, body, Some("task"), Some(task_id)).await;
+    }
+}
+
+// Writing to the feed on its own, without a system push — needed when the push was
+// already delivered by another path.
+async fn log_notification(
+    pool: &SqlitePool,
+    kind: &str,
+    title: &str,
+    body: &str,
+    entity_type: Option<&str>,
+    entity_id: Option<&str>,
+) {
+    let _ = sqlx::query(
+        "INSERT INTO notification_log (id, kind, title, body, created_at, entity_type, entity_id) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    )
+    .bind(uuid::Uuid::new_v4().to_string())
+    .bind(kind)
+    .bind(title)
+    .bind(body)
+    .bind(Utc::now().to_rfc3339())
+    .bind(entity_type)
+    .bind(entity_id)
+    .execute(pool)
+    .await;
 }
 
 // The same push but with a reference to an entity (a note reminder, where

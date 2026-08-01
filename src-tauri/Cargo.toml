@@ -44,3 +44,10 @@ tauri-plugin-single-instance = "2.4.3"
 wayland-client = "0.31.14"
 wayland-protocols = { version = "0.32.13", features = ["client", "staging"] }
 base64 = "0.22"
+
+# Buttons in notifications: tauri-plugin-notification accepts them in its builder
+# but ignores them entirely on desktop (verified against 2.3.3, desktop.rs::show()
+# passes only title/body/icon/sound into notify_rust). The lower layer does support
+# the protocol, so on Linux we call it directly; see notifier/actions.rs.
+[target.'cfg(target_os = "linux")'.dependencies]
+notify-rust = "4"
