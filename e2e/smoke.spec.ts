@@ -1690,6 +1690,92 @@ test("граф заметок: узел следует за курсором п�
   expect(Math.hypot(after.x - before.x, after.y - before.y)).toBeGreaterThan(30);
 });
 
+// Регрессия: узел обязан двигаться ПОКА кнопка зажата, а не прыгать на месте
+// после отпускания. Тест выше этого не ловил — он мерил позицию только после
+// mouse.up(), то есть ровно в тот момент, когда сломанный код всё-таки
+// перерисовывал DOM (draggingId менял $state и запускал честный ререндер).
+//
+// Причина была в реактивности: тик делал `positions = new Map(pos)`, но это
+// поверхностная копия — объекты {x,y} внутри те же, а физика мутирует их на
+// месте. Svelte считал их непрочитанными и разметку не обновлял. Во время
+// драга менялись только координаты внутри объекта, поэтому DOM стоял.
+test("граф заметок: узел двигается во время перетаскивания, а не только после отпускания", async ({ page }) => {
+  const now = new Date().toISOString();
+  await seedDb(page, {
+    tasks: [],
+    notes: [
+      { id: "n1", title: "Тянем", content: "см. [[Вторая]]", tags: [], linked_task_id: null, project_id: null, created_at: now, updated_at: now },
+      { id: "n2", title: "Вторая", content: "без ссылок", tags: [], linked_task_id: null, project_id: null, created_at: now, updated_at: now },
+    ],
+    settings: { onboarding_complete: true },
+  });
+  await withMock(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Граф" }).click();
+  await page.waitForTimeout(1500); // симуляция должна остыть, иначе узел уедет сам
+
+  const node = page.locator(".node").first();
+  const before = (await node.boundingBox())!;
+  const cx = before.x + before.width / 2, cy = before.y + before.height / 2;
+
+  await page.mouse.move(cx, cy);
+  await page.mouse.down();
+  for (let i = 1; i <= 20; i++) await page.mouse.move(cx + i * 6, cy + i * 4);
+  // Кадру нужно успеть отрисоваться, но кнопку НЕ отпускаем.
+  await page.waitForTimeout(200);
+
+  const during = (await node.boundingBox())!;
+  await page.mouse.up();
+
+  // Со сломанной реактивностью узел здесь стоял на месте (сдвиг ~0).
+  expect(Math.hypot(during.x - before.x, during.y - before.y)).toBeGreaterThan(80);
+});
+
+// Регрессия: два RAF-цикла разом. $effect перезапускался и затирал rafId, не
+// отменив прежний кадр — старый цикл оставался сиротой. Замеры на живой машине
+// ловили 137–145 тиков/с при экране 72Гц, то есть двойную физику и двойную
+// отрисовку впустую. Считаем реальные вызовы tick через отрисованные кадры.
+test("граф заметок: крутится ровно один цикл симуляции", async ({ page }) => {
+  const now = new Date().toISOString();
+  await seedDb(page, {
+    tasks: [],
+    notes: [
+      { id: "n1", title: "Один", content: "см. [[Два]]", tags: [], linked_task_id: null, project_id: null, created_at: now, updated_at: now },
+      { id: "n2", title: "Два", content: "см. [[Один]]", tags: [], linked_task_id: null, project_id: null, created_at: now, updated_at: now },
+    ],
+    settings: { onboarding_complete: true },
+  });
+  await withMock(page);
+  await page.goto("/");
+
+  // Считаем, сколько раз за кадр меняется transform узла: один цикл -> один
+  // раз, два параллельных -> два. Ставим счётчик до входа в раздел.
+  await page.evaluate(() => {
+    (window as any).__writes = 0;
+    const orig = SVGElement.prototype.setAttribute;
+    SVGElement.prototype.setAttribute = function (name: string, value: string) {
+      if (name === "transform") (window as any).__writes++;
+      return orig.call(this, name, value);
+    };
+  });
+
+  await page.getByRole("button", { name: "Граф" }).click();
+  await page.waitForTimeout(100);
+  const frames = await page.evaluate(async () => {
+    (window as any).__writes = 0;
+    let f = 0;
+    await new Promise<void>(res => {
+      const step = () => { if (++f >= 30) return res(); requestAnimationFrame(step); };
+      requestAnimationFrame(step);
+    });
+    return { writes: (window as any).__writes, frames: f };
+  });
+
+  // 2 узла: один цикл даёт <=2 записи на кадр, два цикла — вчетверо.
+  const perFrame = frames.writes / frames.frames;
+  expect(perFrame).toBeLessThanOrEqual(2.6);
+});
+
 test("закрепление заметок: пин поднимает заметку наверх списка, переживает перезагрузку", async ({ page }) => {
   await withMock(page);
   await page.goto("/");
@@ -3841,3 +3927,4 @@ test("переключатели: чипы смарт-списков не пре
   const color = await chip.evaluate(el => getComputedStyle(el).color);
   expect(color).not.toBe("rgb(255, 255, 255)");
 });
+

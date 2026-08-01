@@ -104,12 +104,54 @@
       }
       if (changed) {
         positions = next;
+        // Координаты живут вне реактивности (см. paintFrame), поэтому у только
+        // что смонтированных узлов атрибутов ещё нет — без первой отрисовки все
+        // они наложились бы друг на друга в 0,0. Ждём tick(): к моменту
+        // следующего кадра Svelte уже смонтирует элементы и bind:this заполнит
+        // ссылки, а здесь, до обновления DOM, они ещё null.
         wake(); // состав графа изменился (новая/удалённая заметка) — досчитать layout
       }
     });
   });
 
   let rafId: number | null = null;
+
+  // Ссылки на живые SVG-элементы. Координаты в них пишет paintFrame() сам,
+  // минуя реактивность Svelte — см. объяснение над функцией.
+  let nodeEls: Record<string, SVGGElement | null> = {};
+  let edgeEls: Record<string, SVGLineElement | null> = {};
+
+  // Здесь была настоящая причина рывков, а не в частоте кадров.
+  //
+  // Раньше разметка читала координаты через {@const p = positions.get(n.id)},
+  // а тик в конце делал `positions = new Map(pos)`. Но это ПОВЕРХНОСТНАЯ
+  // копия: новый Map содержит те же самые объекты {x,y,vx,vy}, а физика
+  // мутирует их на месте (p.x += dx). Svelte видит присваивание positions,
+  // но объекты внутри те же — он считает их уже прочитанными и разметку не
+  // обновляет. Поэтому во время драга, когда меняются только координаты
+  // внутри объекта, DOM не трогался вовсе: узел стоял под курсором, а на
+  // отпускании draggingId менял $state, шла честная перерисовка — и узел
+  // прыгал туда, где давно был.
+  //
+  // Пишем напрямую в атрибуты. Заодно уходит перерисовка всего SVG силами
+  // Svelte 72 раза в секунду: за кадр трогаем ровно n узлов и m рёбер.
+  function paintFrame(pos: Map<string, { x: number; y: number }>) {
+    for (const n of nodes) {
+      const p = pos.get(n.id);
+      const el = nodeEls[n.id];
+      if (p && el) el.setAttribute("transform", `translate(${p.x},${p.y})`);
+    }
+    for (const e of edges) {
+      const el = edgeEls[e.source + "|" + e.target];
+      const sp = pos.get(e.source), tp = pos.get(e.target);
+      if (!el || !sp || !tp) continue;
+      el.setAttribute("x1", String(sp.x));
+      el.setAttribute("y1", String(sp.y));
+      el.setAttribute("x2", String(tp.x));
+      el.setAttribute("y2", String(tp.y));
+    }
+  }
+
   function tick() {
     const pos = positions;
 
@@ -177,7 +219,7 @@
       totalMotion += Math.abs(p.vx) + Math.abs(p.vy);
     }
 
-    positions = new Map(pos);
+    paintFrame(pos);
     // Симуляция «остывает»: как только суммарное движение узлов падает ниже
     // порога, останавливаем RAF-цикл — иначе граф дёргается бесконечно (лишняя
     // нагрузка на CPU и невозможно надёжно кликнуть по узлу в e2e). Драг узла
@@ -195,9 +237,19 @@
     if (rafId === null) rafId = requestAnimationFrame(tick);
   }
 
+  // Отмена прежнего кадра обязательна: эффект перезапускается, и без неё он
+  // просто затирал rafId, оставляя старый цикл сиротой. Замеры ловили 137–145
+  // тиков/с при экране 72Гц — ровно вдвое, два цикла крутились параллельно, и
+  // половина физики с отрисовкой уходила впустую.
   $effect(() => {
+    if (rafId !== null) cancelAnimationFrame(rafId);
     rafId = requestAnimationFrame(tick);
-    return () => { if (rafId) cancelAnimationFrame(rafId); };
+    return () => {
+      if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+      // Уход с раздела посреди перетаскивания оставил бы слушателей на window.
+      window.removeEventListener("pointermove", onWindowDrag);
+      window.removeEventListener("pointerup", endDrag);
+    };
   });
 
   $effect(() => {
@@ -225,11 +277,24 @@
   function startDrag(id: string, e: PointerEvent) {
     draggingId = id;
     dragRect = container.getBoundingClientRect();
-    (e.target as Element).setPointerCapture(e.pointerId);
+    // Захват вешаем на контейнер, а не на e.target: цель — дочерний <circle>
+    // или <rect> внутри узла, а его Svelte перерисовывает при обновлении
+    // позиции, и захват теряется вместе со старым элементом. Контейнер живёт
+    // всё перетаскивание. Приборы показали цену потери: pointermove падал со
+    // ~170/с до 14–19/с — узел получал новую позицию 15 раз в секунду, ровно
+    // те «15 fps на глаз», при том что кадры шли исправные 72.
+    // setPointerCapture здесь не нужен и вреден: слушатели на window и так
+    // ловят курсор где угодно, а захват переадресует последующие события на
+    // элемент-захватчик — из-за этого dblclick по узлу до него не доезжал.
+    window.addEventListener("pointermove", onWindowDrag);
+    window.addEventListener("pointerup", endDrag);
     wake(); // тянут узел за другими остывшими — снова нужно пересчитывать соседей
   }
-  function onDrag(id: string, e: PointerEvent) {
-    if (draggingId !== id || !dragRect) return;
+
+  // Слушатель на window, а не на узле: пока курсор обгоняет узел, события над
+  // ним не происходят вовсе, и позиция обновляться перестаёт.
+  function onWindowDrag(e: PointerEvent) {
+    if (!draggingId || !dragRect) return;
     pendingDrag = { x: e.clientX - dragRect.left, y: e.clientY - dragRect.top };
     wake();
   }
@@ -237,6 +302,8 @@
     draggingId = null;
     dragRect = null;
     pendingDrag = null;
+    window.removeEventListener("pointermove", onWindowDrag);
+    window.removeEventListener("pointerup", endDrag);
   }
 
   let hoveredId: string | null = $state(null);
@@ -263,29 +330,24 @@
     <div class="canvas" bind:this={container}>
       <svg {width} {height}>
         <g class="edges">
+          <!-- Координаты сюда пишет paintFrame() напрямую через setAttribute:
+               реактивность Svelte на них не работает (см. комментарий там). -->
           {#each edges as e (e.source + "|" + e.target)}
-            {@const sp = positions.get(e.source)}
-            {@const tp = positions.get(e.target)}
-            {#if sp && tp}
-              <line
-                x1={sp.x} y1={sp.y} x2={tp.x} y2={tp.y}
-                class="edge"
-                class:dim={connectedIds && !(connectedIds.has(e.source) && connectedIds.has(e.target))}
-              />
-            {/if}
+            <line
+              bind:this={edgeEls[e.source + "|" + e.target]}
+              class="edge"
+              class:dim={connectedIds && !(connectedIds.has(e.source) && connectedIds.has(e.target))}
+            />
           {/each}
         </g>
         <g class="nodes">
           {#each nodes as n (n.id)}
-            {@const p = positions.get(n.id)}
-            {#if p}
               <g
+                bind:this={nodeEls[n.id]}
                 class="node"
                 class:isolated={n.degree === 0}
                 class:dim={connectedIds && !connectedIds.has(n.id)}
-                transform="translate({p.x},{p.y})"
                 onpointerdown={(e) => startDrag(n.id, e)}
-                onpointermove={(e) => onDrag(n.id, e)}
                 onpointerup={endDrag}
                 onpointerleave={() => { if (draggingId !== n.id) hoveredId = null; }}
                 onpointerenter={() => hoveredId = n.id}
@@ -309,7 +371,6 @@
                 <rect class="label-bg" x="7" y="-6" width={n.title.length * 6 + 6} height="12" rx="2" />
                 <text x="10" y="4">{n.title}</text>
               </g>
-            {/if}
           {/each}
         </g>
       </svg>
@@ -398,4 +459,5 @@
   .hint {
     text-align: center;
   }
+
 </style>
