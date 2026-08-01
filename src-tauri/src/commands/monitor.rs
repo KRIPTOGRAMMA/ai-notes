@@ -223,7 +223,7 @@ pub struct CategoryMinutes {
     pub minutes: i64,
 }
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct CategoryRule {
     pub pattern: String,
     pub category: String,
@@ -236,6 +236,12 @@ pub struct AppLimit {
 }
 
 const KNOWN_CATEGORIES: [&str; 5] = ["Work", "Study", "Home", "Health", "Other"];
+
+// Whether a category is one the dashboard knows. Exposed as a function rather than
+// the constant itself so callers cannot accumulate their own copies of the list.
+pub fn is_known_category(category: &str) -> bool {
+    KNOWN_CATEGORIES.contains(&category)
+}
 
 // Time limits per app category: JSON in settings under the app_limits key,
 // [{"category":"Other","daily_mins":60}, ...]. Junk or an empty string means no limits.
@@ -290,6 +296,40 @@ pub fn categorize_app(app: &str, rules: &[CategoryRule]) -> String {
         }
     }
     "Other".into()
+}
+
+// Apps with no matching rule, ordered by time spent — the input for AI
+// classification.
+//
+// Only unmatched apps are offered: anything already covered by a rule is the
+// user's own decision, and re-proposing it would risk overwriting what they
+// configured by hand. Ordering by minutes matters because the list is capped:
+// the apps worth categorizing first are the ones actually eating the time,
+// while a program opened once for a minute can stay in "Other" indefinitely.
+pub async fn uncategorized_apps_impl(
+    pool: &SqlitePool,
+    days: i64,
+    limit: usize,
+) -> AppResult<Vec<AppMinutes>> {
+    let rules_json = crate::commands::settings::get_setting(pool, "app_category_rules")
+        .await
+        .unwrap_or_default();
+    let rules = parse_category_rules(&rules_json);
+
+    let all = app_minutes_since(pool, days).await?;
+    Ok(all
+        .into_iter()
+        .filter(|a| categorize_app(&a.app, &rules) == "Other")
+        .take(limit)
+        .collect())
+}
+
+#[tauri::command]
+pub async fn get_uncategorized_apps(
+    pool: State<'_, SqlitePool>,
+    days: i64,
+) -> AppResult<Vec<AppMinutes>> {
+    uncategorized_apps_impl(pool.inner(), days, 15).await
 }
 
 async fn app_minutes_since(pool: &SqlitePool, days: i64) -> AppResult<Vec<AppMinutes>> {
@@ -782,6 +822,47 @@ mod tests {
         assert_eq!(categorize_app("anything", &[]), "Other");
         assert!(parse_category_rules("мусор").is_empty());
         assert!(parse_category_rules("").is_empty());
+    }
+
+    // Only apps with no matching rule reach the model, ordered by time. Anything a
+    // rule already covers is the user's own decision and re-proposing it would risk
+    // overwriting what they configured by hand.
+    #[tokio::test]
+    async fn uncategorized_apps_skips_apps_with_rules() {
+        let pool = test_pool().await;
+        let now = chrono::Utc::now();
+        let ts = |m: i64| (now - chrono::Duration::minutes(m)).to_rfc3339();
+
+        log_app(&pool, &ts(1), Some("firefox"), 6000).await;
+        log_app(&pool, &ts(2), Some("jetbrains-idea"), 3000).await;
+        log_app(&pool, &ts(3), Some("obscure-tool"), 600).await;
+
+        crate::commands::settings::set_setting(
+            &pool,
+            "app_category_rules",
+            r#"[{"pattern":"firefox","category":"Study"}]"#,
+        ).await.unwrap();
+
+        let out = uncategorized_apps_impl(&pool, 30, 15).await.unwrap();
+        let names: Vec<&str> = out.iter().map(|a| a.app.as_str()).collect();
+        assert_eq!(names, vec!["jetbrains-idea", "obscure-tool"],
+            "the app with a rule is excluded, the rest keep their order by time");
+    }
+
+    // The list is capped, so the order decides what actually gets categorized: the
+    // apps eating the time, not a program opened once for a minute.
+    #[tokio::test]
+    async fn uncategorized_apps_respects_limit_by_time() {
+        let pool = test_pool().await;
+        let now = chrono::Utc::now();
+        let ts = |m: i64| (now - chrono::Duration::minutes(m)).to_rfc3339();
+
+        log_app(&pool, &ts(1), Some("small"), 60).await;
+        log_app(&pool, &ts(2), Some("big"), 6000).await;
+
+        let out = uncategorized_apps_impl(&pool, 30, 1).await.unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].app, "big");
     }
 
     async fn log_app(pool: &SqlitePool, ts: &str, app: Option<&str>, duration_secs: i64) {

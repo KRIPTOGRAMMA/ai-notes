@@ -3988,3 +3988,61 @@ test("зависимости: блокер в Корзине не блокиру
   await page.getByRole("button", { name: "Активные" }).click();
   await expect(taskByTitle(page, "стены")).toHaveClass(/blocked/);
 });
+
+// ИИ-классификация приложений (v0.9.62): модель предлагает правила, в настройки
+// они попадают только по явному клику. Проверяем весь путь, включая главное —
+// что до подтверждения в списке правил ничего не появилось.
+test("ИИ-правила приложений: предложение не меняет настройки до подтверждения", async ({ page }) => {
+  await seedDb(page, {
+    tasks: [], notes: [], projects: [],
+    settings: { onboarding_complete: true, ai_provider: "openai", openai_key: "k" },
+    windowTracking: "Hyprland",
+    appUsage: [{ app: "jetbrains-idea", minutes: 120 }, { app: "obscure-tool", minutes: 30 }],
+    aiAppRules: [{ pattern: "jetbrains-*", category: "Work" }],
+  });
+  await withMock(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Настройки" }).click();
+  await page.locator(".settings-tab", { hasText: "Категории" }).click();
+
+  await page.getByRole("button", { name: "Определить категории через ИИ" }).click();
+
+  const suggestions = page.locator(".rule-suggestions");
+  await expect(suggestions.locator("code", { hasText: "jetbrains-*" })).toBeVisible();
+  // Ключевое: предложение ещё не правило. В самом списке правил пусто.
+  await expect(page.locator(".rule-row input[placeholder*='класс окна']")).toHaveCount(0);
+
+  await suggestions.getByRole("button", { name: "Добавить отмеченные" }).click();
+  await expect(page.locator(".rule-row input[placeholder*='класс окна']")).toHaveValue("jetbrains-*");
+  await expect(suggestions).toHaveCount(0);
+});
+
+// Снятая галочка означает «не добавлять»: пользователь отбирает предложенное,
+// а не получает всё оптом.
+test("ИИ-правила приложений: снятая галочка не попадает в правила", async ({ page }) => {
+  await seedDb(page, {
+    tasks: [], notes: [], projects: [],
+    settings: { onboarding_complete: true, ai_provider: "openai", openai_key: "k" },
+    windowTracking: "Hyprland",
+    appUsage: [{ app: "jetbrains-idea", minutes: 120 }, { app: "steam_app_570", minutes: 90 }],
+    aiAppRules: [
+      { pattern: "jetbrains-*", category: "Work" },
+      { pattern: "steam_app_*", category: "Home" },
+    ],
+  });
+  await withMock(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Настройки" }).click();
+  await page.locator(".settings-tab", { hasText: "Категории" }).click();
+  await page.getByRole("button", { name: "Определить категории через ИИ" }).click();
+
+  const suggestions = page.locator(".rule-suggestions");
+  await expect(suggestions.locator(".suggestion-row")).toHaveCount(2);
+  await suggestions.locator(".suggestion-row", { hasText: "steam_app_*" }).locator("input").uncheck();
+  await suggestions.getByRole("button", { name: "Добавить отмеченные" }).click();
+
+  const patterns = page.locator(".rule-row input[placeholder*='класс окна']");
+  await expect(patterns).toHaveCount(1);
+  await expect(patterns).toHaveValue("jetbrains-*");
+});
+

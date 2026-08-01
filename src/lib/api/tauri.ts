@@ -84,6 +84,12 @@ export const api = {
   getDomainUsage: (days: number) => invoke<{ domain: string; minutes: number }[]>("get_domain_usage", { days }),
   clearDomainHistory: () => invoke<number>("clear_domain_history"),
   getAppUsage: (days: number) => invoke<{ app: string; minutes: number }[]>("get_app_usage", { days }),
+  // Apps with no matching rule — the input for AI classification.
+  getUncategorizedApps: (days: number) =>
+    invoke<{ app: string; minutes: number }[]>("get_uncategorized_apps", { days }),
+  // Proposes rules; the answer arrives as an "ai-app-rules" event, like the other
+  // AI commands. Nothing is written to the settings — the user confirms.
+  aiSuggestAppRules: () => invoke<void>("ai_suggest_app_rules"),
   getCompletionsForDay: (date: string) => invoke<DayCompletion[]>("get_completions_for_day", { date }),
   getHourlyActivity: (days: number) =>
     invoke<{ weekday: number; hour: number; minutes: number }[]>("get_hourly_activity", { days }),

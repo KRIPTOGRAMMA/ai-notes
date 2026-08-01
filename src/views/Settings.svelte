@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, onDestroy } from "svelte";
+  import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { save as saveDialog, open as openDialog } from "@tauri-apps/plugin-dialog";
   import { api } from "../lib/api/tauri";
   import { categoryStore } from "../lib/stores/categories.svelte";
@@ -176,6 +177,46 @@
     }
   }
 
+  // --- AI suggestion of app rules ---
+  //
+  // Apps with no rule all land in "Other", and writing globs by hand is exactly the
+  // work worth handing to a model. Suggest-then-confirm, as everywhere else here:
+  // the model only proposes and the rules appear in the list by an explicit click.
+  //
+  // Writing them straight into the settings would silently rewrite statistics for
+  // past days — the categories are applied at read time, so a wrong rule would
+  // retroactively distort the dashboard.
+  let ruleSuggestBusy = $state(false);
+  let ruleSuggestError = $state("");
+  // Suggestions with a checkbox each. Ticked by default: the usual case is accepting
+  // nearly everything rather than picking items one by one.
+  let ruleSuggestions: { pattern: string; category: string; take: boolean }[] = $state([]);
+  // Shown when the model returned nothing to add — a distinct state from "not run
+  // yet", or the button would look broken.
+  let ruleSuggestEmpty = $state(false);
+
+  async function suggestAppRules() {
+    ruleSuggestBusy = true;
+    ruleSuggestError = "";
+    ruleSuggestEmpty = false;
+    ruleSuggestions = [];
+    try {
+      await api.aiSuggestAppRules();
+    } catch (e) {
+      ruleSuggestBusy = false;
+      ruleSuggestError = String(e);
+    }
+  }
+
+  // Accepted rules go to the START of the list: the first match wins in
+  // categorize_app, and appended at the end they would be shadowed by a broader
+  // user-written pattern (say "*fox") and quietly do nothing.
+  function acceptRuleSuggestions() {
+    const picked = ruleSuggestions.filter(r => r.take);
+    appRules = [...picked.map(r => ({ pattern: r.pattern, category: r.category })), ...appRules];
+    ruleSuggestions = [];
+  }
+
   // Time limits per app category: one entry per category, where 0 or empty means no
   // limit. Serialized into settings.app_limits on save.
   let appLimits: Record<string, number> = $state({});
@@ -189,7 +230,29 @@
     }
   }
 
+  // The model's answer arrives as an event, like every other AI command here.
+  let ruleUnlisten: UnlistenFn | null = null;
+  onDestroy(() => ruleUnlisten?.());
+
   onMount(async () => {
+    ruleUnlisten = await listen<{ rules: AppCategoryRule[] | null; error: string | null }>(
+      "ai-app-rules",
+      (e) => {
+        ruleSuggestBusy = false;
+        if (e.payload.error) {
+          ruleSuggestError = e.payload.error;
+          return;
+        }
+        const proposed = e.payload.rules ?? [];
+        // Anything already present in the list is dropped: the model may repeat a
+        // rule the user added while it was thinking.
+        const fresh = proposed.filter(
+          p => !appRules.some(r => r.pattern.trim().toLowerCase() === p.pattern.toLowerCase()),
+        );
+        ruleSuggestions = fresh.map(r => ({ ...r, take: true }));
+        ruleSuggestEmpty = fresh.length === 0;
+      },
+    );
     try {
       settings = await api.getSettings();
       // An empty setting means the language was never chosen explicitly. The select
@@ -728,6 +791,36 @@
       <button class="btn-sm" onclick={() => appRules = [...appRules, { pattern: "", category: "Work" }]}>{t("+ Правило")}</button>
  <p class="hint">{t("Первое совпавшее правило выигрывает;")}<code>*</code>{t("— любая подстрока. Приложения без правила попадают в «Другое». Применяется после «Сохранить».")}</p>
 
+      <!-- Suggest-then-confirm: the model proposes, the rules appear in the list
+           above only by an explicit click. Hidden when AI is off — the same
+           capability detection as the other AI buttons. -->
+      {#if settings.ai_provider !== "none"}
+        <button class="btn-sm" style="margin-top:6px;" onclick={suggestAppRules} disabled={ruleSuggestBusy}>
+          {ruleSuggestBusy ? t("Определяю…") : t("Определить категории через ИИ")}
+        </button>
+        {#if ruleSuggestError}
+          <span class="alert" style="margin-top:6px;">{ruleSuggestError}</span>
+        {/if}
+        {#if ruleSuggestEmpty}
+          <p class="hint">{t("Все приложения из статистики уже покрыты правилами.")}</p>
+        {/if}
+        {#if ruleSuggestions.length > 0}
+          <div class="rule-suggestions">
+            {#each ruleSuggestions as sug (sug.pattern)}
+              <label class="rule-row suggestion-row">
+                <input type="checkbox" bind:checked={sug.take} />
+                <code style="flex:1;">{sug.pattern}</code>
+                <span class="muted">{RULE_CATEGORIES.find(c => c.value === sug.category)?.label ?? sug.category}</span>
+              </label>
+            {/each}
+            <button class="btn-sm" onclick={acceptRuleSuggestions}
+              disabled={!ruleSuggestions.some(r => r.take)}>
+              {t("Добавить отмеченные")}
+            </button>
+          </div>
+        {/if}
+      {/if}
+
       <div class="sub-label" style="margin-top:12px;">{t("Лимиты времени на категории (мин/день)")}</div>
       {#each RULE_CATEGORIES as c}
         <div class="rule-row limit-row">
@@ -1187,6 +1280,23 @@
     margin: 2px 0 0 0;
     color: var(--text-secondary);
     line-height: 1.45;
+  }
+
+  /* Suggestions sit apart from the rules themselves: they are not yet part of the
+     settings and must not read as rows already in effect. */
+  .rule-suggestions {
+    margin-top: 6px;
+    padding: 8px;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .suggestion-row {
+    cursor: pointer;
+    align-items: center;
   }
 
   .rule-row {

@@ -459,6 +459,109 @@ pub async fn ai_classify(
     Ok(())
 }
 
+// AI classification of unknown applications.
+//
+// Apps with no matching rule all land in "Other", and writing globs by hand is
+// exactly the kind of work worth handing to a model: it knows that "jetbrains-idea"
+// is a development environment and "steam_app_123" is a game, whereas the app has
+// no way to tell.
+//
+// Suggest-then-confirm, like every other AI feature here: the model only proposes,
+// and the rules are created by an explicit click. Writing them straight into the
+// settings would silently rewrite statistics for past days — the categories are
+// applied at read time, so a wrong rule would retroactively distort the dashboard.
+//
+// A ready glob is requested rather than a bare category: one "jetbrains-*" rule
+// covers a whole family, while a rule per exact name would accumulate one entry per
+// application.
+const SYSTEM_APP_RULES: &str = "\
+Ты классифицируешь приложения по категориям использования времени.
+Категории: Work, Study, Home, Health.
+Ответь ТОЛЬКО JSON-массивом без пояснений, каждый элемент вида
+{\"pattern\": \"...\", \"category\": \"...\"}.
+pattern — маска класса окна, можно с '*' для семейства приложений
+(например jetbrains-idea -> \"jetbrains-*\").
+category — ровно одно слово из списка выше.
+Если приложение непонятно, просто пропусти его.";
+
+#[derive(Clone, Serialize)]
+pub struct AppRulePayload {
+    pub rules: Option<Vec<crate::commands::monitor::CategoryRule>>,
+    pub error: Option<String>,
+}
+
+// A strict parse of the model's answer into rules. We do not trust the model, in the
+// same spirit as parse_subtasks: at the slightest doubt an item is dropped rather
+// than guessed at.
+//
+// Everything is checked against reality rather than against the JSON's shape alone:
+// the category must be one of the known ones (an invented one would silently become
+// "Other" in categorize_app, so a rule with it does nothing at all), and the pattern
+// must actually match the application it was proposed for — a model that hallucinates
+// "jetbrains-*" for "firefox" would otherwise produce a rule that quietly
+// miscategorizes something else.
+pub fn parse_app_rules(raw: &str, apps: &[String]) -> Vec<crate::commands::monitor::CategoryRule> {
+    let start = match raw.find('[') { Some(i) => i, None => return Vec::new() };
+    let end = match raw.rfind(']') { Some(i) => i, None => return Vec::new() };
+    if end <= start { return Vec::new(); }
+
+    let parsed: Vec<crate::commands::monitor::CategoryRule> =
+        match serde_json::from_str(&raw[start..=end]) { Ok(v) => v, Err(_) => return Vec::new() };
+
+    let mut out: Vec<crate::commands::monitor::CategoryRule> = Vec::new();
+    for rule in parsed {
+        let pattern = rule.pattern.trim().to_string();
+        let category = rule.category.trim().to_string();
+        if pattern.is_empty() || !crate::commands::monitor::is_known_category(&category) {
+            continue;
+        }
+        // "*" alone would swallow every application at once.
+        if pattern.chars().all(|c| c == '*') {
+            continue;
+        }
+        if !apps.iter().any(|a| crate::commands::monitor::glob_match(&pattern, a)) {
+            continue;
+        }
+        if out.iter().any(|r: &crate::commands::monitor::CategoryRule| r.pattern == pattern) {
+            continue;
+        }
+        out.push(crate::commands::monitor::CategoryRule { pattern, category });
+    }
+    out
+}
+
+#[tauri::command]
+pub async fn ai_suggest_app_rules(
+    app: tauri::AppHandle,
+    pool: tauri::State<'_, sqlx::SqlitePool>,
+) -> Result<(), String> {
+    let pool = pool.inner().clone();
+    tokio::spawn(async move {
+        let r = async {
+            let apps = crate::commands::monitor::uncategorized_apps_impl(&pool, 30, 15)
+                .await
+                .map_err(|e| e.to_string())?;
+            if apps.is_empty() {
+                return Ok(Vec::new());
+            }
+            let names: Vec<String> = apps.iter().map(|a| a.app.clone()).collect();
+            let listing = names.join("\n");
+            // verbatim: the answer is machine JSON of window classes and category
+            // ids, with not one word for a human. A language requirement here would
+            // only raise the chance of prose instead of an array.
+            let answer = ask_ai_verbatim(&app, SYSTEM_APP_RULES, &listing).await?;
+            Ok(parse_app_rules(&answer, &names))
+        }.await;
+
+        let payload = match r {
+            Ok(rules) => AppRulePayload { rules: Some(rules), error: None },
+            Err(e) => AppRulePayload { rules: None, error: Some(e) },
+        };
+        let _ = app.emit("ai-app-rules", payload);
+    });
+    Ok(())
+}
+
 #[derive(Clone, Serialize)]
 pub struct InsightPayload {
     pub result: Option<String>,
@@ -960,6 +1063,74 @@ mod tests {
         let raw = serde_json::to_string(&items).unwrap();
         let result = parse_subtasks(&raw).unwrap();
         assert_eq!(result.split("|||").count(), MAX_SUBTASKS);
+    }
+
+    // --- AI classification of applications ---
+    //
+    // The parser is the whole safety of this feature: a suggestion becomes a rule the
+    // user clicks in, and a rule silently rewrites statistics for past days (the
+    // categories are applied at read time).
+
+    fn apps() -> Vec<String> {
+        vec!["jetbrains-idea".to_string(), "firefox".to_string(), "steam_app_570".to_string()]
+    }
+
+    #[test]
+    fn app_rules_parse_from_json_array() {
+        let raw = r#"[{"pattern":"jetbrains-*","category":"Work"},{"pattern":"firefox","category":"Study"}]"#;
+        let rules = parse_app_rules(raw, &apps());
+        assert_eq!(rules.len(), 2);
+        assert_eq!(rules[0].pattern, "jetbrains-*");
+        assert_eq!(rules[0].category, "Work");
+    }
+
+    #[test]
+    fn app_rules_survive_prose_around_json() {
+        // A model regularly adds an explanation despite being asked not to.
+        let raw = "Вот правила:\n[{\"pattern\":\"firefox\",\"category\":\"Study\"}]\nГотово.";
+        assert_eq!(parse_app_rules(raw, &apps()).len(), 1);
+    }
+
+    #[test]
+    fn app_rules_reject_unknown_category() {
+        // An invented category silently becomes "Other" in categorize_app, so such a
+        // rule would do nothing at all while looking legitimate in the settings.
+        let raw = r#"[{"pattern":"firefox","category":"Entertainment"}]"#;
+        assert!(parse_app_rules(raw, &apps()).is_empty());
+    }
+
+    #[test]
+    fn app_rules_reject_pattern_matching_nothing() {
+        // The central guard against a hallucination: a pattern must match the very
+        // application it was proposed for, or the rule would quietly categorize
+        // something else entirely.
+        let raw = r#"[{"pattern":"photoshop*","category":"Work"}]"#;
+        assert!(parse_app_rules(raw, &apps()).is_empty());
+    }
+
+    #[test]
+    fn app_rules_reject_catch_all_pattern() {
+        // "*" would swallow every application at once, including those the user has
+        // already categorized by hand.
+        for p in ["*", "**"] {
+            let raw = format!(r#"[{{"pattern":"{p}","category":"Work"}}]"#);
+            assert!(parse_app_rules(&raw, &apps()).is_empty(), "pattern {p} must be rejected");
+        }
+    }
+
+    #[test]
+    fn app_rules_drop_duplicate_patterns() {
+        let raw = r#"[{"pattern":"firefox","category":"Work"},{"pattern":"firefox","category":"Study"}]"#;
+        let rules = parse_app_rules(raw, &apps());
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].category, "Work", "the first one wins, as in categorize_app");
+    }
+
+    #[test]
+    fn app_rules_garbage_yields_nothing() {
+        for raw in ["", "не понял задачу", "{}", "[", "[{\"pattern\":}]"] {
+            assert!(parse_app_rules(raw, &apps()).is_empty(), "raw {raw:?} must yield nothing");
+        }
     }
 
     // --- AI on a selection ---

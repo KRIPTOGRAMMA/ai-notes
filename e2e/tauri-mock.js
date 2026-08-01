@@ -659,6 +659,24 @@
     // рендерилась вообще ({#if appUsage.length > 0}), и переключатель периода
     // внутри неё был недосягаем для тестов.
     get_app_usage: () => db.appUsage ?? [],
+    // Зеркало uncategorized_apps_impl: отдаём только приложения без правила.
+    // Без этого фильтра тест не отличил бы «ИИ предложил» от «показали всё».
+    get_uncategorized_apps: () => {
+      const rules = JSON.parse(db.settings?.app_category_rules || "[]");
+      const covered = (app) => rules.some((r) => {
+        const p = String(r.pattern).toLowerCase();
+        const t = String(app).toLowerCase();
+        if (!p.includes("*")) return p === t;
+        return new RegExp("^" + p.split("*").map((x) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*") + "$").test(t);
+      });
+      return (db.appUsage ?? []).filter((a) => !covered(a.app));
+    },
+    // Ответ модели задаёт тест через db.aiAppRules — как и у остальных ИИ-команд,
+    // чтобы проверять разбор и подтверждение, а не саму модель.
+    ai_suggest_app_rules: () => {
+      const rules = db.aiAppRules ?? [];
+      setTimeout(() => window.__mockEmit("ai-app-rules", { rules, error: db.aiAppRulesError ?? null }), 0);
+    },
     get_app_category_time: () => [],
     dashboard_insight: () => {},
     summarize_day: () => {},

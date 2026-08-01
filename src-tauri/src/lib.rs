@@ -361,6 +361,8 @@ pub fn run() {
                         commands::monitor::get_activity_by_day,
                         commands::monitor::get_task_completions_by_day,
                         commands::monitor::get_app_usage,
+                        commands::monitor::get_uncategorized_apps,
+                        commands::ai::ai_suggest_app_rules,
                         commands::monitor::get_completions_for_day,
                         commands::monitor::get_hourly_activity,
                         commands::monitor::get_app_category_time,

@@ -454,6 +454,12 @@ export const EN: Record<string, string> = {
   "{done}/{total} мин": "{done}/{total} min",
   "Focus — без уведомлений": "Focus — no notifications",
   "~{gb} ГБ · от {ram} ГБ ОЗУ": "~{gb} GB · {ram} GB RAM min",
+  // AI classification of applications
+  "Определить категории через ИИ": "Detect categories with AI",
+  "Определяю…": "Detecting…",
+  "Все приложения из статистики уже покрыты правилами.": "Every app in the statistics is already covered by a rule.",
+  "Добавить отмеченные": "Add selected",
+
   // Model descriptions, from src-tauri/src/commands/model.rs
   "Самая быстрая и лёгкая — годится для слабых машин и старых ноутбуков, но качество ответов базовое.": "The fastest and lightest — fine for weak machines and older laptops, but answer quality is basic.",
   "Баланс скорости и качества — заметно лучше 0.5B в рассуждениях, всё ещё быстрая на CPU.": "A balance of speed and quality — noticeably better than 0.5B at reasoning, still fast on CPU.",
