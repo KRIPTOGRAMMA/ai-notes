@@ -111,6 +111,15 @@
   window.__unknownInvokes = [];
 
   const findTask = (id) => db.tasks.find((t) => t.id === id);
+  // Незакрытые блокеры задачи (v0.9.56). Зеркало OPEN_BLOCKER в Rust: задача
+  // в Корзине НЕ блокирует, но сама связь в db.taskDeps остаётся — поэтому
+  // восстановление блокера возвращает блокировку.
+  const openBlockers = (taskId) =>
+    (db.taskDeps ?? [])
+      .filter((d) => d.task_id === taskId)
+      .map((d) => findTask(d.blocker_id))
+      .filter((b) => b && !b.completed_at && !b.hidden && !b.deleted_at)
+      .map((b) => ({ id: b.id, title: b.title }));
   // Локальная дата YYYY-MM-DD из ISO-метки (зеркало 'localtime' в SQLite)
   const localDayKey = (iso) => {
     const d = new Date(iso);
@@ -179,7 +188,8 @@
 
     // --- задачи ---
     get_tasks: () =>
-      [...db.tasks].filter((t) => !t.deleted_at).sort((a, b) => a.sort_order - b.sort_order).map((t) => ({ ...t })),
+      [...db.tasks].filter((t) => !t.deleted_at).sort((a, b) => a.sort_order - b.sort_order)
+        .map((t) => ({ ...t, blocked_by: openBlockers(t.id) })),
     reorder_tasks: ({ ids }) => {
       // Зеркало бэкенда: та же тройка значений раздаётся по новому порядку
       const byId = new Map(db.tasks.map((t) => [t.id, t]));
@@ -249,6 +259,11 @@
     complete_task: ({ id }) => {
       const t = findTask(id);
       if (!t) throw `Задача не найдена: ${id}`;
+      // Зеркало бэкенда (v0.9.56): заблокированную задачу выполнить нельзя.
+      const blockers = openBlockers(id);
+      if (blockers.length > 0) {
+        throw `Сначала выполните: ${blockers.map((b) => b.title).join(", ")}.`;
+      }
       // Как в Rust: ветка зависит от повтора (v0.9.24 — раньше мок считал
       // любую задачу разовой и не воспроизводил баг с повторами).
       const repeats = t.recurrence && t.recurrence !== "None";
@@ -323,6 +338,32 @@
 
     // --- подзадачи ---
     get_subtasks: ({ taskId }) => findTask(taskId)?.subtasks ?? [],
+    get_task_blockers: ({ taskId }) => openBlockers(taskId),
+    add_task_dependency: ({ taskId, blockerId }) => {
+      if (taskId === blockerId) throw "Задача не может блокировать саму себя";
+      // Цикл ловим тем же обходом цепочки, что и Rust: иначе обе задачи
+      // остались бы заблокированными навсегда.
+      const chain = (from, to, seen = new Set()) => {
+        if (seen.has(from)) return false;
+        seen.add(from);
+        return (db.taskDeps ?? []).filter((d) => d.task_id === from)
+          .some((d) => d.blocker_id === to || chain(d.blocker_id, to, seen));
+      };
+      if (chain(blockerId, taskId)) {
+        throw "Циклическая зависимость: эта задача уже блокирует выбранную";
+      }
+      db.taskDeps = db.taskDeps ?? [];
+      if (!db.taskDeps.some((d) => d.task_id === taskId && d.blocker_id === blockerId)) {
+        db.taskDeps.push({ task_id: taskId, blocker_id: blockerId });
+      }
+      persist();
+    },
+    remove_task_dependency: ({ taskId, blockerId }) => {
+      db.taskDeps = (db.taskDeps ?? []).filter(
+        (d) => !(d.task_id === taskId && d.blocker_id === blockerId),
+      );
+      persist();
+    },
     add_subtask: ({ taskId, title }) => {
       const t = findTask(taskId);
       if (!t) throw `Задача не найдена: ${taskId}`;

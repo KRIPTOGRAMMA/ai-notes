@@ -123,6 +123,11 @@ export const EN: Record<string, string> = {
   "Есть дедлайн": "Has deadline",
   "Все теги": "All tags",
   "Выполнить": "Complete",
+  // Зависимости задач (v0.9.56)
+  "Заблокирована: {tasks}": "Blocked by: {tasks}",
+  "Блокируется задачами": "Blocked by",
+  "Добавить блокер...": "Add blocker...",
+  "Убрать зависимость": "Remove dependency",
   "Дедлайн": "Deadline",
   "Дедлайн и повтор": "Deadline and recurrence",
   "Без повтора": "No recurrence",

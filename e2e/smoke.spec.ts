@@ -2173,7 +2173,9 @@ test("шаблоны чеклистов: сохранить подзадачи �
   await otherRow.locator(".task-main").click();
   const otherModal = page.locator(".modal");
   await otherModal.getByRole("button", { name: "Из шаблона…" }).click();
-  await expect(otherModal.getByText("Поездка")).toBeVisible();
+  // Имя шаблона именно в списке шаблонов: с v0.9.56 в модалке есть ещё и
+  // селект блокеров, куда попадает одноимённая задача.
+  await expect(otherModal.locator(".template-panel").getByText("Поездка")).toBeVisible();
   await otherModal.getByRole("button", { name: "Применить" }).click();
   await expect(otherModal.locator(".checklist-editor")).toHaveText("паспортбилеты");
   await otherModal.getByRole("button", { name: "Сохранить", exact: true }).click();
@@ -3928,3 +3930,61 @@ test("переключатели: чипы смарт-списков не пре
   expect(color).not.toBe("rgb(255, 255, 255)");
 });
 
+
+// Зависимости задач (v0.9.56). Проверяем весь цикл через UI: назначение
+// блокера, запрет выполнения, разблокировку при закрытии блокера.
+//
+// Строки ищем по .task-title, а не по тексту всей строки: у заблокированной
+// задачи в разметке есть подпись «Заблокирована: фундамент», и фильтр по
+// hasText находил бы обе строки сразу.
+function taskByTitle(page: Page, title: string) {
+  return page.locator(".task-row").filter({ has: page.locator(".task-title", { hasText: title }) });
+}
+
+async function blockWith(page: Page, taskTitle: string, blockerTitle: string) {
+  await taskByTitle(page, taskTitle).locator(".task-main").click();
+  const modal = page.locator(".modal");
+  await modal.locator("select").last().selectOption({ label: blockerTitle });
+  await modal.getByRole("button", { name: "Отмена" }).click();
+}
+
+test("зависимости: заблокированную задачу нельзя выполнить, пока не закрыт блокер", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+  await createTask(page, "фундамент");
+  await createTask(page, "стены");
+  await blockWith(page, "стены", "фундамент");
+
+  const walls = taskByTitle(page, "стены");
+  await expect(walls).toHaveClass(/blocked/);
+  await expect(walls.getByText("Заблокирована: фундамент")).toBeVisible();
+  // Причина видна не только глазами: галочка недоступна
+  await expect(walls.locator(".task-check")).toBeDisabled();
+
+  // Закрываем блокер — «стены» освобождаются
+  await taskByTitle(page, "фундамент").locator(".task-check").click();
+  await expect(walls).not.toHaveClass(/blocked/);
+  await expect(walls.locator(".task-check")).toBeEnabled();
+  await walls.locator(".task-check").click();
+  await expect(taskByTitle(page, "стены")).toHaveCount(0);
+});
+
+// Решение пользователя: Корзина мягкая, поэтому блокер в ней не блокирует,
+// но связь жива и возвращается вместе с задачей при восстановлении.
+test("зависимости: блокер в Корзине не блокирует, но связь возвращается при восстановлении", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+  await createTask(page, "фундамент");
+  await createTask(page, "стены");
+  await blockWith(page, "стены", "фундамент");
+  await expect(taskByTitle(page, "стены")).toHaveClass(/blocked/);
+
+  await taskByTitle(page, "фундамент").getByTitle("Удалить").click();
+  await expect(taskByTitle(page, "стены")).not.toHaveClass(/blocked/);
+
+  // Восстановили — блокировка вернулась
+  await page.getByRole("button", { name: "Корзина" }).click();
+  await page.getByRole("button", { name: "Восстановить" }).first().click();
+  await page.getByRole("button", { name: "Активные" }).click();
+  await expect(taskByTitle(page, "стены")).toHaveClass(/blocked/);
+});

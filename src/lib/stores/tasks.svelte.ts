@@ -73,6 +73,21 @@ export const taskStore = {
     }
   },
 
+  // Зависимости (v0.9.56). Обе операции меняют blocked_by у задачи, поэтому
+  // после них перезагружаем список — приглушение и запрет выполнения считает
+  // бэкенд, локально их не воспроизвести.
+  async addDependency(taskId: string, blockerId: string) {
+    if (await guard(async () => { await api.addTaskDependency(taskId, blockerId); return true; }, false)) {
+      await taskStore.load();
+    }
+  },
+
+  async removeDependency(taskId: string, blockerId: string) {
+    if (await guard(async () => { await api.removeTaskDependency(taskId, blockerId); return true; }, false)) {
+      await taskStore.load();
+    }
+  },
+
   async remove(id: string) {
     if (await guard(async () => { await api.deleteTask(id); return true; }, false)) {
       await taskStore.load();

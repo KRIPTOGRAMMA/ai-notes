@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Task, Subtask, CreateTaskPayload, UpdateTaskPayload, Note, CreateNotePayload, UpdateNotePayload, AppSettings, Project, UpdateProjectPayload, CategoryInfo, StatusInfo, NoteSnippet, TaskSnippet, GoalSnapshot, Routine, RoutineBlock, ActiveSession, NoteRevision, ChecklistTemplate, DayCompletion, ModelOption, SmartList, SmartListFilter, NotificationEntry, QuickMode, BlockIdle, PinnedItem, GlobalAction } from "../types";
+import type { Task, Subtask, Blocker, CreateTaskPayload, UpdateTaskPayload, Note, CreateNotePayload, UpdateNotePayload, AppSettings, Project, UpdateProjectPayload, CategoryInfo, StatusInfo, NoteSnippet, TaskSnippet, GoalSnapshot, Routine, RoutineBlock, ActiveSession, NoteRevision, ChecklistTemplate, DayCompletion, ModelOption, SmartList, SmartListFilter, NotificationEntry, QuickMode, BlockIdle, PinnedItem, GlobalAction } from "../types";
 
 export const api = {
   getTasks: () => invoke<Task[]>("get_tasks"),
@@ -120,6 +120,11 @@ export const api = {
   toggleSubtask: (id: string) => invoke<void>("toggle_subtask", { id }),
   deleteSubtask: (id: string) => invoke<void>("delete_subtask", { id }),
   renameSubtask: (id: string, title: string) => invoke<void>("rename_subtask", { id, title }),
+  getTaskBlockers: (taskId: string) => invoke<Blocker[]>("get_task_blockers", { taskId }),
+  addTaskDependency: (taskId: string, blockerId: string) =>
+    invoke<void>("add_task_dependency", { taskId, blockerId }),
+  removeTaskDependency: (taskId: string, blockerId: string) =>
+    invoke<void>("remove_task_dependency", { taskId, blockerId }),
   getRoutines: () => invoke<Routine[]>("get_routines"),
   createRoutine: (routine: { title: string; days_mask: number; start_mins: number; duration_mins: number }) =>
     invoke<Routine>("create_routine", { routine }),

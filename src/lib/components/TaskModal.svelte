@@ -23,6 +23,38 @@
 
   const isEdit = !!task;
 
+  // Кандидаты в блокеры (v0.9.56): открытые задачи, кроме самой этой и уже
+  // добавленных. Циклы бэкенд отвергает сам — здесь их не фильтруем, иначе
+  // пришлось бы тянуть весь граф зависимостей во фронтенд ради подсказки.
+  // Блокеры держим в своём состоянии, а не читаем из пропа: taskStore.load()
+  // после правки создаёт НОВЫЕ объекты задач, и проп остаётся указывать на
+  // старый — список в открытой модалке не обновился бы до переоткрытия.
+  let blockedBy = $state(task?.blocked_by ?? []);
+
+  const candidateBlockers = $derived(
+    taskStore.tasks.filter(c =>
+      c.id !== task?.id &&
+      !c.hidden &&
+      !blockedBy.some(b => b.id === c.id),
+    ),
+  );
+
+  async function addBlocker(select: HTMLSelectElement) {
+    const blockerId = select.value;
+    // Сбрасываем сразу: выбор — это действие, а не состояние поля, иначе в
+    // селекте останется висеть уже добавленный блокер.
+    select.value = "";
+    if (!blockerId || !task) return;
+    await taskStore.addDependency(task.id, blockerId);
+    blockedBy = taskStore.tasks.find(x => x.id === task!.id)?.blocked_by ?? [];
+  }
+
+  async function removeBlocker(blockerId: string) {
+    if (!task) return;
+    await taskStore.removeDependency(task.id, blockerId);
+    blockedBy = taskStore.tasks.find(x => x.id === task!.id)?.blocked_by ?? [];
+  }
+
   // Модалку открывают и разделы, не грузившие категории/статусы (Календарь)
   if (categoryStore.categories.length === 0) categoryStore.load();
   if (statusStore.statuses.length === 0) statusStore.load();
@@ -443,6 +475,36 @@
       </label>
     {/if}
 
+    <!-- Зависимости только у сохранённой задачи (v0.9.56): связь пишется в
+         отдельную таблицу по id, которого у новой задачи ещё нет. Правки тут
+         применяются сразу, не по кнопке «Сохранить» — как и подзадачи. -->
+    {#if isEdit && task}
+      <div class="field">
+        <span class="label">{t("Блокируется задачами")}</span>
+        {#if blockedBy.length > 0}
+          <ul class="blockers">
+            {#each blockedBy as b (b.id)}
+              <li>
+                <span class="blocker-title">{b.title}</span>
+                <button
+                  class="btn-ghost blocker-del"
+                  onclick={() => removeBlocker(b.id)}
+                  title={t("Убрать зависимость")}
+                  aria-label={t("Убрать зависимость")}
+                >×</button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+        <select value="" onchange={(e) => addBlocker(e.currentTarget)}>
+          <option value="">{t("Добавить блокер...")}</option>
+          {#each candidateBlockers as c (c.id)}
+            <option value={c.id}>{c.title}</option>
+          {/each}
+        </select>
+      </div>
+    {/if}
+
     <div class="actions">
       <span class="muted" style="font-size:11px;margin-right:auto;"><kbd>Ctrl Enter</kbd> {t("сохранить ·")} <kbd>Esc</kbd> {t("закрыть")}</span>
       <button class="btn-ghost" onclick={onClose}>{t("Отмена")}</button>
@@ -454,6 +516,39 @@
 </div>
 
 <style>
+  /* Зависимости (v0.9.56) */
+  .blockers {
+    list-style: none;
+    margin: 0 0 6px;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .blockers li {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--bg-hover);
+    border-radius: var(--radius);
+    padding: 4px 6px 4px 9px;
+    font-size: 12px;
+  }
+
+  .blocker-title {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .blocker-del {
+    padding: 0 6px;
+    line-height: 1;
+    font-size: 15px;
+  }
+
   .backdrop {
     align-items: center;
     padding: 16px;

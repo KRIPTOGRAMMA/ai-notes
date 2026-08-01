@@ -67,6 +67,7 @@ pub async fn get_tasks_impl(pool: &SqlitePool) -> Result<Vec<Task>, String> {
 
     let mut tasks: Vec<Task> = rows.into_iter().map(|r| r.into_task()).collect();
     crate::commands::subtasks::attach_subtasks(pool, &mut tasks).await?;
+    crate::commands::dependencies::attach_blockers(pool, &mut tasks).await?;
     Ok(tasks)
 }
 
@@ -308,6 +309,16 @@ pub async fn complete_task(
 }
 
 pub async fn complete_task_impl(pool: &SqlitePool, id: String) -> Result<Task, String> {
+  // Заблокированную задачу выполнить нельзя (v0.9.56). Проверка здесь, а не
+  // только в UI: выполнить можно ещё из трея, быстрого слота и командной
+  // палитры, и каждый такой путь иначе обходил бы запрет.
+  let blockers = crate::commands::dependencies::blockers_of(pool, &id).await?;
+  if !blockers.is_empty() {
+    let names = blockers.iter().map(|b| b.title.clone()).collect::<Vec<_>>().join(", ");
+    let lang = crate::i18n::current_lang(pool).await;
+    return Err(crate::i18n::tr_args("Сначала выполните: {tasks}.", lang, &[("tasks", names)]));
+  }
+
   let row = sqlx::query_as::<_, TaskRow>("SELECT * FROM tasks WHERE id = ?")
         .bind(&id)
         .fetch_one(pool)
@@ -392,6 +403,13 @@ pub async fn complete_task_impl(pool: &SqlitePool, id: String) -> Result<Task, S
   .execute(pool)
   .await
   .map_err(|e| e.to_string())?;
+
+  // Уведомление уходит только если задача действительно закрылась. У
+  // повторяющейся completed_at остаётся пустым — она уехала на следующий
+  // дедлайн и продолжает блокировать, разблокировки не было.
+  if task.completed_at.is_some() {
+    crate::commands::dependencies::notify_unblocked(pool, &id).await?;
+  }
 
   Ok(task)
 }

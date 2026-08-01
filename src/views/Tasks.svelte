@@ -820,22 +820,28 @@
 
 {#snippet taskRow(task: Task)}
   {@const busy = aiLoadingId === task.id}
+  {@const blocked = task.blocked_by.length > 0}
+  {@const blockerNames = task.blocked_by.map(b => b.title).join(", ")}
   <li
     class="task-row"
     style="--prio: var(--prio-{task.priority.toLowerCase()});"
     class:dragging={dragTaskId === task.id}
     class:drop-target={dropTargetId === task.id}
     class:selected={selectedIds.has(task.id)}
+    class:blocked
     draggable={!searchQuery.trim() && !task.hidden}
     ondragstart={(e) => rowDragStart(e, task)}
     ondragover={(e) => rowDragOver(e, task)}
     ondrop={(e) => rowDrop(e, task)}
     ondragend={() => { dragTaskId = null; dropTargetId = null; }}
   >
+    <!-- Заблокированную задачу выполнить нельзя (v0.9.56). Бэкенд запрещает
+         это и сам, но disabled здесь — чтобы клик не приводил к ошибке. -->
     <button
       class="task-check"
       onclick={() => completeRow(task)}
-      title={t("Выполнить")}
+      disabled={blocked}
+      title={blocked ? t("Заблокирована: {tasks}", { tasks: blockerNames }) : t("Выполнить")}
       aria-label={t("Выполнить задачу")}
     ></button>
 
@@ -855,6 +861,11 @@
       </div>
       {#if task.description}
         <div class="task-desc">{task.description}</div>
+      {/if}
+      <!-- Причина блокировки текстом, а не только приглушением: иначе
+           непонятно, почему у задачи не нажимается галочка. -->
+      {#if blocked}
+        <div class="task-blocked-by">{t("Заблокирована: {tasks}", { tasks: blockerNames })}</div>
       {/if}
     </div>
 
@@ -1959,6 +1970,23 @@
     border-radius: 50%;
     flex-shrink: 0;
     background: var(--prio, var(--prio-low));
+  }
+
+  /* Заблокированная задача (v0.9.56): приглушена, но читаема — она остаётся
+     в списке, чтобы о ней не забыли. Приглушаем только содержимое строки,
+     а не саму строку: opacity на .task-row погасил бы и цветную полосу
+     приоритета слева, по которой список читается взглядом. */
+  .task-row.blocked .task-main,
+  .task-row.blocked .task-meta { opacity: .55; }
+  .task-row.blocked .task-check { cursor: not-allowed; }
+
+  .task-blocked-by {
+    font-size: 11px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .task-desc {

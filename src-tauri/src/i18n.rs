@@ -134,6 +134,10 @@ fn en(key: &str) -> Option<&'static str> {
         "Идёт блок «{task}» до {time}." => "Block “{task}” is running until {time}.",
         "Следующий блок: {time} «{task}»." => "Next block: {time} “{task}”.",
         "Просрочено: {tasks}." => "Overdue: {tasks}.",
+        // Зависимости задач (v0.9.56)
+        "Сначала выполните: {tasks}." => "Complete these first: {tasks}.",
+        "Задача разблокирована" => "Task unblocked",
+        "Можно взяться: {task}." => "Ready to start: {task}.",
         "{task} (приоритет {prio})" => "{task} (priority {prio})",
         "Активных задач нет." => "There are no active tasks.",
         "Важные задачи: {tasks}." => "Important tasks: {tasks}.",

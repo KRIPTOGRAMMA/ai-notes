@@ -65,6 +65,17 @@ export interface Task {
   scheduled_mins: number | null; // тайм-блок: длительность
   sort_order: number; // ручной порядок в списке (drag)
   subtasks: Subtask[];
+  // Зависимости (v0.9.56): незакрытые блокеры этой задачи. Пустой массив =
+  // задача свободна. Блокер в Корзине сюда не попадает (не блокирует), но
+  // связь жива и вернётся вместе с ним при восстановлении.
+  blocked_by: Blocker[];
+}
+
+// Блокер с названием — чтобы показать «Заблокирована задачей X» без
+// дополнительного запроса за именем.
+export interface Blocker {
+  id: string;
+  title: string;
 }
 
 export interface Project {

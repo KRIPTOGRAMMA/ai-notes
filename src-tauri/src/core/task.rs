@@ -59,6 +59,21 @@ pub struct Task {
   pub sort_order: i64,
   #[serde(default)]
   pub subtasks: Vec<Subtask>,
+  // Зависимости (v0.9.56): задачи, которые должны быть закрыты перед этой.
+  // Здесь только НЕзакрытые блокеры — то есть причина, по которой задача
+  // заблокирована прямо сейчас. Пустой список = задача свободна.
+  // Блокер в Корзине не блокирует, но связь сохраняется и вернётся вместе
+  // с ним при восстановлении (см. commands/dependencies.rs).
+  #[serde(default)]
+  pub blocked_by: Vec<Blocker>,
+}
+
+/// Незакрытый блокер в списке `Task::blocked_by`. Название нужно, чтобы
+/// показать «Заблокирована задачей X» без второго запроса из фронтенда.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, sqlx::FromRow)]
+pub struct Blocker {
+  pub id: String,
+  pub title: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, sqlx::FromRow)]
@@ -257,6 +272,7 @@ impl CreateTask {
             scheduled_mins: None,
             sort_order: 0, // create_task_impl назначает max+1 перед вставкой
             subtasks: Vec::new(),
+            blocked_by: Vec::new(),
         }
     }
 }
@@ -296,6 +312,7 @@ impl TaskRow {
             scheduled_mins: self.scheduled_mins,
             sort_order: self.sort_order,
             subtasks: Vec::new(),
+            blocked_by: Vec::new(),
         }
     }
 }
