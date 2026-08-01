@@ -9,9 +9,10 @@ fn normalize_ext(ext: &str) -> Option<&'static str> {
     ALLOWED_EXT.iter().find(|e| e.eq_ignore_ascii_case(ext)).copied()
 }
 
-// Декодирует base64 (с опциональным data:-префиксом, "data:image/png;base64,...")
-// и пишет файл в images_dir/<uuid>.<ext>. Возвращает только имя файла (относительное) —
-// абсолютный путь фронту не нужен, он резолвит через convertFileSrc + app_data_dir.
+// Decodes base64 (with an optional data: prefix, "data:image/png;base64,...") and
+// writes the file to images_dir/<uuid>.<ext>. Returns only the relative filename:
+// the frontend does not need an absolute path, it resolves one via
+// convertFileSrc plus app_data_dir.
 pub fn save_note_image_impl(images_dir: &std::path::Path, data_base64: &str, ext: &str) -> AppResult<String> {
     let ext = normalize_ext(ext.trim().trim_start_matches('.'))
         .ok_or_else(|| AppError::Other(format!("Недопустимое расширение: {ext}")))?;
@@ -42,8 +43,9 @@ pub async fn save_note_image(
     save_note_image_impl(&images_dir, &data_base64, &ext)
 }
 
-// Абсолютный путь к папке images — фронт использует его с convertFileSrc()
-// для построения asset:// URL (scope в tauri.conf.json ограничен этой папкой).
+// The absolute path to the images folder. The frontend feeds it to
+// convertFileSrc() to build asset:// URLs (the scope in tauri.conf.json is
+// limited to this folder).
 #[tauri::command]
 pub fn get_images_dir(app: tauri::AppHandle) -> AppResult<String> {
     let dir = app.path().app_data_dir()?.join("images");

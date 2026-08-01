@@ -24,9 +24,10 @@
   let inputEl: HTMLInputElement | undefined = $state();
   let activeIndex = $state(0);
   let items: Array<{ type: "command"; i: number } | { type: "task"; i: number } | { type: "note"; i: number }> = $state([]);
-  // Команды, прошедшие фильтр текущего запроса — items с type "command" индексируют
-  // СЮДА, а не в исходный commands[] (иначе после фильтрации индексы съезжают
-  // и клик/рендер попадают на другую команду — был баг).
+  // Commands that passed the current query's filter: items of type "command" index
+  // INTO THIS list rather than into the original commands[] (otherwise the indices
+  // shift after filtering and a click or render lands on a different command — that
+  // was a real bug).
   let filteredCommands: PaletteCommand[] = $state([]);
 
   let searchToken = 0;
@@ -61,7 +62,7 @@
   }
 
   $effect(() => { inputEl?.focus(); });
-  // Стартовая сборка
+  // The initial build
   $effect(() => {
     if (items.length > 0) return;
     rebuild("", [], []);

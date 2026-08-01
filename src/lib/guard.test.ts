@@ -2,8 +2,8 @@ import { describe, it, expect } from "vitest";
 import { describeError, runGuarded } from "./guard";
 
 describe("describeError", () => {
-  // Rust-команды через invoke отдают именно строку, не Error — это основной
-  // путь в приложении, и раньше такие ошибки нигде не показывались.
+  // Rust commands invoked through invoke return a string rather than an Error. That
+  // is the main path in the application, and such errors used to be shown nowhere.
   it("строка от Rust-команды проходит как есть", () => {
     expect(describeError("Задача не найдена: abc")).toBe("Задача не найдена: abc");
   });
@@ -30,9 +30,9 @@ describe("runGuarded", () => {
     expect(r).toEqual({ ok: false, error: "Пустая подзадача" });
   });
 
-  // Ключевое поведение v0.9.25: успех должен различаться от ошибки, чтобы
-  // стор мог сбросить error. Раньше error только выставлялся и первая же
-  // неудача оставляла баннер висеть навсегда.
+  // The key behaviour: success must be distinguishable from failure so the store can
+  // clear error. It used to be only set, and the very first failure left the banner
+  // hanging forever.
   it("успех после ошибки различим — стору есть по чему сбросить error", async () => {
     const fail = await runGuarded(async () => { throw "упало"; });
     const ok = await runGuarded(async () => "ок");

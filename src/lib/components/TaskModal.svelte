@@ -11,10 +11,10 @@
 
   type Props = {
     task?: Task | null;
-    initialDeadline?: string | null; // префилл дедлайна при создании (формат datetime-local)
-    initialStatus?: TaskStatus; // префилл статуса при создании (Канбан: колонка задаёт статус)
-    // Возвращает созданную задачу (create-режим) — модалка дописывает к ней
-    // подзадачи из инлайн-чеклиста; в edit-режиме возврат не используется.
+    initialDeadline?: string | null; // deadline prefill on creation (datetime-local format)
+    initialStatus?: TaskStatus; // status prefill on creation (kanban: the column sets it)
+    // Returns the created task (in create mode) so the modal can append the subtasks
+    // from the inline checklist; in edit mode the return value is unused.
     onSave: (data: CreateTaskPayload | UpdateTaskPayload) => Promise<Task | null | void>;
     onClose: () => void;
   };
@@ -23,12 +23,13 @@
 
   const isEdit = !!task;
 
-  // Кандидаты в блокеры (v0.9.56): открытые задачи, кроме самой этой и уже
-  // добавленных. Циклы бэкенд отвергает сам — здесь их не фильтруем, иначе
-  // пришлось бы тянуть весь граф зависимостей во фронтенд ради подсказки.
-  // Блокеры держим в своём состоянии, а не читаем из пропа: taskStore.load()
-  // после правки создаёт НОВЫЕ объекты задач, и проп остаётся указывать на
-  // старый — список в открытой модалке не обновился бы до переоткрытия.
+  // Blocker candidates: open tasks other than this one and those already added.
+  // Cycles are rejected by the backend itself, so they are not filtered here —
+  // otherwise the whole dependency graph would have to be pulled into the frontend
+  // just for a hint. The blockers are kept in local state rather than read from the
+  // prop: taskStore.load() creates NEW task objects after an edit and the prop keeps
+  // pointing at the old one, so the list in an open modal would not update until it
+  // was reopened.
   let blockedBy = $state(task?.blocked_by ?? []);
 
   const candidateBlockers = $derived(
@@ -41,8 +42,8 @@
 
   async function addBlocker(select: HTMLSelectElement) {
     const blockerId = select.value;
-    // Сбрасываем сразу: выбор — это действие, а не состояние поля, иначе в
-    // селекте останется висеть уже добавленный блокер.
+    // Reset immediately: picking an option is an action rather than field state, or
+    // the already-added blocker would stay showing in the select.
     select.value = "";
     if (!blockerId || !task) return;
     await taskStore.addDependency(task.id, blockerId);
@@ -55,7 +56,7 @@
     blockedBy = taskStore.tasks.find(x => x.id === task!.id)?.blocked_by ?? [];
   }
 
-  // Модалку открывают и разделы, не грузившие категории/статусы (Календарь)
+  // The modal is also opened by sections that never loaded categories or statuses (the Calendar)
   if (categoryStore.categories.length === 0) categoryStore.load();
   if (statusStore.statuses.length === 0) statusStore.load();
 
@@ -63,7 +64,7 @@
   let description = $state(task?.description ?? "");
   let status = $state<TaskStatus>(task?.status ?? initialStatus);
   let priority = $state<Priority>(task?.priority ?? "Medium");
-  // "Other" — фолбэк-категория, существует всегда (в отличие от Work — её можно удалить)
+  // "Other" is the fallback category and always exists (unlike Work, which can be deleted)
   let category = $state<Category>(task?.category ?? "Other");
   let tagsInput = $state((task?.tags ?? []).join(", "));
   let totalTaskMins = $state(0);
@@ -71,11 +72,11 @@
   if (task) {
     api.getTaskSeconds(task.id).then(s => totalTaskMins = Math.round(s / 60)).catch(() => {});
   }
-  // "" = без проекта; в патче пустая строка отвязывает
+  // "" means no project; in a patch an empty string detaches it
   let projectId = $state(task?.project_id ?? "");
 
-  // datetime-local работает в локальном времени. toISOString() дал бы UTC —
-  // тогда каждое открытие+сохранение сдвигало бы дедлайн на смещение пояса.
+  // datetime-local works in local time. toISOString() would give UTC, and then every
+  // open-and-save would shift the deadline by the timezone offset.
   function toLocalInput(iso: string): string {
     const d = new Date(iso);
     const p = (n: number) => String(n).padStart(2, "0");
@@ -111,8 +112,8 @@
   let customN = $state(initCustomN());
   let customUnit = $state<RecurrenceUnit>(initCustomUnit());
 
-  // Дни недели для Recurrence::Weekdays — тот же паттерн, что days_mask у
-  // рутин (RoutinesModal.svelte): бит 0 = Пн ... бит 6 = Вс.
+  // Weekdays for Recurrence::Weekdays — the same pattern as days_mask on routines
+  // (RoutinesModal.svelte): bit 0 = Monday ... bit 6 = Sunday.
   const WEEKDAY_LABELS = $derived([t("Пн"), t("Вт"), t("Ср"), t("Чт"), t("Пт"), t("Сб"), t("Вс")]);
   function initWeekdays(): boolean[] {
     const r = task?.recurrence;
@@ -129,24 +130,24 @@
   let saving = $state(false);
   let error = $state("");
 
-  // --- Чек-лист подзадач одним текстовым полем (v0.8.3 → переписано в
-  // v0.9.45). Строка = подзадача, префикс `[x]`/`[ ]` = отметка. Раньше каждая
-  // строка была своим <input>, из-за чего по списку нельзя было ходить
-  // стрелками и выделять несколько строк сразу. Изменения по-прежнему
-  // применяются при сохранении (diff с task.subtasks), а не мгновенно.
+  // --- The subtask checklist as a single text field. A line is a subtask and the
+  // `[x]`/`[ ]` prefix is the tick. Every line used to be its own <input>, which made
+  // it impossible to move through the list with arrow keys or select several lines at
+  // once. Changes are still applied on save (a diff against task.subtasks) rather than
+  // immediately.
   //
-  // Соответствие «строка ↔ существующая подзадача» ведётся по позиции: id
-  // текста не переживает, а альтернатива (скрытые маркеры в тексте) сломала бы
-  // именно то, ради чего поле текстовое. Практическое следствие — переставленная
-  // строка считается переименованием, а не перемещением; для чек-листа из
-  // нескольких пунктов это дешевле, чем сопоставление по содержимому.
-  // svelte-ignore state_referenced_locally -- модалка пересоздаётся на каждую задачу ({#if editingTask}), снимок начального значения тут и нужен
+  // The correspondence "line <-> existing subtask" is kept positionally: an id does
+  // not survive in text, and the alternative (hidden markers inside the text) would
+  // break the very thing a text field is for. The practical consequence is that a
+  // reordered line counts as a rename rather than a move; for a checklist of a few
+  // items that is cheaper than matching by content.
+  // svelte-ignore state_referenced_locally -- the modal is recreated for each task ({#if editingTask}), so a snapshot of the initial value is exactly what is wanted here
   let subsText = $state(
     formatChecklist((task?.subtasks ?? []).map(s => ({ title: s.title, done: s.done }))),
   );
   const hasSubs = $derived(parseChecklist(subsText).length > 0);
 
-  // --- Шаблоны чеклистов (v0.7.15, перенесено в модалку в v0.8.3) ---
+  // --- Checklist templates ---
   let checklistTemplates: ChecklistTemplate[] = $state([]);
   let templatePickerOpen = $state(false);
   let savingTemplateOpen = $state(false);
@@ -163,7 +164,7 @@
   }
 
   function applyTemplate(template: ChecklistTemplate) {
-    // Шаблон дописывается к тому, что уже набрано, а не заменяет его.
+    // A template is appended to whatever is already typed rather than replacing it.
     const added = formatChecklist(template.items.map(title => ({ title, done: false })));
     subsText = subsText.trim() ? `${subsText.replace(/\n+$/, "")}\n${added}` : added;
     templatePickerOpen = false;
@@ -189,11 +190,11 @@
     newTemplateName = "";
   }
 
-  // Diff чеклиста против исходных подзадач задачи. Строки текста сопоставляются
-  // с существующими подзадачами по позиции (id в тексте не хранится, см.
-  // комментарий у subsText): i-я строка правит i-ю подзадачу, лишние строки
-  // добавляются, лишние подзадачи удаляются. Так правка формулировки остаётся
-  // переименованием и сохраняет отметку, а не пересоздаёт подзадачу заново.
+  // The checklist diffed against the task's original subtasks. Lines of text are
+  // matched to existing subtasks positionally (no id is stored in the text, see the
+  // comment on subsText): line i edits subtask i, extra lines are added and extra
+  // subtasks removed. That way editing the wording stays a rename and keeps the tick
+  // rather than recreating the subtask from scratch.
   async function applySubtaskChanges(taskId: string) {
     const orig = task?.subtasks ?? [];
     const current = parseChecklist(subsText);
@@ -241,14 +242,14 @@
     error = "";
     try {
       const recurrence = buildRecurrence();
-      // Дедлайн больше не обнуляется при повторе — это время первого
-      // срабатывания, тот же смысл, что и без повтора (см. next_occurrence
-      // на бэкенде, которая сдвигает именно это поле при выполнении).
+      // The deadline is no longer cleared for a recurring task — it is the time of the
+      // first occurrence, meaning the same as it does without recurrence (see
+      // next_occurrence on the backend, which shifts this very field on completion).
       const deadlineIso = deadline ? new Date(deadline).toISOString() : null;
 
       if (isEdit) {
-        // Подзадачи — до onSave: onSave обновляет задачу и перечитывает store,
-        // подхватывая заодно и изменения чеклиста.
+        // Subtasks go before onSave: onSave updates the task and re-reads the store,
+        // picking up the checklist changes along the way.
         await applySubtaskChanges(task!.id);
         const patch: UpdateTaskPayload = {
           title: title.trim(),
@@ -281,7 +282,7 @@
             const added = await api.addSubtask(created.id, s.title);
             if (s.done) await api.toggleSubtask(added.id);
           }
-          await taskStore.load(); // create уже перечитал store ДО подзадач
+          await taskStore.load(); // create already re-read the store BEFORE the subtasks
         }
       }
       onClose();
@@ -467,7 +468,7 @@
           {#each projectStore.active as p (p.id)}
             <option value={p.id}>{p.name}</option>
           {/each}
-          <!-- задача может висеть на архивном проекте — не теряем привязку -->
+          <!-- a task may hang on an archived project — we do not lose the link -->
           {#each projectStore.projects.filter(p => p.archived && p.id === projectId) as p (p.id)}
             <option value={p.id}>{p.name} ({t("архив")})</option>
           {/each}
@@ -475,9 +476,9 @@
       </label>
     {/if}
 
-    <!-- Зависимости только у сохранённой задачи (v0.9.56): связь пишется в
-         отдельную таблицу по id, которого у новой задачи ещё нет. Правки тут
-         применяются сразу, не по кнопке «Сохранить» — как и подзадачи. -->
+    <!-- Dependencies exist only for a saved task: the link is written into a
+         separate table keyed by an id a new task does not have yet. Edits here
+         apply immediately rather than on "Save", just like subtasks. -->
     {#if isEdit && task}
       <div class="field">
         <span class="label">{t("Блокируется задачами")}</span>
@@ -516,7 +517,7 @@
 </div>
 
 <style>
-  /* Зависимости (v0.9.56) */
+  /* Dependencies */
   .blockers {
     list-style: none;
     margin: 0 0 6px;
@@ -577,8 +578,8 @@
     gap: 12px;
   }
 
-  /* Дедлайн+Повтор сгруппированы визуально (v0.9.21) — общая рамка
-     объясняет, что это одна связанная настройка, а не два независимых поля. */
+  /* Deadline and recurrence are grouped visually: a shared border explains that
+     this is one connected setting rather than two independent fields. */
   .recurrence-block {
     padding: 10px;
     border: 1px solid var(--border);
@@ -619,8 +620,8 @@
     margin: 0;
   }
 
-  /* Чек-лист подзадач переехал в ChecklistEditor (v0.9.45) — стили строк
-     живут там же, здесь остаётся только ряд кнопок шаблонов. */
+  /* The subtask checklist moved into ChecklistEditor — the row styles live there
+     too, and only the row of template buttons remains here. */
   .template-row {
     display: flex;
     gap: 6px;

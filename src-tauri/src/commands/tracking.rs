@@ -12,7 +12,7 @@ pub struct ActiveSession {
     pub elapsed_secs: i64,
 }
 
-/// Закрыть любую открытую сессию, открыть новую для task_id, задачу → InProgress.
+/// Close any open session, open a new one for task_id, move the task to InProgress.
 #[tauri::command]
 pub async fn start_task_tracking(
     pool: State<'_, SqlitePool>,
@@ -22,20 +22,20 @@ pub async fn start_task_tracking(
 }
 
 pub async fn start_task_tracking_impl(pool: &SqlitePool, task_id: &str) -> AppResult<ActiveSession> {
-    // 1. Закрыть любую открытую сессию
+    // 1. Close any open session
     sqlx::query("UPDATE task_sessions SET ended_at = ? WHERE ended_at IS NULL")
         .bind(Utc::now().to_rfc3339())
         .execute(pool)
         .await?;
 
-    // 2. Проверить, что задача существует
+    // 2. Check that the task exists
     let title: String = sqlx::query_scalar("SELECT title FROM tasks WHERE id = ?")
         .bind(task_id)
         .fetch_optional(pool)
         .await?
         .ok_or_else(|| AppError::Other("Задача не найдена".into()))?;
 
-    // 3. Открыть новую сессию
+    // 3. Open a new session
     let now = Utc::now();
     let session = ActiveSession {
         task_id: task_id.to_string(),
@@ -52,7 +52,7 @@ pub async fn start_task_tracking_impl(pool: &SqlitePool, task_id: &str) -> AppRe
     .execute(pool)
     .await?;
 
-    // 4. Задачу → InProgress
+    // 4. Move the task to InProgress
     sqlx::query("UPDATE tasks SET status = 'InProgress', updated_at = ? WHERE id = ?")
         .bind(&now.to_rfc3339())
         .bind(task_id)
@@ -62,7 +62,7 @@ pub async fn start_task_tracking_impl(pool: &SqlitePool, task_id: &str) -> AppRe
     Ok(session)
 }
 
-/// Закрыть открытую сессию (если есть).
+/// Close the open session, if there is one.
 #[tauri::command]
 pub async fn stop_task_tracking(pool: State<'_, SqlitePool>) -> AppResult<()> {
     stop_task_tracking_impl(pool.inner()).await
@@ -76,7 +76,7 @@ pub async fn stop_task_tracking_impl(pool: &SqlitePool) -> AppResult<()> {
     Ok(())
 }
 
-/// Вернуть активную сессию + прошедшие секунды.
+/// Return the active session plus the seconds elapsed.
 #[tauri::command]
 pub async fn get_active_session(pool: State<'_, SqlitePool>) -> AppResult<Option<ActiveSession>> {
     get_active_session_impl(pool.inner()).await
@@ -109,7 +109,7 @@ pub async fn get_active_session_impl(pool: &SqlitePool) -> AppResult<Option<Acti
     }))
 }
 
-/// Сумма секунд по всем сессиям задачи (закрытые + открытая до now).
+/// Total seconds across all sessions of a task (closed ones plus the open one up to now).
 #[tauri::command]
 pub async fn get_task_seconds(pool: State<'_, SqlitePool>, task_id: String) -> AppResult<i64> {
     get_task_seconds_impl(pool.inner(), &task_id).await
@@ -137,7 +137,7 @@ pub async fn get_task_seconds_impl(pool: &SqlitePool, task_id: &str) -> AppResul
     Ok(total)
 }
 
-/// Сумма секунд по всем задачам проекта с даты from.
+/// Total seconds across all tasks of a project since the given date.
 #[tauri::command]
 pub async fn get_project_seconds(
     pool: State<'_, SqlitePool>,
@@ -216,17 +216,17 @@ mod tests {
         assert_eq!(s.task_id, "t1");
         assert_eq!(s.title, "Тест");
 
-        // Проверяем, что задача стала InProgress
+        // Check that the task became InProgress
         let status: String = sqlx::query_scalar("SELECT status FROM tasks WHERE id = 't1'")
             .fetch_one(&pool).await.unwrap();
         assert_eq!(status, "InProgress");
 
-        // Активная сессия есть
+        // There is an active session
         let active = get_active_session_impl(&pool).await.unwrap();
         assert!(active.is_some());
         assert_eq!(active.unwrap().task_id, "t1");
 
-        // Останавливаем
+        // Stop it
         stop_task_tracking_impl(&pool).await.unwrap();
         let active = get_active_session_impl(&pool).await.unwrap();
         assert!(active.is_none());
@@ -239,15 +239,15 @@ mod tests {
         insert_task(&pool, "t2", "Вторая", "Todo", None).await;
 
         start_task_tracking_impl(&pool, "t1").await.unwrap();
-        // Маленькая пауза, чтобы разница была > 0
+        // A short pause so the difference is > 0
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         start_task_tracking_impl(&pool, "t2").await.unwrap();
 
-        // t1 сессия закрыта
+        // the t1 session is closed
         let active = get_active_session_impl(&pool).await.unwrap().unwrap();
         assert_eq!(active.task_id, "t2");
 
-        // t1 должна иметь ended_at (проверяем что ended_at не NULL у первой сессии)
+        // t1 must have ended_at (check the first session's ended_at is not NULL)
         let ended: Option<String> = sqlx::query_scalar(
             "SELECT ended_at FROM task_sessions WHERE task_id = 't1'"
         ).fetch_optional(&pool).await.unwrap().flatten();
@@ -260,7 +260,7 @@ mod tests {
         insert_task(&pool, "t1", "Тест", "Todo", None).await;
 
         let now = Utc::now();
-        // Закрытая сессия 10 минут
+        // A closed 10-minute session
         sqlx::query(
             "INSERT INTO task_sessions (id, task_id, started_at, ended_at) VALUES (?, ?, ?, ?)"
         )
@@ -269,7 +269,7 @@ mod tests {
         .bind((now - secs(300)).to_rfc3339())
         .execute(&pool).await.unwrap();
 
-        // Открытая сессия 5 минут
+        // An open 5-minute session
         sqlx::query(
             "INSERT INTO task_sessions (id, task_id, started_at, ended_at) VALUES (?, ?, ?, NULL)"
         )
@@ -277,7 +277,7 @@ mod tests {
         .bind((now - secs(300)).to_rfc3339())
         .execute(&pool).await.unwrap();
 
-        // 300 + 300 = 600 (но открытая считается до now, плюс-минус)
+        // 300 + 300 = 600 (the open one counts up to now, give or take)
         let total = get_task_seconds_impl(&pool, "t1").await.unwrap();
         assert!(total >= 590 && total <= 610, "total={total}");
     }
@@ -313,7 +313,7 @@ mod tests {
     #[tokio::test]
     async fn stop_when_no_active_is_noop() {
         let pool = test_pool().await;
-        // Не должно падать
+        // Must not panic
         let r = stop_task_tracking_impl(&pool).await;
         assert!(r.is_ok());
     }

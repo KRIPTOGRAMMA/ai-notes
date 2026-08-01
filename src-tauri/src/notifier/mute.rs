@@ -2,8 +2,8 @@ use chrono::{DateTime, Utc};
 use sqlx::SqlitePool;
 use crate::commands::settings::{WorkMode, get_setting};
 
-// Единый гейт всех уведомлений: режим Focus ИЛИ активная пауза quiet_until.
-// Чистая функция — вся асинхронщина снаружи.
+// The single gate for every notification: Focus mode OR an active quiet_until
+// pause. A pure function — all the async work happens outside.
 pub fn notifications_muted(
     mode: &WorkMode,
     quiet_until: Option<DateTime<Utc>>,
@@ -17,14 +17,14 @@ pub async fn quiet_until(pool: &SqlitePool) -> Option<DateTime<Utc>> {
     DateTime::parse_from_rfc3339(&v).ok().map(|t| t.with_timezone(&Utc))
 }
 
-// Комбинированный хелпер для точек отправки: читает паузу из БД и применяет гейт.
+// A combined helper for the sending sites: reads the pause from the DB and applies the gate.
 pub async fn muted_now(pool: &SqlitePool, mode: &WorkMode) -> bool {
     notifications_muted(mode, quiet_until(pool).await, Utc::now())
 }
 
-// Фокус-режим (v0.9.12): авто-пауза на время помодоро-работы / активного
-// тайм-блока. Никогда не укорачивает уже действующую паузу — только продлевает
-// (пользователь мог вручную поставить "бессрочно" или более далёкий таймер).
+// Focus mode: an automatic pause for the duration of pomodoro work or an active
+// time block. It never shortens a pause already in effect, only extends it — the
+// user may have set "indefinite" or a more distant timer by hand.
 pub async fn extend_quiet_until(pool: &SqlitePool, until: DateTime<Utc>) {
     let current = quiet_until(pool).await;
     if current.map(|t| t >= until).unwrap_or(false) {

@@ -45,7 +45,7 @@
     } finally {
       loading = false;
     }
-    // Открытие панели считается прочтением всей текущей ленты.
+    // Opening the panel counts as reading the whole current feed.
     await api.markNotificationsRead().catch(() => {});
   });
 

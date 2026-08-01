@@ -49,9 +49,9 @@ pub async fn get_task_completions_by_day(pool: State<'_, SqlitePool>) -> AppResu
 }
 
 pub async fn get_task_completions_by_day_impl(pool: &SqlitePool) -> AppResult<Vec<TaskCompletion>> {
-    // Локальные сутки: completed_at хранится в UTC, а «день» для пользователя —
-    // локальный (иначе вечерние задачи уезжают на завтра). Так же группирует
-    // календарь-«квадратики» и get_completions_for_day.
+    // Local days: completed_at is stored in UTC, but a "day" for the user is
+    // local (otherwise evening tasks drift into tomorrow). The calendar squares
+    // and get_completions_for_day group things the same way.
     let rows = sqlx::query(
       "SELECT date(completed_at, 'localtime') as date, COUNT(*) as completed
        FROM tasks
@@ -100,25 +100,25 @@ pub async fn get_active_idle_ratio_impl(pool: &SqlitePool) -> AppResult<ActiveId
     Ok(ActiveIdleRatio { today_active, today_idle, week_active, week_idle })
 }
 
-// Простой внутри запланированных тайм-блоков за день (v0.9.30).
+// Idle time inside a day's planned time blocks.
 //
-// Тайм-блок — это план: «с 14:00 два часа на задачу X». Сколько времени
-// реально работалось, знает мониторинг (activity_log). Пересечение даёт
-// честное «план vs факт» — до этой версии тайм-блоки считались выполненными
-// по факту наступления времени, независимо от того, был ли пользователь
-// вообще за компьютером.
+// A time block is a plan: "two hours on task X starting at 14:00". How much time
+// was really worked is known to monitoring (activity_log). Intersecting the two
+// gives an honest plan-versus-actual: before this, time blocks counted as done
+// simply because their hour had arrived, whether or not the user was at the
+// computer at all.
 //
-// Считается на SQL-стороне без сложных оконных функций: тиков мониторинга
-// за день немного (по одному на log_interval_secs, по умолчанию минуту),
-// блоков тем более, поэтому простое соединение дешевле любой оптимизации.
+// Computed on the SQL side without window functions: there are few monitoring
+// ticks per day (one per log_interval_secs, a minute by default) and even fewer
+// blocks, so a plain join is cheaper than any optimization.
 #[tauri::command]
 pub async fn get_block_idle(pool: State<'_, SqlitePool>, date: String) -> AppResult<Vec<BlockIdle>> {
     get_block_idle_impl(pool.inner(), &date).await
 }
 
 pub async fn get_block_idle_impl(pool: &SqlitePool, date: &str) -> AppResult<Vec<BlockIdle>> {
-    // Блоки этого дня. scheduled_mins может быть NULL — берём час по
-    // умолчанию, тот же фолбэк, что и в остальном коде тайм-блоков.
+    // This day's blocks. scheduled_mins may be NULL, so we default to an hour —
+    // the same fallback the rest of the time-block code uses.
     let blocks = sqlx::query(
         "SELECT id, title, scheduled_at, COALESCE(scheduled_mins, 60) AS mins
          FROM tasks
@@ -138,7 +138,7 @@ pub async fn get_block_idle_impl(pool: &SqlitePool, date: &str) -> AppResult<Vec
     .fetch_all(pool)
     .await?;
 
-    // Разбираем тики один раз, а не внутри цикла по блокам.
+    // Parse the ticks once rather than inside the loop over blocks.
     let parsed: Vec<(i64, i64, bool)> = ticks.iter().filter_map(|r| {
         let ts: String = r.get("timestamp");
         let start = parse_ts(&ts)?;
@@ -165,8 +165,8 @@ pub async fn get_block_idle_impl(pool: &SqlitePool, date: &str) -> AppResult<Vec
             task_id: b.get("id"),
             task_title: b.get("title"),
             planned_mins: mins,
-            // Округление вниз: показать «простаивал 9 минут» при 9:59
-            // честнее, чем округлить до 10 и завысить претензию.
+            // Rounding down: reporting "idle for 9 minutes" at 9:59 is more
+            // honest than rounding up to 10 and overstating the accusation.
             idle_mins: idle / 60,
             active_mins: active / 60,
         });
@@ -174,9 +174,9 @@ pub async fn get_block_idle_impl(pool: &SqlitePool, date: &str) -> AppResult<Vec
     Ok(out)
 }
 
-// RFC3339 из БД → unix-секунды. Неразобранная метка пропускается, а не
-// роняет всю сводку: одна битая строка не должна лишать пользователя
-// статистики за день.
+// RFC3339 from the DB into unix seconds. An unparseable timestamp is skipped
+// rather than failing the whole digest: one broken row must not cost the user a
+// day of statistics.
 fn parse_ts(s: &str) -> Option<i64> {
     chrono::DateTime::parse_from_rfc3339(s)
         .ok()
@@ -203,7 +203,7 @@ async fn state_sums(pool: &SqlitePool, window: &str) -> AppResult<(i64, i64)> {
     Ok((active, idle))
 }
 
-// ===== Трекинг по приложениям (v0.5 фаза 1) =====
+// ===== Per-application tracking =====
 
 #[derive(Debug, serde::Serialize, PartialEq)]
 pub struct AppMinutes {
@@ -232,25 +232,25 @@ pub struct CategoryRule {
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct AppLimit {
     pub category: String,
-    pub daily_mins: i64, // 0/отсутствие правила = без лимита
+    pub daily_mins: i64, // 0 or no rule means no limit
 }
 
 const KNOWN_CATEGORIES: [&str; 5] = ["Work", "Study", "Home", "Health", "Other"];
 
-// Лимиты времени на категории приложений: JSON в settings под ключом
-// app_limits: [{"category":"Other","daily_mins":60}, ...]. Мусор/пустая строка — нет лимитов.
+// Time limits per app category: JSON in settings under the app_limits key,
+// [{"category":"Other","daily_mins":60}, ...]. Junk or an empty string means no limits.
 pub fn parse_app_limits(json: &str) -> Vec<AppLimit> {
     serde_json::from_str(json).unwrap_or_default()
 }
 
-// Правила категоризации приложений: JSON в settings под ключом
-// app_category_rules: [{"pattern":"kitty","category":"Work"}, ...].
-// Мусор/пустая строка — просто нет правил.
+// App categorization rules: JSON in settings under the app_category_rules key,
+// [{"pattern":"kitty","category":"Work"}, ...]. Junk or an empty string simply
+// means there are no rules.
 pub fn parse_category_rules(json: &str) -> Vec<CategoryRule> {
     serde_json::from_str(json).unwrap_or_default()
 }
 
-// Глоб с '*' (любая подстрока), регистронезависимый. Без '*' — точное совпадение.
+// A glob with '*' (any substring), case-insensitive. Without '*' it is an exact match.
 pub fn glob_match(pattern: &str, text: &str) -> bool {
     let p = pattern.trim().to_lowercase();
     let t = text.to_lowercase();
@@ -281,8 +281,8 @@ pub fn glob_match(pattern: &str, text: &str) -> bool {
     true
 }
 
-// Первое совпавшее правило выигрывает; нет совпадений или неизвестная
-// категория — "Other" (дашборд знает только 5 категорий палитры).
+// The first matching rule wins; no match or an unknown category yields "Other"
+// (the dashboard only knows the 5 palette categories).
 pub fn categorize_app(app: &str, rules: &[CategoryRule]) -> String {
     for rule in rules {
         if glob_match(&rule.pattern, app) && KNOWN_CATEGORIES.contains(&rule.category.as_str()) {
@@ -316,16 +316,16 @@ pub async fn get_app_usage(pool: State<'_, SqlitePool>, days: i64) -> AppResult<
     get_app_usage_impl(pool.inner(), days).await
 }
 
-// Топ-10 приложений по активным минутам за последние N дней.
+// The top 10 apps by active minutes over the last N days.
 pub async fn get_app_usage_impl(pool: &SqlitePool, days: i64) -> AppResult<Vec<AppMinutes>> {
     let mut apps = app_minutes_since(pool, days.max(1)).await?;
     apps.truncate(10);
     Ok(apps)
 }
 
-// Время по сайтам (v0.9.31). Пустой результат — нормальное состояние, а не
-// ошибка: пока track_domains выключен (по умолчанию), колонка domain пуста
-// у всех строк, и UI показывает объяснение вместо пустого графика.
+// Time per site. An empty result is a normal state rather than an error: while
+// track_domains is off (the default) the domain column is empty on every row,
+// and the UI shows an explanation instead of a blank chart.
 #[tauri::command]
 pub async fn get_domain_usage(pool: State<'_, SqlitePool>, days: i64) -> AppResult<Vec<DomainMinutes>> {
     get_domain_usage_impl(pool.inner(), days).await
@@ -352,11 +352,11 @@ pub async fn get_domain_usage_impl(pool: &SqlitePool, days: i64) -> AppResult<Ve
     }).collect())
 }
 
-// Забыть всю собранную статистику по доменам. Нужна рядом с галочкой:
-// выключение трекинга останавливает сбор, но само по себе не удаляет уже
-// накопленное — а пользователь, снимающий приватностную галочку, обычно
-// хочет именно этого. Отдельная явная кнопка, а не побочный эффект
-// выключения: тихое удаление данных пользователя — это тоже сюрприз.
+// Forget all collected domain statistics. This belongs next to the checkbox:
+// turning tracking off stops collection but does not by itself remove what has
+// already accumulated — and a user unticking a privacy checkbox usually wants
+// exactly that. A separate explicit button rather than a side effect of the
+// toggle: silently deleting a user's data is a surprise too.
 #[tauri::command]
 pub async fn clear_domain_history(pool: State<'_, SqlitePool>) -> AppResult<u64> {
     clear_domain_history_impl(pool.inner()).await
@@ -377,7 +377,7 @@ pub async fn get_app_category_time(
     get_app_category_time_impl(pool.inner(), days).await
 }
 
-// Активные минуты по категориям: приложения из лога прогоняются через правила.
+// Active minutes per category: apps from the log are run through the rules.
 pub async fn get_app_category_time_impl(
     pool: &SqlitePool,
     days: i64,
@@ -400,7 +400,7 @@ pub async fn get_app_category_time_impl(
     Ok(out)
 }
 
-// ===== Дашборд-аналитика (v0.6.5) =====
+// ===== Dashboard analytics =====
 
 #[derive(Debug, serde::Serialize, PartialEq)]
 pub struct DayCompletion {
@@ -408,7 +408,7 @@ pub struct DayCompletion {
     pub title: String,
 }
 
-// Выполненные задачи конкретного локального дня (для попапа/тултипа календаря).
+// Tasks completed on a specific local day (for the calendar popup/tooltip).
 #[tauri::command]
 pub async fn get_completions_for_day(pool: State<'_, SqlitePool>, date: String) -> AppResult<Vec<DayCompletion>> {
     get_completions_for_day_impl(pool.inner(), date).await
@@ -428,12 +428,12 @@ pub async fn get_completions_for_day_impl(pool: &SqlitePool, date: String) -> Ap
 
 #[derive(Debug, serde::Serialize, PartialEq)]
 pub struct HourCell {
-    pub weekday: i64, // 0 = воскресенье … 6 = суббота (strftime %w)
-    pub hour: i64,    // 0–23, локальное время
+    pub weekday: i64, // 0 = Sunday ... 6 = Saturday (strftime %w)
+    pub hour: i64,    // 0-23, local time
     pub minutes: i64,
 }
 
-// Heatmap «час × день недели»: активные минуты за последние N дней.
+// An "hour x weekday" heatmap: active minutes over the last N days.
 #[tauri::command]
 pub async fn get_hourly_activity(pool: State<'_, SqlitePool>, days: i64) -> AppResult<Vec<HourCell>> {
     get_hourly_activity_impl(pool.inner(), days).await
@@ -476,7 +476,7 @@ mod tests {
             .execute(pool).await.unwrap();
     }
 
-    // v0.9.31 — время по сайтам
+    // time per site
     async fn log_domain(pool: &SqlitePool, ts: &str, app: &str, domain: Option<&str>, secs: i64) {
         sqlx::query(
             "INSERT INTO activity_log (timestamp, state, app_focused, input_events, duration_secs, app, domain)
@@ -502,8 +502,8 @@ mod tests {
         assert_eq!(r[1].domain, "youtube.com");
     }
 
-    // Пока track_domains выключен, domain у всех строк NULL — статистика
-    // пустая, и это нормальное состояние, а не ошибка.
+    // While track_domains is off the domain is NULL on every row, so the
+    // statistics are empty — a normal state, not an error.
     #[tokio::test]
     async fn domain_usage_empty_when_nothing_tracked() {
         let pool = test_pool().await;
@@ -524,12 +524,12 @@ mod tests {
         assert_eq!(affected, 1);
         assert!(get_domain_usage_impl(&pool, 7).await.unwrap().is_empty());
 
-        // Само время активности не потеряно — стёрты только домены
+        // The activity time itself is not lost, only the domains are erased
         let (active, _) = state_sums(&pool, "1=1").await.unwrap();
         assert_eq!(active, 600);
     }
 
-    // v0.9.30 — простой в тайм-блоках
+    // idle time within time blocks
     async fn block(pool: &SqlitePool, id: &str, title: &str, at: &str, mins: i64) {
         sqlx::query(
             "INSERT INTO tasks (id, title, description, status, priority, category,
@@ -544,10 +544,10 @@ mod tests {
     #[tokio::test]
     async fn block_idle_splits_active_and_idle_within_block() {
         let pool = test_pool().await;
-        // Блок 14:00–15:00 (60 мин)
+        // A 14:00-15:00 block (60 min)
         block(&pool, "t1", "работа", "2026-07-01T14:00:00+00:00", 60).await;
 
-        // 20 минут активности, 10 минут простоя — внутри блока
+        // 20 minutes active, 10 minutes idle — inside the block
         for i in 0..20 {
             log(&pool, &format!("2026-07-01T14:{:02}:00+00:00", i), "Active", 60).await;
         }
@@ -563,19 +563,19 @@ mod tests {
         assert_eq!(r[0].idle_mins, 10);
     }
 
-    // Главное, ради чего вынесен overlap_secs: активность ВНЕ блока не должна
-    // приписываться блоку, иначе «факт» окажется больше плана.
+    // The whole point of extracting overlap_secs: activity OUTSIDE a block must
+    // not be credited to it, or the actual would exceed the plan.
     #[tokio::test]
     async fn block_idle_ignores_activity_outside_block() {
         let pool = test_pool().await;
         block(&pool, "t1", "встреча", "2026-07-01T14:00:00+00:00", 30).await;
 
-        // До блока и после него — не должно попасть в счёт
+        // Before and after the block — must not be counted
         log(&pool, "2026-07-01T13:00:00+00:00", "Active", 60).await;
         log(&pool, "2026-07-01T13:59:00+00:00", "Idle", 60).await;
         log(&pool, "2026-07-01T14:30:00+00:00", "Active", 60).await;
         log(&pool, "2026-07-01T15:00:00+00:00", "Idle", 60).await;
-        // Внутри блока — 5 минут простоя
+        // Inside the block — 5 minutes idle
         for i in 0..5 {
             log(&pool, &format!("2026-07-01T14:{:02}:00+00:00", i), "Idle", 60).await;
         }
@@ -588,9 +588,9 @@ mod tests {
     #[tokio::test]
     async fn block_idle_counts_partial_tick_overlap() {
         let pool = test_pool().await;
-        // Блок 14:00–14:10
+        // A 14:00-14:10 block
         block(&pool, "t1", "короткий", "2026-07-01T14:00:00+00:00", 10).await;
-        // Длинный idle-тик 13:55–14:55: в блок попадают только 10 минут
+        // A long idle tick 13:55-14:55: only 10 minutes fall inside the block
         log(&pool, "2026-07-01T13:55:00+00:00", "Idle", 3600).await;
 
         let r = get_block_idle_impl(&pool, "2026-07-01").await.unwrap();
@@ -603,12 +603,12 @@ mod tests {
         block(&pool, "t1", "вчерашний", "2026-06-30T14:00:00+00:00", 60).await;
         log(&pool, "2026-06-30T14:00:00+00:00", "Idle", 60).await;
 
-        // Запрошен другой день — блок вчерашнего дня не возвращается
+        // A different day was requested: yesterday's block is not returned
         assert!(get_block_idle_impl(&pool, "2026-07-01").await.unwrap().is_empty());
         assert_eq!(get_block_idle_impl(&pool, "2026-06-30").await.unwrap().len(), 1);
     }
 
-    // Задача в Корзине не должна светиться в сводке дня.
+    // A task in the Trash must not show up in the day's digest.
     #[tokio::test]
     async fn block_idle_skips_deleted_tasks() {
         let pool = test_pool().await;
@@ -623,21 +623,21 @@ mod tests {
     #[tokio::test]
     async fn activity_minutes_sum_durations_per_day() {
         let pool = test_pool().await;
-        // День 1: 3 активных тика по 60с + idle (не считается)
+        // Day 1: 3 active ticks of 60s each + idle (not counted)
         log(&pool, "2026-07-01T10:00:00+00:00", "Active", 60).await;
         log(&pool, "2026-07-01T10:01:00+00:00", "Active", 60).await;
         log(&pool, "2026-07-01T10:02:00+00:00", "Active", 60).await;
         log(&pool, "2026-07-01T10:03:00+00:00", "Idle", 60).await;
-        // День 2: тики с другим интервалом (настройка сменилась) — 90с + 30с
+        // Day 2: ticks at a different interval (the setting changed) — 90s + 30s
         log(&pool, "2026-07-02T09:00:00+00:00", "Active", 90).await;
         log(&pool, "2026-07-02T09:02:00+00:00", "Active", 30).await;
 
         let days = get_activity_by_day_impl(&pool).await.unwrap();
         assert_eq!(days.len(), 2);
         assert_eq!(days[0].date, "2026-07-01");
-        assert_eq!(days[0].minutes, 3);   // 180с / 60, Idle не учтён
+        assert_eq!(days[0].minutes, 3);   // 180s / 60, Idle excluded
         assert_eq!(days[1].date, "2026-07-02");
-        assert_eq!(days[1].minutes, 2);   // (90+30)с / 60
+        assert_eq!(days[1].minutes, 2);   // (90+30)s / 60
     }
 
     #[tokio::test]
@@ -690,15 +690,15 @@ mod tests {
         use chrono::{Datelike, Timelike, Duration, Local, Utc};
         let pool = test_pool().await;
 
-        // Стабильный момент внутри часа: -3ч от «сейчас», минута 10
+        // A stable moment inside the hour: 3h before "now", at minute 10
         let t = (Utc::now() - Duration::hours(3))
             .with_minute(10).unwrap()
             .with_second(0).unwrap()
             .with_nanosecond(0).unwrap();
-        log(&pool, &t.to_rfc3339(), "Active", 600).await; // 10 мин
-        log(&pool, &(t + Duration::minutes(5)).to_rfc3339(), "Active", 300).await; // +5 мин, тот же час
-        log(&pool, &t.to_rfc3339(), "Idle", 600).await; // не считается
-        log(&pool, &(Utc::now() - Duration::days(100)).to_rfc3339(), "Active", 600).await; // вне окна
+        log(&pool, &t.to_rfc3339(), "Active", 600).await; // 10 min
+        log(&pool, &(t + Duration::minutes(5)).to_rfc3339(), "Active", 300).await; // +5 min, the same hour
+        log(&pool, &t.to_rfc3339(), "Idle", 600).await; // not counted
+        log(&pool, &(Utc::now() - Duration::days(100)).to_rfc3339(), "Active", 600).await; // outside the window
 
         let cells = get_hourly_activity_impl(&pool, 7).await.unwrap();
         let local = t.with_timezone(&Local);
@@ -723,7 +723,7 @@ mod tests {
         insert_task(&pool, "a", "Work", Some("2026-07-01T12:00:00+00:00")).await;
         insert_task(&pool, "b", "Work", Some("2026-07-02T12:00:00+00:00")).await;
         insert_task(&pool, "c", "Health", Some("2026-07-02T13:00:00+00:00")).await;
-        insert_task(&pool, "d", "Study", None).await; // не выполнена — не считается
+        insert_task(&pool, "d", "Study", None).await; // not completed, so not counted
 
         let cats = get_category_distribution_impl(&pool).await.unwrap();
         assert_eq!(cats.len(), 2);
@@ -739,12 +739,12 @@ mod tests {
         let now = chrono::Utc::now();
         let ts = |days_ago: i64| (now - chrono::Duration::days(days_ago)).to_rfc3339();
 
-        // Сегодня: 120с актив + 60с простой
+        // Today: 120s active + 60s idle
         log(&pool, &ts(0), "Active", 120).await;
         log(&pool, &ts(0), "Idle", 60).await;
-        // 3 дня назад: попадает в неделю, но не в сегодня
+        // 3 days ago: inside the week window but not today's
         log(&pool, &ts(3), "Active", 300).await;
-        // 10 дней назад: вне обоих окон
+        // 10 days ago: outside both windows
         log(&pool, &ts(10), "Active", 999).await;
         log(&pool, &ts(10), "Idle", 999).await;
 
@@ -756,15 +756,15 @@ mod tests {
     #[test]
     fn glob_match_cases() {
         assert!(glob_match("kitty", "kitty"));
-        assert!(glob_match("KiTTy", "kitty")); // регистр не важен
-        assert!(!glob_match("kitty", "kitty-extra")); // без '*' — точное
+        assert!(glob_match("KiTTy", "kitty")); // case does not matter
+        assert!(!glob_match("kitty", "kitty-extra")); // without '*' it is exact
         assert!(glob_match("kitty*", "kitty-extra"));
         assert!(glob_match("*fox", "firefox"));
         assert!(glob_match("*ire*", "firefox"));
         assert!(glob_match("jetbrains-*", "jetbrains-idea"));
         assert!(!glob_match("jetbrains-*", "idea-jetbrains"));
         assert!(glob_match("*", "что угодно"));
-        assert!(!glob_match("a*b", "ba")); // порядок частей обязателен
+        assert!(!glob_match("a*b", "ba")); // the order of the parts matters
     }
 
     #[test]
@@ -775,8 +775,8 @@ mod tests {
                 {"pattern":"zen","category":"Игры"}]"#,
         );
         assert_eq!(categorize_app("jetbrains-idea", &rules), "Work");
-        assert_eq!(categorize_app("kitty", &rules), "Study"); // wildcard-правило
-        // «Игры» — не из палитры: правило пропускается (здесь ловит wildcard)
+        assert_eq!(categorize_app("kitty", &rules), "Study"); // the wildcard rule
+        // "Игры" is not in the palette: the rule is skipped (the wildcard catches it here)
         assert_eq!(categorize_app("zen", &rules), "Study");
 
         assert_eq!(categorize_app("anything", &[]), "Other");
@@ -801,8 +801,8 @@ mod tests {
         log_app(&pool, &ts(0), Some("kitty"), 600).await;
         log_app(&pool, &ts(0), Some("kitty"), 600).await;
         log_app(&pool, &ts(0), Some("zen"), 300).await;
-        log_app(&pool, &ts(0), None, 999).await; // без app — не считается
-        log_app(&pool, &ts(30), Some("kitty"), 6000).await; // вне окна
+        log_app(&pool, &ts(0), None, 999).await; // no app, so not counted
+        log_app(&pool, &ts(30), Some("kitty"), 6000).await; // outside the window
 
         let usage = get_app_usage_impl(&pool, 7).await.unwrap();
         assert_eq!(usage[0], AppMinutes { app: "kitty".into(), minutes: 20 });
@@ -822,7 +822,7 @@ mod tests {
         .unwrap();
         let now = chrono::Utc::now().to_rfc3339();
         log_app(&pool, &now, Some("kitty"), 600).await;
-        log_app(&pool, &now, Some("zen"), 300).await; // нет правила → Other
+        log_app(&pool, &now, Some("zen"), 300).await; // no rule, so Other
 
         let cats = get_app_category_time_impl(&pool, 1).await.unwrap();
         assert_eq!(cats[0], CategoryMinutes { category: "Work".into(), minutes: 10 });

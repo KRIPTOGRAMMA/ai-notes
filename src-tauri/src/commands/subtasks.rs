@@ -4,7 +4,7 @@ use uuid::Uuid;
 use chrono::Utc;
 use crate::core::task::{Subtask, Task};
 
-// Проставляет подзадачи в уже загруженные задачи одним запросом.
+// Fills subtasks into already-loaded tasks with a single query.
 pub async fn attach_subtasks(pool: &SqlitePool, tasks: &mut [Task]) -> Result<(), String> {
     if tasks.is_empty() {
         return Ok(());
@@ -49,7 +49,7 @@ pub async fn add_subtask_impl(pool: &SqlitePool, task_id: &str, title: &str) -> 
         return Err("Пустая подзадача".into());
     }
     let id = Uuid::new_v4().to_string();
-    // position = в конец списка
+    // position = the end of the list
     let next_pos: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(position) + 1, 0) FROM subtasks WHERE task_id = ?")
         .bind(task_id)
         .fetch_one(pool)
@@ -86,8 +86,8 @@ pub async fn toggle_subtask_impl(pool: &SqlitePool, id: &str) -> Result<(), Stri
     Ok(())
 }
 
-// Инлайн-редактирование названий в чеклисте модалки (v0.8.3):
-// пустое название — ошибка, а не тихое удаление (удаление — явная операция).
+// Inline title editing in the modal's checklist: an empty title is an error
+// rather than a silent deletion — deleting is an explicit operation.
 #[tauri::command]
 pub async fn rename_subtask(pool: State<'_, SqlitePool>, id: String, title: String) -> Result<(), String> {
     rename_subtask_impl(pool.inner(), &id, &title).await
@@ -166,7 +166,7 @@ mod tests {
         assert_eq!(list[0].title, "новое"); // trim
 
         assert!(rename_subtask_impl(&pool, &s.id, "   ").await.is_err());
-        // название не затёрлось после отклонённого rename
+        // the title was not clobbered by the rejected rename
         assert_eq!(get_subtasks_impl(&pool, "task-1").await.unwrap()[0].title, "новое");
     }
 

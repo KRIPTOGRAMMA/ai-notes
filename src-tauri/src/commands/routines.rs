@@ -34,7 +34,7 @@ pub struct UpdateRoutine {
 #[derive(Debug, Clone, Serialize)]
 pub struct RoutineBlock {
     pub title: String,
-    pub start_mins: i64,     // минут от полуночи
+    pub start_mins: i64,     // minutes since midnight
     pub duration_mins: i64,
 }
 
@@ -116,7 +116,7 @@ pub async fn delete_routine(pool: State<'_, SqlitePool>, id: String) -> AppResul
     Ok(())
 }
 
-/// Возвращает все активные рутины для указанного дня недели (0=пн, 6=вс).
+/// Returns every active routine for the given weekday (0 = Monday, 6 = Sunday).
 pub async fn routines_for_day(pool: &SqlitePool, weekday: u32) -> Result<Vec<RoutineBlock>, sqlx::Error> {
     let bit: i64 = 1 << weekday;
     let rows = sqlx::query(
@@ -134,7 +134,7 @@ pub async fn routines_for_day(pool: &SqlitePool, weekday: u32) -> Result<Vec<Rou
     }).collect())
 }
 
-/// Возвращает сегодняшние рутины как busy-слоты (start_mins, end_mins, title).
+/// Returns today's routines as busy slots (start_mins, end_mins, title).
 pub async fn today_routine_busy(pool: &SqlitePool) -> Result<Vec<(i64, i64, String)>, sqlx::Error> {
     let weekday = Utc::now().with_timezone(&Local).date_naive().weekday().num_days_from_monday();
     let blocks = routines_for_day(pool, weekday).await?;
@@ -227,7 +227,7 @@ mod tests {
     #[tokio::test]
     async fn days_mask_bits() {
         let pool = test_pool().await;
-        // пн (0) и ср (2)
+        // Monday (0) and Wednesday (2)
         create_routine_impl(&pool, CreateRoutine {
             title: "Зарядка".into(),
             days_mask: mask(&[0, 2]),
@@ -281,7 +281,7 @@ mod tests {
     #[tokio::test]
     async fn routine_busy_overlap_with_planner() {
         let pool = test_pool().await;
-        // Рутина с пн по пт (0-4) с 9:00 до 10:00
+        // A routine from Monday to Friday (0-4), 9:00 to 10:00
         create_routine_impl(&pool, CreateRoutine {
             title: "Планёрка".into(),
             days_mask: mask(&[0, 1, 2, 3, 4]),
@@ -290,12 +290,12 @@ mod tests {
         }).await.unwrap();
 
         let busy = today_routine_busy(&pool).await.unwrap();
-        // weekday может быть любым — проверяем структуру
+        // the weekday may be anything — we check the structure
         for (start, end, title) in &busy {
             assert_eq!(*end - *start, 60);
             assert_eq!(title, "Планёрка");
         }
-        // Если сегодня пн-пт, должен быть 1 блок
+        // If today is Mon-Fri there must be exactly 1 block
         let wd = Utc::now().with_timezone(&Local).date_naive().weekday().num_days_from_monday();
         if wd < 5 {
             assert_eq!(busy.len(), 1);

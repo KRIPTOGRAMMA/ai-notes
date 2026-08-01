@@ -5,18 +5,18 @@ import type { Task, CreateTaskPayload, UpdateTaskPayload } from "../types";
 let tasks: Task[] = $state([]);
 let deletedTasks: Task[] = $state([]);
 let error: string | null = $state(null);
-// Сигнал «открыть эту задачу» — ставится из глобального поиска, Tasks.svelte
-// реагирует через $effect и открывает TaskModal.
+// The "open this task" signal, set from global search; Tasks.svelte reacts through
+// an $effect and opens TaskModal.
 let focusTaskId: string | null = $state(null);
-let createRequested = $state(0); // инкремент — сигнал открыть модалку создания
-let planDayRequested = $state(0); // инкремент — сигнал перейти в Календарь-неделю и запустить план дня
+let createRequested = $state(0); // an increment signals opening the creation modal
+let planDayRequested = $state(0); // an increment signals switching to the Calendar week and running the day plan
 
-// Обёртка вместо try/catch в каждом методе (v0.9.25). Главное здесь —
-// сброс error на успехе: раньше он только выставлялся, и первая же ошибка
-// оставляла баннер висеть навсегда, даже когда всё уже работало.
-// Успех/ошибка различаются по флагу ok, а не по truthiness результата —
-// иначе методы, законно возвращающие null/0/false, считались бы упавшими.
-// fallback возвращается вызывающему при ошибке (null/[] — по сигнатуре).
+// A wrapper instead of a try/catch in every method. The key part is clearing error
+// on success: it used to be only set, so the very first failure left the banner
+// hanging forever, even once everything worked again. Success and failure are told
+// apart by the ok flag rather than by the result's truthiness — otherwise methods
+// that legitimately return null, 0 or false would count as failed. On an error the
+// fallback is returned to the caller (null or [], per the signature).
 async function guard<T>(op: () => Promise<T>, fallback: T): Promise<T> {
   const r = await runGuarded(op);
   if (r.ok) {
@@ -34,10 +34,10 @@ export const taskStore = {
   get deletedTasks() { return deletedTasks; },
   get error() { return error; },
   clearError() { error = null; },
-  // Произвольная операция под тем же баннером ошибок, что и остальной стор
-  // (v0.9.45): чек-лист в панели строки шлёт свой diff несколькими вызовами
-  // api и не укладывается в готовые методы, но ошибку показывать обязан там
-  // же, где её ждёт пользователь.
+  // An arbitrary operation under the same error banner as the rest of the store: the
+  // checklist in a row's panel sends its diff through several api calls and does not
+  // fit the ready-made methods, yet it must surface an error in the same place the
+  // user expects one.
   async guarded(op: () => Promise<void>): Promise<void> {
     await guard(async () => { await op(); }, undefined);
   },
@@ -53,8 +53,8 @@ export const taskStore = {
     tasks = await guard(() => api.getTasks(), tasks);
   },
 
-  // Возвращает созданную задачу — модалке нужен id, чтобы дописать подзадачи
-  // из инлайн-чеклиста (v0.8.3) сразу после создания.
+  // Returns the created task: the modal needs the id to append the subtasks from the
+  // inline checklist right after creation.
   async create(payload: CreateTaskPayload): Promise<Task | null> {
     const task = await guard(() => api.createTask(payload), null);
     if (task) await taskStore.load();
@@ -73,9 +73,9 @@ export const taskStore = {
     }
   },
 
-  // Зависимости (v0.9.56). Обе операции меняют blocked_by у задачи, поэтому
-  // после них перезагружаем список — приглушение и запрет выполнения считает
-  // бэкенд, локально их не воспроизвести.
+  // Dependencies. Both operations change a task's blocked_by, so the list is
+  // reloaded afterwards: the dimming and the completion ban are computed by the
+  // backend and cannot be reproduced locally.
   async addDependency(taskId: string, blockerId: string) {
     if (await guard(async () => { await api.addTaskDependency(taskId, blockerId); return true; }, false)) {
       await taskStore.load();
@@ -91,8 +91,8 @@ export const taskStore = {
   async remove(id: string) {
     if (await guard(async () => { await api.deleteTask(id); return true; }, false)) {
       await taskStore.load();
-      // Обновляем и корзину — если панель сейчас открыта, задача должна
-      // появиться в ней сразу, а не только при следующем ручном переключении.
+      // The Trash is refreshed too: if that panel is open right now the task must
+      // appear in it at once rather than only on the next manual switch.
       await taskStore.loadDeleted();
     }
   },

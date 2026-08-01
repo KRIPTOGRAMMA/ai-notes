@@ -1,11 +1,12 @@
-// Провайдеры активного окна: кто сейчас в фокусе (класс + заголовок).
+// Active-window providers: what currently has focus (class plus title).
 //
-// Принцип v0.5 — capability detection: detect_provider() пробует провайдеры
-// по очереди и возвращает первый рабочий; ни одного — трекинг приложений
-// просто выключен (activity_log.app = NULL), без ошибок и настроек.
+// The guiding principle is capability detection: detect_provider() tries the
+// providers in turn and returns the first that works; if none do, app tracking
+// is simply off (activity_log.app = NULL), with no errors and no settings.
 //
-// Реализовано: Hyprland (IPC-сокет). Кандидаты на будущее: X11 (_NET_ACTIVE_WINDOW),
-// Windows (GetForegroundWindow) — добавляются как новые ветки в detect_provider().
+// Implemented: Hyprland (IPC socket). Future candidates: X11
+// (_NET_ACTIVE_WINDOW) and Windows (GetForegroundWindow), added as new branches
+// in detect_provider().
 
 #[cfg(unix)]
 use std::io::{Read, Write};
@@ -16,8 +17,8 @@ use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct WindowInfo {
-    pub app: String,   // класс окна (например "kitty", "zen")
-    pub title: String, // заголовок — в БД не пишем, но полезен для будущих правил
+    pub app: String,   // the window class (for example "kitty", "zen")
+    pub title: String, // the title: never written to the DB, but useful for future rules
 }
 
 pub trait WindowProvider: Send + Sync {
@@ -25,14 +26,14 @@ pub trait WindowProvider: Send + Sync {
     fn current_window(&self) -> Option<WindowInfo>;
 }
 
-// Путь IPC-сокета Hyprland. Чистая функция — тестируется без окружения.
+// The path to Hyprland's IPC socket. A pure function, testable without the environment.
 #[cfg(unix)]
 fn hypr_socket_path(runtime_dir: &str, signature: &str) -> PathBuf {
     PathBuf::from(runtime_dir).join("hypr").join(signature).join(".socket.sock")
 }
 
-// Ответ `j/activewindow` — JSON с полями class/title (и десятком других).
-// Пустой объект/не-JSON/отсутствующий class — нет активного окна.
+// The `j/activewindow` reply is JSON with class/title fields (among a dozen
+// others). An empty object, non-JSON, or a missing class means no active window.
 #[cfg(unix)]
 fn parse_active_window(raw: &str) -> Option<WindowInfo> {
     let v: serde_json::Value = serde_json::from_str(raw).ok()?;
@@ -65,8 +66,9 @@ impl WindowProvider for HyprlandProvider {
         "Hyprland"
     }
 
-    // Один запрос — одно соединение: так работает протокол hyprctl.
-    // Сокет локальный, вызов на тике раз в log_interval_secs — цена нулевая.
+    // One request per connection: that is how the hyprctl protocol works. The
+    // socket is local and the call happens once per log_interval_secs tick, so
+    // the cost is nil.
     fn current_window(&self) -> Option<WindowInfo> {
         let mut stream = UnixStream::connect(&self.socket).ok()?;
         stream.write_all(b"j/activewindow").ok()?;
@@ -107,9 +109,9 @@ mod tests {
 
     #[test]
     fn no_active_window_variants() {
-        assert_eq!(parse_active_window("{}"), None); // пустой рабочий стол
-        assert_eq!(parse_active_window("Invalid"), None); // не-JSON ответ
-        assert_eq!(parse_active_window(r#"{"class":""}"#), None); // пустой класс
-        assert_eq!(parse_active_window(r#"{"class":"x"}"#).unwrap().title, ""); // без title
+        assert_eq!(parse_active_window("{}"), None); // an empty desktop
+        assert_eq!(parse_active_window("Invalid"), None); // a non-JSON reply
+        assert_eq!(parse_active_window(r#"{"class":""}"#), None); // an empty class
+        assert_eq!(parse_active_window(r#"{"class":"x"}"#).unwrap().title, ""); // no title
     }
 }

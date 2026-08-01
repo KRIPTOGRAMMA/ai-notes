@@ -36,20 +36,20 @@ pub struct UpdateNote {
     pub title: Option<String>,
     pub content: Option<String>,
     pub tags: Option<Vec<String>>,
-    // Some(Some(id)) — привязать, Some(None) — отвязать, None — не трогать.
+    // Some(Some(id)) links, Some(None) unlinks, None leaves it alone.
     #[serde(default, deserialize_with = "deserialize_optional_field")]
     pub linked_task_id: Option<Option<String>>,
-    // Аналогично: Some(Some(id)) — в проект, Some(None) — из проекта, None — не трогать.
+    // Likewise: Some(Some(id)) into a project, Some(None) out of it, None leaves it alone.
     #[serde(default, deserialize_with = "deserialize_optional_field")]
     pub project_id: Option<Option<String>>,
     pub pinned: Option<bool>,
-    // Some(Some(iso)) — установить напоминание, Some(None) — снять, None — не трогать.
+    // Some(Some(iso)) sets a reminder, Some(None) clears it, None leaves it alone.
     #[serde(default, deserialize_with = "deserialize_optional_field")]
     pub reminder_at: Option<Option<String>>,
 }
 
-// Различаем «поле отсутствует» и «поле = null» в JSON: нужно, чтобы отвязку
-// (linked_task_id: null) отличать от «не трогать» (поле не прислано).
+// We distinguish "field absent" from "field = null" in JSON so that unlinking
+// (linked_task_id: null) can be told apart from "leave alone" (no field sent).
 fn deserialize_optional_field<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -158,7 +158,7 @@ pub async fn update_note_impl(pool: &SqlitePool, id: String, patch: UpdateNote) 
             .execute(pool).await?;
     }
     if let Some(ref linked) = patch.linked_task_id {
-        // linked: Some(id) — привязать, None — отвязать (linked сам Option<String>)
+        // linked: Some(id) links, None unlinks (linked is itself an Option<String>)
         sqlx::query("UPDATE notes SET linked_task_id = ?, updated_at = ? WHERE id = ?")
             .bind(linked).bind(&now).bind(&id)
             .execute(pool).await?;
@@ -174,18 +174,18 @@ pub async fn update_note_impl(pool: &SqlitePool, id: String, patch: UpdateNote) 
             .execute(pool).await?;
     }
     if let Some(ref reminder) = patch.reminder_at {
-        // Напоминание реально изменилось (в т.ч. снято) — сбросить notified_reminder,
-        // тот же паттерн, что notified_block/notified_24h у задач (tasks.rs),
-        // иначе новое/перенесённое напоминание никогда не придёт.
+        // The reminder actually changed (including being cleared), so reset
+        // notified_reminder — the same pattern as notified_block/notified_24h on
+        // tasks (tasks.rs). Otherwise a new or moved reminder never fires.
         sqlx::query("UPDATE notes SET reminder_at = ?, notified_reminder = 0, updated_at = ? WHERE id = ?")
             .bind(reminder).bind(&now).bind(&id)
             .execute(pool).await?;
     }
 
-    // fetch_optional, не fetch_one: заметка могла быть удалена параллельно
-    // (автосейв debounced на 800мс — пользователь успевает нажать «Удалить»
-    // раньше, чем сработает предыдущий таймер сохранения). Это не ошибка
-    // сохранения — заметки уже нет, апдейт стал no-op, откатывать нечего.
+    // fetch_optional rather than fetch_one: the note may have been deleted in
+    // parallel (autosave is debounced by 800ms, so the user can press "Delete"
+    // before the pending save timer fires). This is not a save failure — the
+    // note is gone, the update became a no-op, and there is nothing to roll back.
     let row = sqlx::query(&format!("SELECT {NOTE_COLUMNS} FROM notes WHERE id = ?"))
         .bind(&id)
         .fetch_optional(pool)
@@ -198,11 +198,12 @@ pub async fn update_note_impl(pool: &SqlitePool, id: String, patch: UpdateNote) 
 const REVISION_INTERVAL_MINS: i64 = 10;
 const REVISION_KEEP: i64 = 20;
 
-// Снимок ДО записи нового content: только если последняя ревизия этой заметки
-// старше REVISION_INTERVAL_MINS (или ревизий ещё нет вовсе — первая правка тоже
-// снимается, чтобы можно было откатиться к исходному тексту). Не снимает
-// снимок, если content ещё не менялся в БД (частые автосейвы одного и того же
-// текста не плодят ревизии) — сравниваем с текущим content заметки.
+// A snapshot taken BEFORE the new content is written, but only if this note's
+// latest revision is older than REVISION_INTERVAL_MINS (or there are no
+// revisions at all — the first edit is captured too, so the original text can be
+// restored). No snapshot is taken when the content has not changed in the DB, so
+// frequent autosaves of identical text do not breed revisions; we compare
+// against the note's current content.
 async fn snapshot_revision_if_due(pool: &SqlitePool, note_id: &str, now: &str) -> AppResult<()> {
     let current: Option<String> = sqlx::query_scalar("SELECT content FROM notes WHERE id = ?")
         .bind(note_id)
@@ -243,7 +244,7 @@ async fn snapshot_revision_if_due(pool: &SqlitePool, note_id: &str, now: &str) -
     rotate_revisions(pool, note_id).await
 }
 
-// Держим ≤ REVISION_KEEP ревизий на заметку — старейшие лишние удаляем.
+// Keep at most REVISION_KEEP revisions per note, deleting the oldest extras.
 async fn rotate_revisions(pool: &SqlitePool, note_id: &str) -> AppResult<()> {
     sqlx::query(
         "DELETE FROM note_revisions WHERE note_id = ? AND id NOT IN (
@@ -298,9 +299,9 @@ pub async fn get_note_revision_content_impl(pool: &SqlitePool, revision_id: &str
         .ok_or_else(|| crate::error::AppError::Other("Ревизия не найдена".into()))
 }
 
-// Откат к ревизии: текущее содержимое заметки тоже сохраняется ревизией
-// (иначе несохранённая на момент отката правка теряется без следа), затем
-// content заметки заменяется содержимым выбранной ревизии.
+// Rolling back to a revision: the note's current content is saved as a revision
+// too (otherwise an edit unsaved at the moment of rollback vanishes without a
+// trace), and then the note's content is replaced with the chosen revision.
 #[tauri::command]
 pub async fn restore_note_revision(pool: State<'_, SqlitePool>, revision_id: String) -> AppResult<Note> {
     restore_note_revision_impl(pool.inner(), &revision_id).await
@@ -316,8 +317,8 @@ pub async fn restore_note_revision_impl(pool: &SqlitePool, revision_id: &str) ->
     let revision_content: String = row.get("content");
 
     let now = Utc::now().to_rfc3339();
-    // Текущее содержимое — тоже в ревизию, без учёта 10-минутного интервала
-    // (откат — явное действие пользователя, а не автосейв).
+    // The current content goes into a revision as well, ignoring the 10-minute
+    // interval: a rollback is a deliberate user action, not an autosave.
     let current: Option<String> = sqlx::query_scalar("SELECT content FROM notes WHERE id = ?")
         .bind(&note_id)
         .fetch_optional(pool)
@@ -348,10 +349,11 @@ pub async fn restore_note_revision_impl(pool: &SqlitePool, revision_id: &str) ->
     Ok(row_to_note(row))
 }
 
-// Вики-ссылка на переименованную заметку: [[old]] или [[old|алиас]] → [[new]] /
-// [[new|алиас]] — только цель меняется, алиас (если был) остаётся как есть.
-// Регистронезависимо; заголовок в [[...]] может содержать любые символы кроме
-// '[', ']', '|' (см. WIKILINK_RE в src/lib/markdown.ts — зеркалим тот же формат).
+// A wiki link to a renamed note: [[old]] or [[old|alias]] becomes [[new]] or
+// [[new|alias]] — only the target changes, any alias stays as it was.
+// Case-insensitive; the title inside [[...]] may contain any characters except
+// '[', ']' and '|' (see WIKILINK_RE in src/lib/markdown.ts — we mirror that
+// format).
 fn rewrite_links(content: &str, old_title: &str, new_title: &str) -> (String, bool) {
     let old_lower = old_title.to_lowercase();
     let mut out = String::with_capacity(content.len());
@@ -362,7 +364,7 @@ fn rewrite_links(content: &str, old_title: &str, new_title: &str) -> (String, bo
         out.push_str(&rest[..start]);
         let after = &rest[start + 2..];
         let Some(end) = after.find("]]") else {
-            // Незакрытая ссылка до конца строки — остаток копируем как есть
+            // An unclosed link runs to the end of the line: copy the rest as is
             out.push_str(&rest[start..]);
             rest = "";
             break;
@@ -402,14 +404,14 @@ pub async fn rename_note_links(
     rename_note_links_impl(pool.inner(), old_title, new_title).await
 }
 
-// Переписывает [[old_title]]/[[old_title|alias]] во всех заметках на new_title.
-// Возвращает число обновлённых заметок. Пустой/неизменившийся old_title — no-op
-// (переименование "Без названия" → "Без названия" не должно ничего переписывать).
+// Rewrites [[old_title]] and [[old_title|alias]] across all notes to new_title.
+// Returns how many notes were updated. An empty or unchanged old_title is a
+// no-op (renaming "Untitled" to "Untitled" must not rewrite anything).
 pub async fn rename_note_links_impl(pool: &SqlitePool, old_title: String, new_title: String) -> AppResult<i64> {
     let old_title = old_title.trim();
     let new_title = new_title.trim();
-    // eq_ignore_ascii_case не покрывает кириллицу и другой не-ASCII — сравниваем
-    // через to_lowercase (Юникодная свёртка регистра).
+    // eq_ignore_ascii_case does not cover Cyrillic or other non-ASCII text, so we
+    // compare via to_lowercase (Unicode case folding).
     if old_title.is_empty() || old_title.to_lowercase() == new_title.to_lowercase() {
         return Ok(0);
     }
@@ -448,8 +450,8 @@ pub async fn search_notes_impl(pool: &SqlitePool, query: String) -> AppResult<Ve
         return Ok(vec![]);
     }
 
-    // Как в search_tasks: сырой ввод — не синтаксис FTS5, оборачиваем в
-    // quoted-phrase-prefix, кавычки удваиваем.
+    // As in search_tasks: raw input is not FTS5 syntax, so we wrap it as a quoted
+    // phrase prefix and double any quotes.
     let escaped = trimmed.replace('"', "\"\"");
     let fts_query = format!("\"{}\"*", escaped);
 
@@ -522,8 +524,8 @@ pub async fn delete_note_impl(pool: &SqlitePool, id: String) -> AppResult<()> {
     Ok(())
 }
 
-// Символы, недопустимые/проблемные в именах файлов на распространённых ФС
-// (Windows тоже, т.к. экспорт может быть скопирован туда) — заменяем на "_".
+// Characters that are invalid or troublesome in filenames on common filesystems
+// (Windows included, since an export may be copied there) are replaced with "_".
 fn sanitize_filename(title: &str) -> String {
     let cleaned: String = title
         .trim()
@@ -538,9 +540,10 @@ pub async fn export_notes_md(pool: State<'_, SqlitePool>, dir: String) -> AppRes
     export_notes_md_impl(pool.inner(), std::path::Path::new(&dir)).await
 }
 
-// Каждая заметка → <санитизированное имя>.md, контент как есть (вики-ссылки
-// уже совместимы с Obsidian). Коллизии имён (после санитайза, включая регистр
-// разных заметок с одинаковым названием) — суффикс "-2", "-3"... по порядку.
+// Each note becomes <sanitized name>.md with its content as is (wiki links are
+// already Obsidian-compatible). Name collisions after sanitizing — including
+// case differences between notes with the same title — get a "-2", "-3", ...
+// suffix in order.
 pub async fn export_notes_md_impl(pool: &SqlitePool, dir: &std::path::Path) -> AppResult<usize> {
     let notes = get_notes_impl(pool).await?;
     std::fs::create_dir_all(dir)?;
@@ -559,10 +562,10 @@ pub async fn export_notes_md_impl(pool: &SqlitePool, dir: &std::path::Path) -> A
     Ok(count)
 }
 
-// Экспорт одной заметки в самодостаточный HTML-файл (v0.9.08). Рендер
-// markdown → HTML и встраивание картинок как data: URI делает фронт
-// (renderMarkdown + DOMPurify уже там), команда лишь пишет готовую строку
-// на диск — как export_notes_md, но без обращения к БД.
+// Exports a single note into a self-contained HTML file. Rendering markdown to
+// HTML and embedding images as data: URIs is the frontend's job (renderMarkdown
+// and DOMPurify already live there); this command only writes the finished
+// string to disk — like export_notes_md, but without touching the DB.
 #[tauri::command]
 pub fn export_note_html(path: String, html: String) -> AppResult<()> {
     std::fs::write(&path, html)?;
@@ -574,10 +577,10 @@ pub async fn import_notes_md(pool: State<'_, SqlitePool>, dir: String) -> AppRes
     import_notes_md_impl(pool.inner(), std::path::Path::new(&dir)).await
 }
 
-// Все *.md в папке (не рекурсивно) → новые заметки: title = имя файла без
-// расширения, content = содержимое как есть. Совпадение с уже существующим
-// названием НЕ мёржится — создаётся отдельная новая заметка (пользователь сам
-// разберётся через дубликаты; тише через тихий merge было бы неожиданнее).
+// Every *.md in a folder (non-recursively) becomes a new note: title = the
+// filename without its extension, content = the file as is. A clash with an
+// existing title is NOT merged — a separate new note is created. The user can
+// sort duplicates out themselves; a silent merge would be more surprising.
 pub async fn import_notes_md_impl(pool: &SqlitePool, dir: &std::path::Path) -> AppResult<usize> {
     if !dir.is_dir() {
         return Ok(0);
@@ -641,7 +644,7 @@ mod tests {
             reminder_at: None,
         }).await.unwrap();
         assert_eq!(updated.content, "новый текст");
-        assert_eq!(updated.title, "заметка"); // не тронут
+        assert_eq!(updated.title, "заметка"); // untouched
 
         delete_note_impl(&pool, note.id).await.unwrap();
         assert!(get_notes_impl(&pool).await.unwrap().is_empty());
@@ -666,7 +669,7 @@ mod tests {
         }).await.unwrap();
         assert!(pinned.pinned);
 
-        // Переживает перечитывание из БД (не только in-memory возврат update).
+        // Survives a re-read from the DB, not just update's in-memory return.
         let all = get_notes_impl(&pool).await.unwrap();
         assert!(all.iter().find(|n| n.id == note.id).unwrap().pinned);
 
@@ -677,9 +680,9 @@ mod tests {
         assert!(!unpinned.pinned);
     }
 
-    // v0.9.18: напоминание можно поставить/перенести/снять; изменение
-    // reminder_at сбрасывает notified_reminder — тот же принцип, что
-    // notified_block/notified_24h у задач при переносе дедлайна/блока.
+    // A reminder can be set, moved or cleared; changing reminder_at resets
+    // notified_reminder — the same principle as notified_block/notified_24h on
+    // tasks when a deadline or block moves.
     #[tokio::test]
     async fn reminder_set_move_and_clear_resets_notified_flag() {
         let pool = test_pool().await;
@@ -695,7 +698,7 @@ mod tests {
         }).await.unwrap();
         assert_eq!(with_reminder.reminder_at.as_deref(), Some("2026-08-01T10:00:00+00:00"));
 
-        // Симулируем «уже уведомили», затем переносим дату — флаг должен сброситься
+        // Simulate "already notified", then move the date — the flag must reset
         sqlx::query("UPDATE notes SET notified_reminder = 1 WHERE id = ?")
             .bind(&note.id).execute(&pool).await.unwrap();
         update_note_impl(&pool, note.id.clone(), UpdateNote {
@@ -713,11 +716,11 @@ mod tests {
         assert_eq!(cleared.reminder_at, None);
     }
 
-    // Гонка автосейва с удалением: debounced-сохранение может долететь до
-    // бэкенда уже после того, как пользователь удалил заметку. UPDATE на
-    // отсутствующую строку — безвредный no-op, но раньше finalизирующий
-    // SELECT падал с RowNotFound и всплывал как видимая ошибка, хотя удаление
-    // уже реально прошло — чинили именно это.
+    // Autosave racing deletion: a debounced save can reach the backend after the
+    // user has already deleted the note. An UPDATE against a missing row is a
+    // harmless no-op, but the finalizing SELECT used to fail with RowNotFound and
+    // surface as a visible error even though the deletion had genuinely gone
+    // through — that is what was fixed here.
     #[tokio::test]
     async fn update_after_delete_is_soft_error_not_panic() {
         let pool = test_pool().await;
@@ -730,7 +733,7 @@ mod tests {
 
         let r = update_note_impl(&pool, note.id.clone(), content_patch("v2")).await;
         assert!(r.is_err());
-        // Заметка остаётся удалённой — UPDATE-гонка не воскрешает и не дублирует её.
+        // The note stays deleted: the UPDATE race neither revives nor duplicates it.
         assert!(get_notes_impl(&pool).await.unwrap().is_empty());
     }
 
@@ -746,17 +749,17 @@ mod tests {
             project_id: None,
         }).await.unwrap();
 
-        // По заголовку, по содержимому, по тегу; префиксно.
+        // By title, by content, by tag; prefix matching.
         assert_eq!(search_notes_impl(&pool, "борщ".into()).await.unwrap().len(), 1);
         assert_eq!(search_notes_impl(&pool, "капуст".into()).await.unwrap().len(), 1);
         assert_eq!(search_notes_impl(&pool, "еда".into()).await.unwrap().len(), 1);
         assert!(search_notes_impl(&pool, "плов".into()).await.unwrap().is_empty());
 
-        // Спецсимволы FTS5 в запросе не роняют MATCH.
+        // FTS5 special characters in the query do not break MATCH.
         assert!(search_notes_impl(&pool, "борщ-2 \"AND (x:y)".into()).await.unwrap().is_empty());
         assert!(search_notes_impl(&pool, "   ".into()).await.unwrap().is_empty());
 
-        // После UPDATE индекс видит новый текст и не видит старый.
+        // After an UPDATE the index sees the new text and not the old.
         update_note_impl(&pool, note.id.clone(), UpdateNote {
             title: None,
             content: Some("теперь про плов".into()),
@@ -769,7 +772,7 @@ mod tests {
         assert_eq!(search_notes_impl(&pool, "плов".into()).await.unwrap().len(), 1);
         assert!(search_notes_impl(&pool, "капуст".into()).await.unwrap().is_empty());
 
-        // После DELETE ничего не находится.
+        // After a DELETE nothing is found.
         delete_note_impl(&pool, note.id).await.unwrap();
         assert!(search_notes_impl(&pool, "плов".into()).await.unwrap().is_empty());
         assert!(search_notes_impl(&pool, "борщ".into()).await.unwrap().is_empty());
@@ -797,37 +800,37 @@ mod tests {
 
     #[test]
     fn rewrite_links_covers_alias_case_and_self_link() {
-        // Простая ссылка
+        // A plain link
         let (out, changed) = rewrite_links("см. [[Идея]] тут", "Идея", "Новая идея");
         assert_eq!(out, "см. [[Новая идея]] тут");
         assert!(changed);
 
-        // Алиас сохраняется, меняется только цель
+        // The alias is kept, only the target changes
         let (out, changed) = rewrite_links("[[Идея|вот тут]]", "Идея", "Новая идея");
         assert_eq!(out, "[[Новая идея|вот тут]]");
         assert!(changed);
 
-        // Регистронезависимо
+        // Case-insensitive
         let (out, changed) = rewrite_links("[[идея]]", "Идея", "Новая идея");
         assert_eq!(out, "[[Новая идея]]");
         assert!(changed);
 
-        // Несколько ссылок, только совпадающие переписываются
+        // Several links, only the matching ones are rewritten
         let (out, changed) = rewrite_links("[[Идея]] и [[Другая]] и снова [[Идея|та же]]", "Идея", "X");
         assert_eq!(out, "[[X]] и [[Другая]] и снова [[X|та же]]");
         assert!(changed);
 
-        // Без совпадений — не менялось
+        // No matches, nothing changed
         let (out, changed) = rewrite_links("[[Другая]] заметка", "Идея", "X");
         assert_eq!(out, "[[Другая]] заметка");
         assert!(!changed);
 
-        // Самоссылка [[Идея]] → [[X]] переписывается как обычная ссылка
+        // A self-link [[Идея]] -> [[X]] is rewritten like any other link
         let (out, changed) = rewrite_links("это [[Идея]] сама на себя", "Идея", "X");
         assert_eq!(out, "это [[X]] сама на себя");
         assert!(changed);
 
-        // Незакрытая ссылка не роняет парсинг
+        // An unclosed link does not break parsing
         let (out, changed) = rewrite_links("текст [[Идея без закрытия", "Идея", "X");
         assert_eq!(out, "текст [[Идея без закрытия");
         assert!(!changed);
@@ -855,16 +858,16 @@ mod tests {
         }).await.unwrap();
 
         let count = rename_note_links_impl(&pool, "Идея".into(), "Идея v2".into()).await.unwrap();
-        assert_eq!(count, 2); // referrer1 и referrer2; target и unrelated не считаются
+        assert_eq!(count, 2); // referrer1 and referrer2; target and unrelated are not counted
 
         let all = get_notes_impl(&pool).await.unwrap();
         let by_id = |id: &str| all.iter().find(|n| n.id == id).unwrap().content.clone();
         assert_eq!(by_id(&referrer1.id), "см. [[Идея v2]]");
         assert_eq!(by_id(&referrer2.id), "[[Идея v2|та самая]] и [[Другая]]");
         assert_eq!(by_id(&unrelated.id), "просто текст");
-        assert_eq!(by_id(&target.id), "исходная"); // содержимое цели не переписывается
+        assert_eq!(by_id(&target.id), "исходная"); // the target's content is not rewritten
 
-        // Пустой old_title и неизменившийся регистр — no-op
+        // An empty old_title, or one differing only in case, is a no-op
         assert_eq!(rename_note_links_impl(&pool, "".into(), "X".into()).await.unwrap(), 0);
         assert_eq!(rename_note_links_impl(&pool, "Идея v2".into(), "идея v2".into()).await.unwrap(), 0);
     }
@@ -895,12 +898,12 @@ mod tests {
         assert_eq!(note.tags, vec!["work", "idea"]);
         assert_eq!(note.linked_task_id.as_deref(), Some("task-1"));
 
-        // Перечитали из БД — сериализация/парсинг тегов и привязки сохранились
+        // Re-read from the DB: tag serialization/parsing and the link survived
         let all = get_notes_impl(&pool).await.unwrap();
         assert_eq!(all[0].tags, vec!["work", "idea"]);
         assert_eq!(all[0].linked_task_id.as_deref(), Some("task-1"));
 
-        // Обновление тегов и отвязка (Some(None))
+        // Updating tags and unlinking (Some(None))
         let updated = update_note_impl(&pool, note.id.clone(), UpdateNote {
             title: None,
             content: None,
@@ -958,7 +961,7 @@ mod tests {
         update_note_impl(&pool, note.id.clone(), content_patch("v2")).await.unwrap();
         assert_eq!(revision_count(&pool, &note.id).await, 1);
 
-        // Правка сразу после — интервал (10 мин) ещё не прошёл
+        // An edit right after: the interval (10 min) has not elapsed yet
         update_note_impl(&pool, note.id.clone(), content_patch("v3")).await.unwrap();
         assert_eq!(revision_count(&pool, &note.id).await, 1);
     }
@@ -974,7 +977,7 @@ mod tests {
         update_note_impl(&pool, note.id.clone(), content_patch("v2")).await.unwrap();
         assert_eq!(revision_count(&pool, &note.id).await, 1);
 
-        // Отодвигаем последнюю ревизию на 11 минут назад — интервал прошёл
+        // Push the latest revision 11 minutes back so the interval has elapsed
         let stale = (Utc::now() - chrono::Duration::minutes(11)).to_rfc3339();
         set_last_revision_at(&pool, &note.id, &stale).await;
 
@@ -990,7 +993,7 @@ mod tests {
             tags: vec![], linked_task_id: None, project_id: None,
         }).await.unwrap();
 
-        // 25 правок, каждая "старит" предыдущую ревизию за интервал, чтобы снимок случился
+        // 25 edits, each ageing the previous revision past the interval so a snapshot happens
         for i in 1..=25 {
             update_note_impl(&pool, note.id.clone(), content_patch(&format!("v{i}"))).await.unwrap();
             let stale = (Utc::now() - chrono::Duration::minutes(11)).to_rfc3339();
@@ -1016,7 +1019,7 @@ mod tests {
         let restored = restore_note_revision_impl(&pool, &original_rev_id).await.unwrap();
         assert_eq!(restored.content, "оригинал");
 
-        // Текущее ("изменённый") тоже попало в ревизии — можно вернуться вперёд
+        // The current text landed in revisions too, so moving forward again is possible
         let revs_after = get_note_revisions_impl(&pool, &note.id).await.unwrap();
         assert_eq!(revs_after.len(), 2);
     }
@@ -1122,7 +1125,7 @@ mod tests {
     #[tokio::test]
     async fn import_of_missing_or_empty_dir_is_zero() {
         let pool = test_pool().await;
-        let dir = temp_dir(); // не создаём — не существует
+        let dir = temp_dir(); // not created, so it does not exist
         assert_eq!(import_notes_md_impl(&pool, &dir).await.unwrap(), 0);
 
         std::fs::create_dir_all(&dir).unwrap();

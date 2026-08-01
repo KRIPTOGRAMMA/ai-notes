@@ -7,7 +7,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS tasks_fts USING fts5(
     content_rowid='rowid'
 );
 
--- Триггеры для синхронизации с tasks
+-- Triggers that keep the index in sync with tasks
 CREATE TRIGGER IF NOT EXISTS tasks_ai AFTER INSERT ON tasks BEGIN
     INSERT INTO tasks_fts(id, title, description, tags)
     VALUES (new.id, new.title, new.description, new.tags);

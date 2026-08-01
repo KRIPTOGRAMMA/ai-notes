@@ -1,14 +1,14 @@
 <script lang="ts">
-  // Живой markdown-редактор (Obsidian-style live preview) на CodeMirror 6.
-  // Один режим: заголовки/жирный/курсив/код/списки/чекбоксы/[[ссылки]] рендерятся
-  // инлайн прямо в тексте; синтаксис-маркеры (##, **, [[ ]]) видны только на
-  // строке, где сейчас курсор — иначе редактирование было бы вслепую.
+  // A live markdown editor (Obsidian-style live preview) built on CodeMirror 6.
+  // One mode only: headings, bold, italics, code, lists, checkboxes and [[links]]
+  // render inline right in the text, while the syntax markers (##, **, [[ ]]) are
+  // visible only on the line holding the cursor — otherwise editing would be blind.
   //
-  // Примечание: @codemirror/lang-markdown сам продолжает маркер списка ("- ")
-  // при Enter внутри пункта списка — стандартное поведение таких редакторов.
-  // Программная вставка многострочного текста с "\n" через keyboard.type()
-  // (а не paste/insertText) в e2e триггерит ту же логику и дублирует маркер —
-  // учтено в e2e-хелпере fillNoteEditor (использует insertText).
+  // Note: @codemirror/lang-markdown continues a list marker ("- ") by itself when
+  // Enter is pressed inside a list item — standard behaviour for such editors.
+  // Programmatically inserting multi-line text containing "\n" via keyboard.type()
+  // (rather than paste/insertText) triggers the same logic in e2e and duplicates the
+  // marker — accounted for in the fillNoteEditor e2e helper, which uses insertText.
   import { onMount, onDestroy } from "svelte";
   import { EditorState, EditorSelection, StateField, type Extension } from "@codemirror/state";
   import {
@@ -28,7 +28,7 @@
   import { api } from "../api/tauri";
   import { IMAGE_RE, imageMarkdown, extImageExt, parseTableAt, serializeTable, emptyTable, type ParsedTable, type TableAlign } from "../markdown";
 
-  // `t` здесь занято локальной переменной, перевод импортируется как `tr`.
+  // `t` is taken here by a local variable, so the translation helper is imported as `tr`.
   import { t as tr } from "../i18n.svelte";
   let {
     value = $bindable(""),
@@ -51,10 +51,10 @@
   let hostEl: HTMLDivElement | undefined = $state();
   let view: EditorView | undefined;
 
-  // knownTitles/resolveExists меняются реактивно (список заметок), но не
-  // должны пересоздавать редактор — читаем их через мутable-обёртку, которую
-  // decoration-плагин видит при каждом рефреше. Заполняется в $effect ниже
-  // (а не тут), чтобы не захватывать только начальное значение пропа.
+  // knownTitles and resolveExists change reactively (the list of notes) but must not
+  // recreate the editor, so they are read through a mutable wrapper that the
+  // decoration plugin sees on every refresh. It is filled in the $effect below rather
+  // than here, so only the prop's initial value is not captured.
   const linkCtx: {
     knownTitles: string[];
     resolveExists: (title: string) => boolean;
@@ -65,8 +65,8 @@
     linkCtx.resolveExists = resolveExists;
     linkCtx.onWikiLinkClick = onWikiLinkClick;
     forceRebuild = true;
-    // Пустая транзакция — единственный способ дёрнуть ViewPlugin.update()
-    // без реального изменения документа/выделения.
+    // An empty transaction is the only way to trigger ViewPlugin.update() without
+    // actually changing the document or the selection.
     view?.dispatch({});
   });
 
@@ -84,7 +84,7 @@
       box.type = "checkbox";
       box.checked = this.checked;
       box.className = "cm-task-checkbox";
-      box.onmousedown = (e) => e.preventDefault(); // не отдавать фокус чекбоксу
+      box.onmousedown = (e) => e.preventDefault(); // do not hand focus to the checkbox
       box.onclick = () => {
         if (!view) return;
         const line = view.state.doc.lineAt(this.pos);
@@ -124,10 +124,10 @@
     ignoreEvent() { return false; }
   }
 
-  // Обычная markdown-ссылка [текст](url) (v0.9.27). В отличие от вики-ссылки
-  // ведёт наружу, поэтому открывается системным браузером через plugin-opener,
-  // а не внутренней навигацией. Схему проверяем: в markdown может оказаться
-  // javascript:/data:/file:, и отдавать такое в openUrl нельзя.
+  // An ordinary markdown link [text](url). Unlike a wiki link it points outward, so
+  // it opens in the system browser through plugin-opener rather than by internal
+  // navigation. The scheme is checked: markdown may contain javascript:, data: or
+  // file:, and handing those to openUrl is not acceptable.
   class MdLinkWidget extends WidgetType {
     href: string;
     label: string;
@@ -155,17 +155,17 @@
     ignoreEvent() { return false; }
   }
 
-  // Абсолютный путь к папке images резолвится один раз при монтировании
-  // (get_images_dir) — convertFileSrc() требует абсолютный путь, а markdown
-  // хранит только имя файла (см. paste-обработчик ниже).
+  // The absolute path to the images folder is resolved once on mount
+  // (get_images_dir): convertFileSrc() requires an absolute path while the markdown
+  // stores only a filename (see the paste handler below).
   let imagesDir: string | null = null;
   api.getImagesDir().then(d => { imagesDir = d; forceRebuild = true; view?.dispatch({}); }).catch(() => {});
 
-  // Картинки, у которых сейчас кликом раскрыта markdown-ссылка рядом с
-  // рендером (по умолчанию видна только картинка). Ключ — "from:to" диапазона
-  // ![](...) в документе; переживает только пока сам диапазон не меняется
-  // (правка текста выше по документу сдвинет позиции — раскрытые вернутся
-  // к дефолту, что нормально для редких кликов).
+  // Images whose markdown link has been revealed beside the rendered picture by a
+  // click (by default only the picture is visible). The key is the "from:to" range of
+  // the ![](...) in the document; it survives only while that range is unchanged
+  // (editing text further up shifts the positions and the revealed ones return to the
+  // default, which is fine for such rare clicks).
   const revealedImages = new Set<string>();
 
   class ImageWidget extends WidgetType {
@@ -178,9 +178,9 @@
       this.dir = imagesDir;
       this.key = `${from}:${to}`;
     }
-    // imagesDir резолвится асинхронно после монтирования (см. ниже) — включаем
-    // снимок dir в eq(), иначе CodeMirror переиспользует DOM-узел, созданный ДО
-    // того, как путь стал известен, и src так и останется пустым до следующей правки.
+    // imagesDir resolves asynchronously after mounting (see below), so a snapshot of
+    // dir is included in eq(): otherwise CodeMirror reuses the DOM node created BEFORE
+    // the path was known and src stays empty until the next edit.
     eq(other: ImageWidget) { return other.filename === this.filename && other.dir === this.dir && other.key === this.key; }
     toDOM() {
       const img = document.createElement("img");
@@ -203,20 +203,20 @@
     ignoreEvent() { return false; }
   }
 
-  // Таблица (v0.9.06): единственный виджет, представляющий многострочный
-  // блок как одну DOM-структуру — click-to-edit оверлей поверх реального
-  // <table>, а не просто подсветка синтаксиса (не влезает в mark-decoration
-  // паттерн заголовков/жирного: нужна настоящая 2D-раскладка ячеек).
-  // Правки в ячейках накапливаются в this.table (мутируется на месте) и
-  // сериализуются обратно в markdown одним view.dispatch на blur/Tab/Enter —
-  // не на каждый keystroke, иначе каждая буква пересобирала бы весь виджет
-  // и сбрасывала фокус/каретку в contenteditable-ячейке.
-  // Ячейка, которую нужно сфокусировать после ближайшей пересборки виджета
-  // (Tab/Enter в ячейке коммитят правку → CM6 синхронно пересобирает DOM
-  // таблицы → старые ссылки на DOM-узлы протухают вместе с замкнутыми
-  // cellsGrid()/headRow/tbody). toDOM() читает и сбрасывает этот флаг сразу
-  // после построения новой DOM-структуры — межвиджетный, а не per-instance,
-  // потому что "следующий" виджет — это буквально другой JS-объект.
+  // The table is the only widget that represents a multi-line block as a single DOM
+  // structure: a click-to-edit overlay on top of a real <table> rather than mere
+  // syntax highlighting (it does not fit the mark-decoration pattern used for
+  // headings and bold — it needs a genuine 2D cell layout). Edits to cells accumulate
+  // in this.table (mutated in place) and are serialized back into markdown by a single
+  // view.dispatch on blur/Tab/Enter, not on every keystroke: otherwise each letter
+  // would rebuild the whole widget and reset focus and the caret in a contenteditable
+  // cell.
+  // The cell to focus after the next rebuild of the widget: Tab/Enter in a cell
+  // commits the edit, CM6 synchronously rebuilds the table's DOM, and the old node
+  // references go stale along with the closed-over cellsGrid()/headRow/tbody. toDOM()
+  // reads and clears this flag right after building the new DOM structure. It is
+  // cross-widget rather than per-instance because the "next" widget is literally a
+  // different JS object.
   let pendingTableFocus: { rowIndex: number; colIndex: number } | null = null;
 
   class TableWidget extends WidgetType {
@@ -225,39 +225,37 @@
       super();
       this.table = table;
     }
-    // eq() сравнивает только содержимое таблицы, не диапазон — CodeMirror
-    // переиспользует старый DOM-узел виджета (и, что важно, сам JS-инстанс)
-    // при любой правке документа, если новый TableWidget оказался "равен"
-    // старому. Диапазон [from, to) поэтому НЕ хранится в полях инстанса
-    // (там он бы протух после первой же правки, ведущей к пересозданию
-    // виджета с новыми позициями, пока переиспользуется старый JS-объект) —
-    // вместо этого commit() всегда находит текущую позицию блока заново
-    // через view.posAtDOM(wrap), на момент самого коммита.
+    // eq() compares only the table's content, not its range: CodeMirror reuses the
+    // widget's old DOM node (and, crucially, the JS instance itself) on any document
+    // edit where the new TableWidget turns out to be "equal" to the old one. The
+    // [from, to) range is therefore NOT stored in instance fields — there it would go
+    // stale after the very first edit that recreates the widget at new positions while
+    // the old JS object is reused. Instead commit() always locates the block's current
+    // position afresh via view.posAtDOM(wrap), at the moment of the commit itself.
     eq(other: TableWidget) {
       return JSON.stringify(other.table) === JSON.stringify(this.table);
     }
     commit(wrap: HTMLElement, next: ParsedTable) {
       if (!view || !wrap.isConnected) return;
-      // Правки в разных ячейках (клик по кнопке "+ строка"/переход по Tab)
-      // могут инициировать почти одновременный blur старой ячейки и клик
-      // новой команды — оба пытаются закоммитить одну и ту же (уже
-      // устаревшую к моменту второго вызова) DOM-структуру виджета.
-      // wrap.isConnected выше отсеивает большинство случаев, но CM6 может
-      // отсоединить узел синхронно, уже во время выполнения posAtDOM/dispatch
-      // ниже (реентрантно, изнутри своего же цикла DOM-обновления) — поэтому
-      // ловим исключение вместо попытки предугадать любую гонку заранее:
-      // устаревший коммит — по определению no-op, а не то, что стоит чинить
-      // жёстче ценой более хрупкой логики синхронизации.
+      // Edits in different cells (clicking the "+ row" button, moving with Tab) can
+      // trigger a blur of the old cell and a click of the new command almost
+      // simultaneously, and both try to commit the same widget DOM structure — already
+      // stale by the time of the second call. wrap.isConnected above filters out most
+      // cases, but CM6 may detach the node synchronously while posAtDOM/dispatch below
+      // is running (reentrantly, from inside its own DOM update cycle). So we catch the
+      // exception instead of trying to predict every race in advance: a stale commit is
+      // a no-op by definition, not something worth fixing more forcefully at the cost of
+      // more fragile synchronization logic.
       try {
         const from = view.posAtDOM(wrap);
         const line = view.state.doc.lineAt(from);
         const parsed = parseTableAt(view.state.doc.toString(), line.number);
-        if (!parsed) return; // документ уже не начинается с таблицы в этой позиции — не коммитим вслепую
+        if (!parsed) return; // the document no longer starts with a table here — do not commit blindly
         const to = view.state.doc.line(parsed.endLine).to;
         const md = serializeTable(next);
         view.dispatch({ changes: { from: line.from, to, insert: md } });
       } catch {
-        // Гонка на пересборке DOM виджета — коммитить уже нечего, безопасно игнорировать.
+        // A race during the widget's DOM rebuild: there is nothing left to commit, safe to ignore.
       }
     }
     toDOM() {
@@ -321,16 +319,15 @@
       toolbar.appendChild(addColBtn);
       wrap.appendChild(toolbar);
 
-      // rowIndex 0 = заголовок, 1..N = тело (table.rows[rowIndex-1])
+      // rowIndex 0 is the header, 1..N the body (table.rows[rowIndex-1])
       const self = this;
-      // Tab/Enter коммитят явно и сразу после сами переводят фокус — из-за
-      // чего у старой ячейки тоже срабатывает blur (фокус ушёл с неё) и
-      // повторно зовёт commitFromDom() на уже отсоединённом wrap этого же
-      // (старого) DOM-дерева. wrap.isConnected в TableWidget.commit() уже
-      // отсеивает часть случаев, но повторный вызов может попасть ровно в
-      // момент, когда CM6 ещё синхронно перестраивает DOM после первого
-      // коммита (реентрантный dispatch) — проще и надёжнее не пытаться
-      // коммитить дважды с одного и того же построения виджета вообще.
+      // Tab/Enter commit explicitly and then move focus themselves, which also fires a
+      // blur on the old cell (focus has left it) and calls commitFromDom() again on the
+      // already-detached wrap of that same old DOM tree. wrap.isConnected in
+      // TableWidget.commit() filters out some of these, but a repeat call can land
+      // exactly while CM6 is still synchronously rebuilding the DOM after the first
+      // commit (a reentrant dispatch). It is simpler and more reliable never to commit
+      // twice from one and the same build of the widget.
       let committedOnce = false;
       function cellsGrid(): HTMLElement[][] {
         const headCells = Array.from(headRow.children) as HTMLElement[];
@@ -354,7 +351,7 @@
         if (!row) return;
         const cell = row[Math.max(0, Math.min(row.length - 1, colIndex))];
         cell?.focus();
-        // Каретку — в конец текста ячейки, иначе фокус ставится перед текстом.
+        // Put the caret at the end of the cell's text, otherwise focus lands before it.
         if (cell) {
           const range = document.createRange();
           range.selectNodeContents(cell);
@@ -367,17 +364,16 @@
       function wireCell(el: HTMLElement, rowIndex: number, colIndex: number) {
         el.onblur = () => commitFromDom();
         el.onkeydown = (e) => {
-          // Останавливаем всплытие к CM6-кеймапу (Mod-b и т.п. не должны
-          // применяться внутри ячейки таблицы, это её содержимое, а не
-          // документ редактора).
+          // Stop the event from reaching the CM6 keymap: Mod-b and friends must not
+          // apply inside a table cell, which is its content rather than the editor's
+          // document.
           e.stopPropagation();
-          // Ctrl/Cmd+A: contenteditable="false" на обёртке виджета НЕ создаёт
-          // отдельный edit-host для Selection API в Chromium — нативный
-          // select-all внутри вложенного contenteditable="true" всё равно
-          // выделяет весь contentDOM CM6 целиком (проверено вручную: после
-          // Ctrl+A в ячейке window.getSelection() отдавал текст всего
-          // документа). Поэтому выделение "всё в этой ячейке" делаем сами
-          // через Range/Selection API, а не полагаемся на браузер.
+          // Ctrl/Cmd+A: contenteditable="false" on the widget's wrapper does NOT create
+          // a separate edit host for the Selection API in Chromium — a native select-all
+          // inside a nested contenteditable="true" still selects the whole CM6 contentDOM
+          // (verified by hand: after Ctrl+A in a cell window.getSelection() returned the
+          // entire document's text). So "select everything in this cell" is implemented
+          // ourselves through the Range/Selection API rather than left to the browser.
           if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
             e.preventDefault();
             const range = document.createRange();
@@ -401,10 +397,10 @@
                 ? { rowIndex, colIndex: colIndex + 1 }
                 : { rowIndex: rowIndex + 1, colIndex: 0 };
             }
-            // commitFromDom() пересобирает DOM таблицы синхронно внутри
-            // view.dispatch — сохраняем цель фокуса заранее, а не зовём
-            // focusCell() сразу после: к этому моменту headRow/tbody уже
-            // могут указывать на удалённые узлы старого виджета.
+            // commitFromDom() rebuilds the table's DOM synchronously inside
+            // view.dispatch, so we record the focus target beforehand rather than
+            // calling focusCell() right after: by then headRow/tbody may already point
+            // at removed nodes of the old widget.
             pendingTableFocus = target;
             commitFromDom();
           } else if (e.key === "Enter") {
@@ -417,8 +413,8 @@
         };
       }
 
-      // Если предыдущая ячейка (в старом, уже удалённом виджете) запросила
-      // фокус после коммита — выполняем это здесь, в свежепостроенном DOM.
+      // If the previous cell (in the old, already removed widget) requested focus after
+      // the commit, we honour that here, in the freshly built DOM.
       if (pendingTableFocus) {
         const target = pendingTableFocus;
         pendingTableFocus = null;
@@ -427,18 +423,18 @@
 
       return wrap;
     }
-    // ignoreEvent(event) === true означает "CodeMirror, не трогай это событие
-    // вообще" (см. eventBelongsToEditor в @codemirror/view — при true CM6 не
-    // запускает на нём ни один свой обработчик/кеймап) — нужно для кликов по
-    // ячейкам/кнопкам +строка/+столбец, иначе CM6 перехватывает mousedown и
-    // не даёт реально кликнуть внутрь виджета.
+    // ignoreEvent(event) === true means "CodeMirror, do not touch this event at all"
+    // (see eventBelongsToEditor in @codemirror/view — when true CM6 runs none of its
+    // handlers or keymaps on it). This is needed for clicks on cells and the
+    // +row/+column buttons, otherwise CM6 intercepts mousedown and makes it impossible
+    // to actually click inside the widget.
     ignoreEvent(event: Event) {
       return event.type === "mousedown" || event.type === "click" || event.type === "keydown" || event.type === "blur";
     }
   }
 
-  // Собирает Lezer-диапазоны кода (FencedCode, InlineCode), чтобы
-  // не применять инлайн-стили и вики-ссылки внутри них.
+  // Collects the Lezer ranges of code (FencedCode, InlineCode) so inline styles and
+  // wiki links are not applied inside them.
   function codeRanges(state: EditorState): Set<number> {
     const set = new Set<number>();
     let depth = 0;
@@ -461,15 +457,14 @@
     return set.has(pos);
   }
 
-  // Таблицы — блочные decoration'ы (block: true), а CodeMirror запрещает
-  // блочные decoration'ы из ViewPlugin-источника (динамического facet) —
-  // "Block decorations may not be specified via plugins". Поэтому таблицы
-  // строятся отдельным StateField (статический источник), не вместе с
-  // остальным live-preview в livePreviewPlugin. Раз это блочный виджет,
-  // не однострочная mark-decoration, скрывать его "только пока в фокусе"
-  // не нужно — так же, как ImageWidget не проверяет hasFocus. Курсор
-  // внутри диапазона строк таблицы (по selection, не завязано на hasFocus)
-  // показывает сырой markdown для редактирования textual-diff/копирования.
+  // Tables are block decorations (block: true), and CodeMirror forbids block
+  // decorations from a ViewPlugin source (a dynamic facet): "Block decorations may not
+  // be specified via plugins". So tables are built by a separate StateField (a static
+  // source) rather than alongside the rest of the live preview in livePreviewPlugin.
+  // Being a block widget rather than a single-line mark decoration, it does not need
+  // hiding "only while focused" — just as ImageWidget does not check hasFocus. A cursor
+  // inside the table's line range (by selection, not tied to hasFocus) shows the raw
+  // markdown for textual diffing and copying.
   function buildTableDecorations(state: EditorState): DecorationSet {
     const cursorLine = state.doc.lineAt(state.selection.main.head).number;
     const codePositions = codeRanges(state);
@@ -491,7 +486,7 @@
           deco: Decoration.replace({ widget: new TableWidget(parsed.table), block: true }),
         });
       }
-      i = lastLineNum; // следующая итерация цикла (i++) продолжит сразу за таблицей
+      i = lastLineNum; // the loop's next iteration (i++) continues right after the table
     }
 
     return Decoration.set(items.map(it => it.deco.range(it.from, it.to)), true);
@@ -505,11 +500,11 @@
     provide: f => EditorView.decorations.from(f),
   });
 
-  // Строит decoration-набор для всего документа: строка с курсором показывает
-  // сырой markdown (но только пока редактор реально в фокусе — иначе после
-  // программной подмены value/пересинхронизации курсор на строке 1 навсегда
-  // прятал бы виджеты в однострочных заметках), остальные — отрендеренный вид.
-  // Таблицы сюда не входят — см. tableField выше.
+  // Builds the decoration set for the whole document: the line with the cursor shows
+  // raw markdown (but only while the editor is actually focused — otherwise, after a
+  // programmatic value swap or a resync, a cursor on line 1 would hide the widgets
+  // forever in single-line notes), and the rest show the rendered view. Tables are not
+  // included here — see tableField above.
   function buildDecorations(state: EditorState, hasFocus: boolean): DecorationSet {
     const cursorLine = hasFocus ? state.doc.lineAt(state.selection.main.head).number : -1;
     const codePositions = codeRanges(state);
@@ -520,7 +515,7 @@
       const raw = i === cursorLine;
       const text = line.text;
 
-      // Заголовки: строку целиком метим классом размера, маркер '#' скрываем
+      // Headings: the whole line is tagged with a size class and the '#' marker hidden
       const hLevel = text.startsWith("#") ? /^#{1,6}/.exec(text)?.[0].length ?? 0 : 0;
       if (hLevel > 0) {
         items.push({
@@ -535,7 +530,7 @@
         }
       }
 
-      // Чекбоксы: "- [ ] " / "- [x] " → виджет
+      // Checkboxes: "- [ ] " / "- [x] " become a widget
       const cbMatch = /^(\s*[-*+]\s+)\[( |x|X)\]/.exec(text);
       if (cbMatch) {
         const markStart = line.from + cbMatch[1].length;
@@ -547,12 +542,12 @@
         });
       }
 
-      // Картинки ![alt](filename) — НЕ внутри кода. По умолчанию видна только
-      // отрендеренная картинка (markdown-ссылка скрыта); клик по картинке
-      // раскрывает ссылку рядом с ней (revealedImages), повторный клик —
-      // прячет обратно. Картинка — Decoration.widget (side: 1) сразу после
-      // текста, а не replace: сама ссылка отдельно скрывается/показывается
-      // через Decoration.replace по тому же диапазону.
+      // Images ![alt](filename), NOT inside code. By default only the rendered picture
+      // is visible and the markdown link is hidden; clicking the picture reveals the
+      // link beside it (revealedImages) and clicking again hides it. The picture is a
+      // Decoration.widget (side: 1) placed right after the text rather than a replace:
+      // the link itself is separately hidden or shown by a Decoration.replace over the
+      // same range.
       for (const m of text.matchAll(IMAGE_RE)) {
         const from = line.from + m.index!;
         const to = from + m[0].length;
@@ -572,7 +567,7 @@
       if (!raw) {
         const lineStart = line.from;
 
-        // Жирный **text** — только не внутри кода
+        // Bold **text**, but not inside code
         if (!inCode(lineStart, codePositions)) {
           for (const m of text.matchAll(/\*\*([^*\n]+)\*\*/g)) {
             const from = lineStart + m.index!;
@@ -581,7 +576,7 @@
             items.push({ from: from + 2, to: to - 2, deco: Decoration.mark({ class: "cm-strong" }) });
             items.push({ from: to - 2, to, deco: Decoration.replace({}) });
           }
-          // Курсив *text*/_text_ — только не внутри кода
+          // Italics *text*/_text_, but not inside code
           for (const m of text.matchAll(/(?<!\*)\*([^*\n]+)\*(?!\*)|(?<!_)_([^_\n]+)_(?!_)/g)) {
             const from = lineStart + m.index!;
             const to = from + m[0].length;
@@ -589,7 +584,7 @@
             items.push({ from: from + 1, to: to - 1, deco: Decoration.mark({ class: "cm-em" }) });
             items.push({ from: to - 1, to, deco: Decoration.replace({}) });
           }
-          // Инлайн-код `code`
+          // Inline code `code`
           for (const m of text.matchAll(/`([^`\n]+)`/g)) {
             const from = lineStart + m.index!;
             const to = from + m[0].length;
@@ -597,9 +592,9 @@
             items.push({ from: from + 1, to: to - 1, deco: Decoration.mark({ class: "cm-code" }) });
             items.push({ from: to - 1, to, deco: Decoration.replace({}) });
           }
-          // Обычные ссылки [текст](url) — НЕ внутри кода. Картинки
-          // ![alt](file) исключены отрицательным lookbehind: у них свой
-          // ImageWidget выше, иначе один диапазон получил бы две замены.
+          // Ordinary links [text](url), NOT inside code. Images ![alt](file) are
+          // excluded by a negative lookbehind: they have their own ImageWidget above,
+          // or one range would receive two replacements.
           for (const m of text.matchAll(/(?<!!)\[([^\[\]\n]+)\]\(([^()\s]+)\)/g)) {
             const from = lineStart + m.index!;
             const to = from + m[0].length;
@@ -612,7 +607,7 @@
               deco: Decoration.replace({ widget: new MdLinkWidget(href, label) }),
             });
           }
-          // Вики-ссылки [[target]] / [[target|label]] — НЕ внутри кода
+          // Wiki links [[target]] / [[target|label]], NOT inside code
           for (const m of text.matchAll(/\[\[([^\[\]|]+)(?:\|([^\[\]]+))?\]\]/g)) {
             const from = lineStart + m.index!;
             const to = from + m[0].length;
@@ -629,15 +624,15 @@
       }
     }
 
-    // Блочные конструкции по Lezer-дереву, а не построчным regex (v0.9.27):
-    // цитаты и нумерованные списки многострочны и вкладываются друг в друга,
-    // и разбирать это регулярками построчно — заведомо неверно. Дерево уже
-    // разобрало вложенность, остаётся навесить классы на строки.
+    // Block constructs come from the Lezer tree rather than line-by-line regexes:
+    // quotes and ordered lists span multiple lines and nest inside one another, and
+    // parsing that with per-line regexes is wrong by construction. The tree has already
+    // resolved the nesting; all that remains is tagging the lines with classes.
     syntaxTree(state).iterate({
       from: 0,
       to: state.doc.length,
       enter: (node) => {
-        // FencedCode → CodeText: моноширинный фон
+        // FencedCode -> CodeText: a monospace background
         if (node.name === "FencedCode") {
           let child = node.node.firstChild;
           while (child) {
@@ -652,9 +647,9 @@
           return false;
         }
 
-        // Цитата: класс на каждую строку блока (вертикальная линия + отступ
-        // рисуются CSS). Маркер '>' прячем — но только на строках без курсора,
-        // иначе его нельзя было бы стереть.
+        // A quote: a class on every line of the block (the vertical rule and the indent
+        // are drawn by CSS). The '>' marker is hidden, but only on lines without the
+        // cursor, or it could never be deleted.
         if (node.name === "Blockquote") {
           const first = state.doc.lineAt(node.from).number;
           const last = state.doc.lineAt(node.to).number;
@@ -665,7 +660,7 @@
               deco: Decoration.line({ class: "cm-quote" }),
             });
             if (n === cursorLine) continue;
-            // '> ' в начале строки (с возможным отступом у вложенных цитат)
+            // '> ' at the start of a line (possibly indented for nested quotes)
             const mark = /^\s*>\s?/.exec(line.text);
             if (mark && mark[0].length > 0) {
               items.push({
@@ -674,14 +669,14 @@
               });
             }
           }
-          // return undefined — вложенные Blockquote/OrderedList внутри цитаты
-          // должны обработаться тоже.
+          // return undefined: nested Blockquote/OrderedList inside a quote must be
+          // processed as well.
           return undefined;
         }
 
-        // Нумерованный список: класс на строку для отступа. Сам номер НЕ
-        // прячем — в отличие от '>' и '#', цифра несёт смысл (пользователь
-        // видит и правит нумерацию), её подменять виджетом нельзя.
+        // An ordered list: a class on the line for the indent. The number itself is
+        // NOT hidden — unlike '>' and '#', a digit carries meaning (the user sees and
+        // edits the numbering), so it must not be replaced by a widget.
         if (node.name === "OrderedList") {
           let child = node.node.firstChild;
           while (child) {
@@ -707,8 +702,8 @@
     );
   }
 
-  // ViewPlugin, а не StateField: raw/rendered решение зависит от view.hasFocus,
-  // которое StateField в принципе не видит (у него нет доступа к EditorView).
+  // A ViewPlugin rather than a StateField: the raw-versus-rendered decision depends on
+  // view.hasFocus, which a StateField cannot see at all (it has no access to EditorView).
   const livePreviewPlugin = ViewPlugin.fromClass(
     class {
       decorations: DecorationSet;
@@ -724,9 +719,9 @@
     },
     { decorations: v => v.decorations },
   );
-  // Флаг «внешние knownTitles/resolveExists изменились» — ViewPlugin.update
-  // не запускается сам по себе на реактивные пропы, только на события CM;
-  // дёргаем через view.dispatch (пустой transaction всё равно вызывает update).
+  // A flag meaning "the external knownTitles/resolveExists have changed":
+  // ViewPlugin.update does not run by itself on reactive props, only on CM events, so
+  // we trigger it via view.dispatch (an empty transaction still calls update).
   let forceRebuild = false;
 
   function wikiLinkCompletion(context: CompletionContext): CompletionResult | null {
@@ -770,30 +765,30 @@
       color: "var(--text-secondary)",
       borderBottomStyle: "dashed",
     },
-    // Внешняя ссылка (v0.9.27): визуально отличается от вики-ссылки —
-    // вики ведёт внутрь приложения, эта наружу, в браузер.
+    // An external link, visually distinct from a wiki link:
+    // a wiki link leads inside the app, this one outward into the browser.
     ".cm-mdlink": {
       textDecoration: "underline",
       textDecorationStyle: "solid",
       color: "var(--accent)",
       cursor: "pointer",
     },
-    // Заблокированная схема (javascript:/data:/file:) — видно, что ссылка
-    // мёртвая, а не «клик не сработал».
+    // A blocked scheme (javascript:/data:/file:): it is visible that the link
+    // is dead rather than that "the click did not work".
     ".cm-mdlink.unsafe": {
       color: "var(--danger)",
       textDecorationStyle: "wavy",
       cursor: "not-allowed",
     },
-    // Цитата: вертикальная линия слева + приглушённый текст (v0.9.27)
+    // A quote: a vertical rule on the left plus muted text
     ".cm-quote": {
       borderLeft: "3px solid color-mix(in srgb, var(--accent) 35%, transparent)",
       paddingLeft: "10px",
       color: "var(--text-secondary)",
       fontStyle: "italic",
     },
-    // Нумерованный список: только отступ. Номер остаётся видимым —
-    // он часть текста, а не разметка.
+    // An ordered list: the indent only. The number stays visible —
+    // it is part of the text rather than markup.
     ".cm-ol-item": { paddingLeft: "8px" },
     ".cm-task-checkbox": { marginRight: "4px", cursor: "pointer", verticalAlign: "middle" },
     ".cm-placeholder": { color: "var(--text-secondary)" },
@@ -852,9 +847,9 @@
     },
   });
 
-  // Вставка картинки из буфера: перехватываем paste, если среди файлов буфера
-  // есть image/* — сохраняем через save_note_image и вставляем ![](имя) на
-  // месте курсора вместо стандартной вставки текста/пустоты.
+  // Pasting an image from the clipboard: we intercept the paste when the clipboard's
+  // files include an image/*, save it through save_note_image and insert ![](name) at
+  // the cursor instead of the default paste of text or nothing.
   function fileToBase64(file: File): Promise<string> {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -866,11 +861,11 @@
 
   async function handleImagePaste(ev: ClipboardEvent, v: EditorView): Promise<boolean> {
     const items = ev.clipboardData?.items;
-    // items.length === 0 — DOM ничего не увидел (WebKitGTK на Linux не прокидывает
-    // изображения через ClipboardEvent вообще, даже когда в буфере реально image/png:
-    // types и items приходят пустыми). Отличаем от «в буфере правда только текст» —
-    // там items не пуст, просто type начинается не с "image/". Только для пустого
-    // items имеет смысл идти в обходной путь через нативный буфер.
+    // items.length === 0 means the DOM saw nothing: WebKitGTK on Linux does not pass
+    // images through ClipboardEvent at all, even when the clipboard really holds an
+    // image/png (types and items both arrive empty). Distinguished from "the clipboard
+    // genuinely holds only text", where items is non-empty and merely has a type not
+    // starting with "image/". Only an empty items warrants the native fallback.
     if (!items || items.length === 0) {
       return pasteImageFromClipboard(ev, v);
     }
@@ -891,20 +886,20 @@
         selection: { anchor: pos + markdown.length },
       });
     } catch {
-      // Сохранение не удалось (диск/права/мусор в буфере) — тихо ничего не вставляем.
+      // The save failed (disk, permissions, junk in the clipboard) — insert nothing.
     }
     return true;
   }
 
-  // WebKitGTK на Linux (в т.ч. под Wayland/Hyprland) не прокидывает изображения
-  // через ClipboardEvent.clipboardData — DOM paste-событие приходит пустым
-  // (types: [], items: []), даже когда в буфере реально лежит image/png (проверено
-  // вручную через `wl-paste --list-types`, показывает image/png; DOM-событие при
-  // этом всё равно даёт items: []). Это ограничение самого WebKitGTK, а не кода
-  // приложения. Обходим через нативный доступ к буферу — tauri-plugin-clipboard-manager
-  // читает буфер через GTK API в обход DOM, но отдаёт сырой RGBA (Image.rgba() +
-  // size()), не PNG — кодируем в PNG сами через canvas (toBlob), т.к. готового
-  // PNG-энкодера в JS без доп. библиотек нет.
+  // WebKitGTK on Linux (including under Wayland/Hyprland) does not pass images through
+  // ClipboardEvent.clipboardData: the DOM paste event arrives empty (types: [],
+  // items: []) even when the clipboard really holds an image/png. Verified by hand with
+  // `wl-paste --list-types`, which reports image/png while the DOM event still gives
+  // items: []. This is a limitation of WebKitGTK itself rather than of this code. We
+  // work around it through native clipboard access: tauri-plugin-clipboard-manager
+  // reads the clipboard through the GTK API, bypassing the DOM, but returns raw RGBA
+  // (Image.rgba() plus size()) rather than PNG — so we encode the PNG ourselves via a
+  // canvas (toBlob), there being no ready PNG encoder in JS without extra libraries.
   async function rgbaToPngDataUrl(rgba: Uint8Array, width: number, height: number): Promise<string> {
     const canvas = document.createElement("canvas");
     canvas.width = width;
@@ -923,9 +918,9 @@
     });
   }
 
-  // Возвращает true, только если реально вставили картинку (paste-обработчик
-  // сверху решает, звать ли ev.preventDefault() — до этого момента буфер мог
-  // содержать текст, который должен пройти обычной вставкой без перехвата).
+  // Returns true only if an image was actually inserted: the paste handler above uses
+  // that to decide whether to call ev.preventDefault(), since up to this point the
+  // clipboard may have held text that should paste normally, without interception.
   async function pasteImageFromClipboard(ev: ClipboardEvent, v: EditorView): Promise<boolean> {
     try {
       const { readImage } = await import("@tauri-apps/plugin-clipboard-manager");
@@ -942,9 +937,9 @@
       });
       return true;
     } catch {
-      // В буфере не изображение (текст/пусто) или плагин недоступен — тихо
-      // пропускаем, обычный Ctrl+V для текста проходит как есть (preventDefault
-      // ещё не вызывался на этом пути, если readImage() упал раньше).
+      // The clipboard holds no image (text or nothing) or the plugin is unavailable —
+      // we quietly skip, and an ordinary Ctrl+V for text passes through as is
+      // (preventDefault has not been called on this path if readImage() failed earlier).
       return false;
     }
   }
@@ -977,9 +972,9 @@
       EditorView.domEventHandlers({
         paste: (event, v) => {
           void handleImagePaste(event, v);
-          // Возврат из domEventHandlers не отменяет вставку сам по себе —
-          // отмена делается через event.preventDefault() внутри handleImagePaste
-          // (только когда среди буфера реально нашлась картинка).
+          // Returning from domEventHandlers does not cancel the paste by itself —
+          // that is done by event.preventDefault() inside handleImagePaste,
+          // and only when an image was actually found in the clipboard.
           return false;
         },
       }),
@@ -1001,8 +996,8 @@
 
   onDestroy(() => view?.destroy());
 
-  // Внешние изменения value (смена заметки, вставка из composer/AI) —
-  // синхронизируем документ, только если он реально разошёлся с state.
+  // External changes to value (switching notes, inserting from the composer or AI):
+  // the document is synced only when it has genuinely diverged from the state.
   $effect(() => {
     const v = value;
     if (view && view.state.doc.toString() !== v) {
@@ -1016,10 +1011,10 @@
     view?.focus();
   }
 
-  // ИИ по выделению (v0.9.09): сообщаем родителю о непустом выделении, чтобы
-  // тот мог показать плавающее меню действий рядом с ним. Координаты — уже
-  // страничные (coordsAtPos отдаёт viewport-relative rect самого view, а не
-  // хоста), родителю не нужно ничего пересчитывать.
+  // AI on a selection: we tell the parent about a non-empty selection so it can
+  // show a floating action menu beside it. The coordinates are already page-level
+  // (coordsAtPos returns a viewport-relative rect of the view itself, not of the
+  // host), so the parent need not recompute anything.
   function reportSelection(v: EditorView) {
     if (!onSelectionChange) return;
     const range = v.state.selection.main;
@@ -1036,13 +1031,12 @@
     onSelectionChange({ text, from: range.from, to: range.to, left: coords.left, top: coords.top });
   }
 
-  // Замена диапазона результатом ИИ-действия над выделением. from/to — это
-  // позиции на момент открытия меню; вызывающая сторона должна дождаться
-  // ответа модели прежде, чем звать этот метод, но документ мог измениться
-  // за это время — если диапазон уже не совпадает с текущим выделением
-  // (пользователь кликнул/напечатал), правка всё равно применяется по тем же
-  // числовым позициям (безопасно, т.к. это уже финальное подтверждённое
-  // действие пользователя, а не фоновая операция).
+  // Replaces a range with the result of an AI action on the selection. from/to are
+  // the positions as of when the menu opened; the caller must await the model's
+  // reply before calling this method, but the document may have changed meanwhile.
+  // If the range no longer matches the current selection (the user clicked or
+  // typed), the edit is still applied at the same numeric positions — safe, since
+  // this is a final confirmed user action rather than a background operation.
   export function replaceRange(from: number, to: number, text: string) {
     if (!view) return;
     view.dispatch({
@@ -1053,14 +1047,14 @@
     view.focus();
   }
 
-  // Форматирование из внешней панели инструментов (v0.9.05): оборачивает
-  // выделение маркерами (жирный/курсив/код) или переключает префикс строки
-  // (заголовок/чек-лист). Работает и без выделения — вставляет пустую пару
-  // маркеров с курсором внутри (жирный/курсив/код) либо просто добавляет
-  // префикс на текущей строке (заголовок/чек-лист/вики-ссылка).
-  // Повторное нажатие на уже обёрнутом тексте снимает обёртку — иначе Ctrl+B
-  // на **жирном** тексте продолжал бы плодить лишние ** снаружи (стандартное
-  // поведение toggle-форматирования в любом текстовом редакторе).
+  // Formatting from the external toolbar: wraps the selection in markers (bold,
+  // italics, code) or toggles a line prefix (heading, checklist). It works without
+  // a selection too, inserting an empty pair of markers with the cursor inside
+  // (bold, italics, code) or simply adding the prefix on the current line
+  // (heading, checklist, wiki link).
+  // Pressing again on already-wrapped text unwraps it: otherwise Ctrl+B on **bold**
+  // text would keep piling extra ** on the outside (the standard toggle-formatting
+  // behaviour of any text editor).
   function wrapSelection(before: string, after: string) {
     if (!view) return;
     const { state } = view;
@@ -1116,9 +1110,9 @@
   export function formatWikiLink() { wrapSelection("[[", "]]"); }
   export function formatQuote() { toggleLinePrefix("> "); }
 
-  // Нумерованный список (v0.9.27): нельзя через toggleLinePrefix — у него
-  // префикс статический, а здесь у каждой строки свой номер. Нумеруем строки
-  // выделения подряд с 1; если список уже есть — снимаем.
+  // An ordered list cannot go through toggleLinePrefix: that takes a static prefix,
+  // while here every line has its own number. We number the selected lines from 1;
+  // if the list already exists, we remove it.
   export function formatOrderedList() {
     if (!view) return;
     const { state } = view;
@@ -1127,8 +1121,8 @@
     const last = state.doc.lineAt(range.to).number;
 
     const NUM_RE = /^(\s*)\d+\.\s+/;
-    // Снимаем нумерацию, только если она есть на КАЖДОЙ непустой строке —
-    // иначе клик по частично оформленному куску молча терял бы номера.
+    // The numbering is removed only if EVERY non-empty line has it, or a click on a
+    // partially formatted block would silently lose the numbers.
     let allNumbered = true;
     for (let n = first; n <= last; n++) {
       const t = state.doc.line(n).text;
@@ -1139,13 +1133,13 @@
     let counter = 1;
     for (let n = first; n <= last; n++) {
       const line = state.doc.line(n);
-      if (!line.text.trim()) continue; // пустые строки не нумеруем
+      if (!line.text.trim()) continue; // blank lines are not numbered
       if (allNumbered) {
         const m = NUM_RE.exec(line.text)!;
         changes.push({ from: line.from, to: line.from + m[0].length, insert: m[1] });
       } else {
         const m = NUM_RE.exec(line.text);
-        // Уже пронумерованную строку перенумеровываем, а не префиксуем повторно
+        // An already-numbered line is renumbered rather than prefixed again
         const from = line.from;
         const to = m ? line.from + m[0].length : line.from;
         changes.push({ from, to, insert: `${counter}. ` });
@@ -1157,9 +1151,10 @@
     view.focus();
   }
 
-  // Обычная ссылка [текст](url): выделение становится подписью, курсор
-  // встаёт внутрь пустых скобок — url дописывается сразу, без второго клика.
-  // Без выделения вставляется заготовка с курсором на слове "текст".
+  // An ordinary link [text](url): the selection becomes the label and the cursor
+  // lands inside the empty parentheses, so the url is typed at once without a
+  // second click. With no selection a template is inserted with the cursor on the
+  // word "text".
   export function formatLink() {
     if (!view) return;
     const { state } = view;
@@ -1184,11 +1179,11 @@
     view.focus();
   }
 
-  // Вставка таблицы (v0.9.06, добавлено в панель после первого прохода):
-  // стартовая 2x2-таблица на новой строке под курсором. Пустые строки
-  // до/после — не потому что parseTableAt их требует (не требует, таблица
-  // парсится и вплотную к соседнему тексту), а чтобы вставка не сливалась
-  // с текстом текущей строки, если курсор был не в её начале/конце.
+  // Inserting a table: a starter 2x2 table on a new line below the cursor. The blank
+  // lines before and after are not because parseTableAt requires them (it does not,
+  // a table parses even flush against neighbouring text) but so the insertion does
+  // not merge with the current line's text when the cursor was not at its start or
+  // end.
   export function insertTable() {
     if (!view) return;
     const { state } = view;

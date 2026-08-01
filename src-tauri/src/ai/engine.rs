@@ -15,14 +15,14 @@ struct Message {
     content: String,
 }
 
-// Спецтокены конца хода разных чат-шаблонов (ChatML/Phi/Llama/Gemma/...).
-// Сервер llama.cpp запускается без --chat-template (капабилити-детект по
-// самой модели не делаем — sidecar не знает, какую именно модель ему дали),
-// поэтому берётся дефолтный шаблон, который не обязательно совпадает с тем,
-// на котором модель обучена. Итог — модель иногда не останавливается на
-// своём стоп-токене вовремя, и тот прорывается в текст ответа как обычный
-// текст. Чиним на выходе: вырезаем известные токены, а не полагаемся на то,
-// что сервер всегда правильно их распознает и обрежет сам.
+// End-of-turn special tokens from various chat templates (ChatML/Phi/Llama/
+// Gemma/...). The llama.cpp server starts without --chat-template (we do no
+// capability detection on the model itself — the sidecar does not know which
+// model it was handed), so it uses a default template that need not match the one
+// the model was trained on. As a result the model sometimes fails to stop at its
+// own stop token in time and that token breaks through into the answer as
+// ordinary text. We fix it on the way out by cutting the known tokens, rather
+// than trusting the server to always recognize and trim them itself.
 const KNOWN_STOP_TOKENS: [&str; 6] = [
     "<|end|>", "<|endoftext|>", "<|im_end|>", "<|eot_id|>", "</s>", "<end_of_turn>",
 ];
@@ -86,8 +86,8 @@ mod tests {
 
     #[test]
     fn does_not_touch_similar_but_different_tags() {
-        // не должно случайно резать текст, где пользователь пишет что-то
-        // похожее на тег, но это не спецтокен модели
+        // it must not accidentally cut text where the user writes something
+        // tag-like that is not one of the model's special tokens
         assert_eq!(strip_stop_tokens("<|not-a-real-token|>"), "<|not-a-real-token|>");
     }
 }

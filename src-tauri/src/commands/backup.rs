@@ -8,13 +8,14 @@ use tauri::Manager;
 use crate::error::AppResult;
 use crate::commands::settings::{get_setting, set_setting};
 
-// БД работает в WAL-режиме: свежие записи лежат в data.db-wal, а не в data.db.
-// Просто скопировать файл нельзя — снимок будет неполным. VACUUM INTO пишет
-// целостную копию всей БД (включая WAL) в отдельный файл.
+// The DB runs in WAL mode: recent writes live in data.db-wal, not in data.db.
+// Copying the file alone is not enough — the snapshot would be incomplete.
+// VACUUM INTO writes a consistent copy of the whole DB (WAL included) to a
+// separate file.
 pub async fn export_impl(pool: &sqlx::SqlitePool, data_dir: &Path, path: &str) -> AppResult<()> {
     let snapshot_path = data_dir.join("data.db.export");
 
-    let _ = std::fs::remove_file(&snapshot_path); // VACUUM INTO требует, чтобы файла не было
+    let _ = std::fs::remove_file(&snapshot_path); // VACUUM INTO requires the file to be absent
     sqlx::query("VACUUM INTO ?")
         .bind(snapshot_path.to_string_lossy().as_ref())
         .execute(pool)
@@ -49,9 +50,10 @@ pub async fn export(
     export_impl(pool.inner(), &data_dir, &path).await
 }
 
-// Нельзя перезаписывать data.db на живом пуле: activity-loop пишет в БД
-// каждые 60 сек и затёр бы импорт. Кладём staging-файл и перезапускаем
-// приложение — apply_pending_import() подхватит его до открытия пула.
+// data.db must not be overwritten while the pool is live: the activity loop
+// writes to the DB every 60 seconds and would clobber the import. We drop a
+// staging file and restart the app — apply_pending_import() picks it up before
+// the pool is opened.
 pub fn import_impl(data_dir: &Path, path: &str) -> AppResult<()> {
     let staging_path = data_dir.join("data.db.import");
 
@@ -73,8 +75,8 @@ pub async fn import(app: tauri::AppHandle, path: String) -> AppResult<()> {
     app.restart()
 }
 
-// Определяет, нужно ли делать авто-бэкап: прошло ≥24ч с последнего
-// и папка задана.
+// Decides whether an automatic backup is due: at least 24h since the last one
+// and a folder is configured.
 pub async fn auto_backup_due(pool: &sqlx::SqlitePool) -> bool {
     let dir = get_setting(pool, "auto_backup_dir").await;
     let dir = match dir {
@@ -93,11 +95,11 @@ pub async fn auto_backup_due(pool: &sqlx::SqlitePool) -> bool {
             let elapsed = chrono::Utc::now() - parsed.with_timezone(&chrono::Utc);
             elapsed >= chrono::Duration::hours(24)
         }
-        None => true, // ни разу не делали — пора
+        None => true, // never run before — it is due
     }
 }
 
-// Выполняет авто-бэкап: экспорт + ротация. Возвращает имя файла.
+// Performs an automatic backup: export plus rotation. Returns the filename.
 pub async fn auto_backup_impl(
     pool: &sqlx::SqlitePool,
     data_dir: &Path,
@@ -115,7 +117,7 @@ pub async fn auto_backup_impl(
 
     export_impl(pool, data_dir, path.to_str().unwrap()).await?;
 
-    // Ротация: удаляем старейшие файлы сверх keep
+    // Rotation: delete the oldest files beyond keep
     let mut entries: Vec<_> = fs::read_dir(&dir)
         .unwrap_or_else(|_| panic!("cannot read backup dir {:?}", dir))
         .filter_map(|e| e.ok())
@@ -151,8 +153,8 @@ pub fn apply_pending_import(data_dir: &std::path::Path) {
     let staging = data_dir.join("data.db.import");
     if staging.exists() {
         let _ = std::fs::rename(&staging, data_dir.join("data.db"));
-        // Остатки WAL от старой БД иначе "переиграются" поверх импортированной
-        // и молча откатят импорт.
+        // Otherwise WAL leftovers from the old DB would be replayed over the
+        // imported one and silently roll the import back.
         let _ = std::fs::remove_file(data_dir.join("data.db-wal"));
         let _ = std::fs::remove_file(data_dir.join("data.db-shm"));
     }
@@ -169,8 +171,9 @@ mod tests {
         dir
     }
 
-    // Не sqlite::memory: — у пула к in-memory БД каждое соединение видит свою
-    // пустую базу, и VACUUM INTO может уйти не туда. Файловая БД повторяет прод.
+    // Not sqlite::memory: — with a pool over an in-memory DB every connection
+    // sees its own empty database and VACUUM INTO may end up in the wrong place.
+    // A file-backed DB matches production.
     async fn test_pool(dir: &Path) -> sqlx::SqlitePool {
         let url = format!("sqlite:{}?mode=rwc", dir.join("source.db").display());
         let pool = sqlx::SqlitePool::connect(&url).await.unwrap();
@@ -187,8 +190,8 @@ mod tests {
             .execute(pool).await.unwrap();
     }
 
-    // Полный цикл: экспорт в zip → импорт в staging → применение при «рестарте» →
-    // открытие импортированной БД и проверка данных.
+    // The full cycle: export to zip -> import into staging -> apply on "restart"
+    // -> open the imported DB and check the data.
     #[tokio::test]
     async fn export_import_round_trip() {
         let dir = tmp_dir("roundtrip");
@@ -198,13 +201,13 @@ mod tests {
         let zip_path = dir.join("backup.zip");
         export_impl(&pool, &dir, zip_path.to_str().unwrap()).await.unwrap();
         assert!(zip_path.exists());
-        // временный снимок VACUUM INTO подчищен
+        // the temporary VACUUM INTO snapshot has been cleaned up
         assert!(!dir.join("data.db.export").exists());
 
         import_impl(&dir, zip_path.to_str().unwrap()).unwrap();
         assert!(dir.join("data.db.import").exists());
 
-        // Симулируем состояние до рестарта: старая БД с WAL-остатками
+        // Simulate the pre-restart state: an old DB with WAL leftovers
         std::fs::write(dir.join("data.db"), b"old-db").unwrap();
         std::fs::write(dir.join("data.db-wal"), b"stale-wal").unwrap();
         std::fs::write(dir.join("data.db-shm"), b"stale-shm").unwrap();
@@ -233,7 +236,7 @@ mod tests {
         std::fs::write(&bad, b"garbage").unwrap();
 
         assert!(import_impl(&dir, bad.to_str().unwrap()).is_err());
-        // staging-файл не должен появиться
+        // no staging file must appear
         assert!(!dir.join("data.db.import").exists());
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -279,12 +282,12 @@ mod tests {
         sqlx::migrate!("./src/db/migrations").run(&pool).await.unwrap();
         set_setting(&pool, "auto_backup_dir", backup_dir.to_str().unwrap()).await.unwrap();
 
-        // недавний бэкап — не должен срабатывать
+        // a recent backup — must not trigger
         let recent = (Utc::now() - chrono::Duration::hours(1)).to_rfc3339();
         set_setting(&pool, "last_auto_backup", &recent).await.unwrap();
         assert!(!auto_backup_due(&pool).await);
 
-        // 25 часов назад — должен
+        // 25 hours ago — must trigger
         let old = (Utc::now() - chrono::Duration::hours(25)).to_rfc3339();
         set_setting(&pool, "last_auto_backup", &old).await.unwrap();
         assert!(auto_backup_due(&pool).await);
@@ -297,24 +300,24 @@ mod tests {
         let backup_dir = dir.join("backups");
         std::fs::create_dir_all(&backup_dir).unwrap();
 
-        // Чужие файлы не трогаем
+        // Unrelated files are left alone
         std::fs::write(backup_dir.join("note.txt"), b"hello").unwrap();
 
-        // Создаём «старые» бэкапы — через прямой export_impl, не auto_backup_impl
+        // Create "old" backups via export_impl directly, not auto_backup_impl
         let pool = test_pool(&dir).await;
         set_setting(&pool, "auto_backup_dir", backup_dir.to_str().unwrap()).await.unwrap();
         set_setting(&pool, "auto_backup_keep", "3").await.unwrap();
 
-        // Симулируем 4 старых бэкапа
+        // Simulate 4 old backups
         for i in 1..=4 {
             let name = format!("ai-notes-backup-2026-07-{:02}0-1200.zip", i);
             std::fs::write(backup_dir.join(&name), b"fake-zip").unwrap();
         }
 
-        // Запускаем авто-бэкап — он создаст новый и почистит старые
+        // Run the automatic backup: it creates a new one and prunes the old
         auto_backup_impl(&pool, &dir).await.unwrap();
 
-        // Должно остаться 3 бэкапа (keep) + 1 чужой файл = 4 файла
+        // 3 backups (keep) + 1 unrelated file = 4 files must remain
         let mut entries: Vec<_> = std::fs::read_dir(&backup_dir).unwrap()
             .filter_map(|e| e.ok())
             .collect();
@@ -325,7 +328,7 @@ mod tests {
         }).count();
         assert_eq!(backup_count, 3, "должно быть 3 бэкапа после ротации");
 
-        // Чужой файл не тронут
+        // The unrelated file is untouched
         assert!(backup_dir.join("note.txt").exists());
 
         let _ = std::fs::remove_dir_all(&dir);

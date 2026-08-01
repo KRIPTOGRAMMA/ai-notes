@@ -12,7 +12,7 @@
   }
   let { settings, isWayland, onDone }: Props = $props();
 
-  // Шаг 3 (Wayland) показываем только на Wayland
+  // Step 3 (Wayland) is shown on Wayland only
   const steps = isWayland ? [1, 2, 3, 4, 5] : [1, 2, 4, 5];
   let stepIdx = $state(0);
   let step = $derived(steps[stepIdx]);
@@ -110,9 +110,9 @@
         {t("Запускать AI Notes при входе в систему")}
       </label>
       <p>{t("Быстрая задача из любого места:")} <kbd>Ctrl Shift N</kbd></p>
-      <!-- Совет про композитор — только на Wayland (v0.9.28). Раньше он
-           показывался всем, включая Windows, где ни Hyprland/Sway, ни
-           бинд в конфиге композитора не имеют смысла. -->
+      <!-- The compositor tip, on Wayland only. It used to be shown to everyone,
+           including on Windows, where neither Hyprland/Sway nor a bind in a
+           compositor config means anything. -->
       {#if isWayland}
         <p class="muted" style="font-size:13px;">
           {t("На Hyprland/Sway глобальные хоткеи перехватывает композитор — добавь бинд, запускающий")}
@@ -126,9 +126,9 @@
         <li><b>{t("Дашборд")}</b> {t("— активность и выполненные задачи по дням")}</li>
         <li><b>{t("Трей")}</b> {t("— быстрое переключение режима (Focus — без уведомлений, Study — помодоро)")}</li>
       </ul>
-      <!-- Онбординг намеренно остаётся коротким (v0.9.29): полный обзор
-           возможностей живёт одним местом — Настройки → Справка. Дублировать
-           его здесь означало бы два текста, расходящихся при первой правке. -->
+      <!-- The onboarding deliberately stays short: the full tour of the features
+           lives in one place, Settings -> Help. Duplicating it here would mean
+           two texts that diverge at the first edit. -->
       <p class="muted" style="font-size:13px;margin-top:10px;">
         {t("Остальное — в")} <b>{t("Настройках → Справка")}</b>{t(": там собрано, что умеют заметки, задачи, быстрый ввод, ИИ и мониторинг.")}
       </p>

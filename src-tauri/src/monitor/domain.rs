@@ -1,20 +1,21 @@
-// Извлечение домена из заголовка окна браузера (v0.9.31).
+// Extracting a domain from a browser window title.
 //
-// ПРИВАТНОСТЬ — главное ограничение этого модуля, а не деталь реализации.
-// Заголовок окна браузера содержит название вкладки целиком: поисковые
-// запросы, названия документов, имена людей в переписке. В БД он не
-// попадал никогда (activity.rs берёт только w.app, w.title выбрасывается),
-// и эта версия ничего не меняет: домен извлекается в памяти, заголовок
-// уходит в мусор сразу же. По умолчанию функция вообще не вызывается —
-// нужна явная галочка в Настройках.
+// PRIVACY is this module's governing constraint, not an implementation detail.
+// A browser window title contains the whole tab name: search queries, document
+// names, the names of people in a conversation. It has never reached the DB
+// (activity.rs takes only w.app and throws w.title away), and nothing here
+// changes that: the domain is extracted in memory and the title is discarded
+// immediately. By default this function is not called at all — it requires an
+// explicit checkbox in Settings.
 //
-// Отсюда следует главное правило: **при малейшем сомнении возвращаем None**.
-// Ложный None стоит потерянной строчки статистики; ложный Some может
-// записать в БД кусок личного заголовка, приняв его за домен.
+// Hence the governing rule: **at the slightest doubt, return None**. A false
+// None costs one row of statistics; a false Some could write a fragment of a
+// private title into the DB, having mistaken it for a domain.
 
-// Браузеры, чьи заголовки имеет смысл разбирать. Белый список, а не «всё,
-// что не в чёрном»: в заголовке редактора или мессенджера тоже бывает
-// точка, и без ограничения мы бы писали в БД обрывки чужих текстов.
+// The browsers whose titles are worth parsing. An allowlist rather than
+// "anything not on a blocklist": an editor's or messenger's title can contain a
+// dot too, and without the restriction we would be writing fragments of other
+// people's text into the DB.
 const BROWSER_CLASSES: &[&str] = &[
     "firefox", "librewolf", "zen", "floorp", "waterfox",
     "chromium", "google-chrome", "brave-browser", "vivaldi", "opera",
@@ -26,9 +27,10 @@ pub fn is_browser(app_class: &str) -> bool {
     BROWSER_CLASSES.iter().any(|b| lower.contains(b))
 }
 
-// Похоже ли на доменное имя. Намеренно строго: латиница, цифры, дефис,
-// точки; минимум одна точка; TLD от двух букв. Отсекает «версия 2.0»,
-// «12.5 мм», пути с точками и прочие ложные срабатывания.
+// Whether something looks like a domain name. Deliberately strict: Latin
+// letters, digits, hyphens and dots; at least one dot; a TLD of two letters or
+// more. This rejects "version 2.0", "12.5 mm", dotted paths and other false
+// positives.
 fn looks_like_domain(s: &str) -> bool {
     let labels: Vec<&str> = s.split('.').collect();
     if labels.len() < 2 {
@@ -46,26 +48,26 @@ fn looks_like_domain(s: &str) -> bool {
     })
 }
 
-// Нормализация: нижний регистр и без www — иначе github.com и WWW.GitHub.com
-// разъедутся в статистике как разные сайты.
+// Normalization: lowercase and without www, or github.com and WWW.GitHub.com
+// would drift apart in the statistics as two different sites.
 fn normalize(host: &str) -> String {
     let h = host.trim().to_ascii_lowercase();
     h.strip_prefix("www.").unwrap_or(&h).to_string()
 }
 
-/// Домен из заголовка окна браузера. None — если заголовок не содержит
-/// ничего, уверенно похожего на домен.
+/// The domain from a browser window title. None if the title contains nothing
+/// confidently domain-like.
 ///
-/// Заголовки браузеров выглядят так:
-///   "Название статьи — Википедия — Mozilla Firefox"
-///   "GitHub - user/repo: описание — Mozilla Firefox"
+/// Browser titles look like this:
+///   "Article title — Wikipedia — Mozilla Firefox"
+///   "GitHub - user/repo: description — Mozilla Firefox"
 ///   "https://example.com/path — Mozilla Firefox"
-/// Домен в них есть далеко не всегда: браузеры показывают заголовок
-/// страницы, а не URL. Поэтому None — обычный, ожидаемый результат, а не
-/// ошибка: время такого окна просто останется учтённым как «браузер»
-/// без разбивки по сайтам.
+/// They very often contain no domain at all: browsers show the page title, not
+/// the URL. So None is the ordinary, expected result rather than a failure —
+/// that window's time simply stays counted as "browser" with no per-site
+/// breakdown.
 pub fn domain_from_title(title: &str) -> Option<String> {
-    // Явный URL в заголовке — самый надёжный случай.
+    // An explicit URL in the title is the most reliable case.
     for token in title.split_whitespace() {
         let t = token.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != ':' && c != '/' && c != '.' && c != '-');
         if let Some(rest) = t.strip_prefix("https://").or_else(|| t.strip_prefix("http://")) {
@@ -76,11 +78,12 @@ pub fn domain_from_title(title: &str) -> Option<String> {
         }
     }
 
-    // Иначе ищем голый домен среди слов заголовка. Разделители заголовка
-    // (— - | ·) режем сами: "GitHub - user/repo" не должен дать "repo".
+    // Otherwise look for a bare domain among the title's words. We split on the
+    // title separators (— - | ·) ourselves: "GitHub - user/repo" must not yield
+    // "repo".
     for raw in title.split(|c: char| c.is_whitespace() || c == '|' || c == '·' || c == '—' || c == '–') {
         let token = raw.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '.' && c != '-');
-        // Путь/запрос отсекаем: "example.com/a/b" → "example.com"
+        // Strip the path and query: "example.com/a/b" -> "example.com"
         let host = token.split('/').next().unwrap_or(token);
         if looks_like_domain(host) {
             return Some(normalize(host));
@@ -98,7 +101,7 @@ mod tests {
     fn extracts_from_explicit_url() {
         assert_eq!(domain_from_title("https://github.com/user/repo — Firefox").as_deref(), Some("github.com"));
         assert_eq!(domain_from_title("http://example.com").as_deref(), Some("example.com"));
-        // порт и путь не попадают в домен
+        // the port and path do not become part of the domain
         assert_eq!(domain_from_title("https://localhost.dev:3000/app").as_deref(), Some("localhost.dev"));
     }
 
@@ -110,13 +113,13 @@ mod tests {
 
     #[test]
     fn normalizes_case_and_www() {
-        // иначе один сайт разъедется в статистике на несколько строк
+        // otherwise one site would split into several rows of statistics
         assert_eq!(domain_from_title("WWW.GitHub.COM").as_deref(), Some("github.com"));
         assert_eq!(domain_from_title("https://WWW.Example.com/x").as_deref(), Some("example.com"));
     }
 
-    // Главный приватностный тест: заголовок без домена НЕ должен превратиться
-    // в «домен» из куска личного текста.
+    // The central privacy test: a title with no domain must NOT be turned into a
+    // "domain" made from a fragment of private text.
     #[test]
     fn returns_none_when_no_domain_present() {
         assert_eq!(domain_from_title("Как уволиться красиво — Google Поиск"), None);
@@ -126,21 +129,21 @@ mod tests {
         assert_eq!(domain_from_title("Mozilla Firefox"), None);
     }
 
-    // Точка в тексте не делает его доменом.
+    // A dot in some text does not make it a domain.
     #[test]
     fn does_not_mistake_numbers_and_versions_for_domains() {
         assert_eq!(domain_from_title("Версия 2.0 вышла"), None);
         assert_eq!(domain_from_title("Цена 12.50 руб"), None);
-        // Кириллица в метке не проходит is_ascii_alphanumeric — и хорошо:
-        // «файл.txt» формально имеет вид домена, но доменом не является.
+        // Cyrillic in a label fails is_ascii_alphanumeric, which is what we want:
+        // "файл.txt" has the shape of a domain but is not one.
         assert_eq!(domain_from_title("файл.txt открыт"), None);
     }
 
-    // Латинское имя файла с расширением-как-TLD — известное ограничение
-    // эвристики. Оно осознанное: заголовки разбираются ТОЛЬКО у браузеров
-    // (is_browser), где «report.com» в имени файла практически не встречается,
-    // а ужесточать проверку до списка реальных TLD означало бы держать этот
-    // список в коде и обновлять его.
+    // A Latin filename with a TLD-like extension is a known limitation of the
+    // heuristic, and a deliberate one: titles are parsed ONLY for browsers
+    // (is_browser), where a filename like "report.com" is virtually unheard of,
+    // and tightening the check to a list of real TLDs would mean keeping that
+    // list in the code and updating it.
     #[test]
     fn known_limitation_file_like_names_in_browser_titles() {
         assert_eq!(domain_from_title("report.com открыт").as_deref(), Some("report.com"));
@@ -152,7 +155,7 @@ mod tests {
         assert!(is_browser("Firefox"));
         assert!(is_browser("google-chrome"));
         assert!(is_browser("Brave-Browser"));
-        // не браузеры — их заголовки не разбираются вовсе
+        // not browsers — their titles are not parsed at all
         assert!(!is_browser("kitty"));
         assert!(!is_browser("code"));
         assert!(!is_browser("telegram-desktop"));

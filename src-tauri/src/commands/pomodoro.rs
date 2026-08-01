@@ -8,7 +8,7 @@ pub use crate::notifier::pomodoro::{PomodoroCmd, PomodoroCmdTx};
 #[derive(Debug, Serialize, Clone, PartialEq)]
 pub struct PomodoroState {
     pub phase: String, // "work" | "break" | "paused" | "off"
-    pub until: Option<String>, // RFC3339, конец текущей фазы (для work/break/paused)
+    pub until: Option<String>, // RFC3339, the end of the current phase (for work/break/paused)
 }
 
 #[derive(Debug, Serialize, Clone, PartialEq, Default)]
@@ -78,8 +78,9 @@ pub async fn get_pomodoro_stats_impl(pool: &SqlitePool, now: DateTime<Utc>) -> A
     Ok(PomodoroStats { today, week, task_streak, pomodoro_streak })
 }
 
-// Дни подряд (от сегодня назад), где было ≥1 выполненной задачи. Сегодняшний
-// день без выполненных задач не рвёт стрик — он мог просто ещё не закончиться.
+// Consecutive days, counting back from today, with at least one completed task.
+// A today with no completed tasks does not break the streak — the day may simply
+// not be over yet.
 async fn task_streak_impl(pool: &SqlitePool, now: DateTime<Utc>) -> AppResult<i64> {
     let rows = sqlx::query(
         "SELECT DISTINCT date(completed_at, 'localtime') as d FROM tasks WHERE completed_at IS NOT NULL"
@@ -90,7 +91,8 @@ async fn task_streak_impl(pool: &SqlitePool, now: DateTime<Utc>) -> AppResult<i6
     Ok(count_streak(&days, now))
 }
 
-// Дни подряд с ≥1 завершённым помидором, та же логика "сегодня не рвёт".
+// Consecutive days with at least one finished pomodoro, with the same
+// "today does not break it" rule.
 async fn pomodoro_streak_impl(pool: &SqlitePool, now: DateTime<Utc>) -> AppResult<i64> {
     let rows = sqlx::query(
         "SELECT DISTINCT date(finished_at, 'localtime') as d FROM pomodoro_log"
@@ -111,8 +113,8 @@ fn count_streak(days: &std::collections::HashSet<String>, now: DateTime<Utc>) ->
             streak += 1;
             cursor -= chrono::Duration::days(1);
         } else if cursor == today_local {
-            // сегодня ещё не закончился — пропуск сегодняшнего дня не рвёт стрик,
-            // но и не засчитывает его, продолжаем проверку со вчера
+            // today is not over yet: skipping it neither breaks the streak nor
+            // counts towards it, so we continue checking from yesterday
             cursor -= chrono::Duration::days(1);
         } else {
             break;
@@ -158,7 +160,7 @@ mod tests {
         let now = Utc::now();
         insert_log(&pool, now, None).await;
         insert_log(&pool, now - chrono::Duration::days(1), None).await;
-        // пропуск -2 дня рвёт стрик дальше
+        // a gap at -2 days breaks the streak beyond that point
         insert_log(&pool, now - chrono::Duration::days(3), None).await;
 
         let streak = pomodoro_streak_impl(&pool, now).await.unwrap();
@@ -169,7 +171,7 @@ mod tests {
     async fn today_without_pomodoro_does_not_break_yesterday_streak() {
         let pool = test_pool().await;
         let now = Utc::now();
-        // Ничего сегодня, но вчера и позавчера — есть
+        // Nothing today, but yesterday and the day before have entries
         insert_log(&pool, now - chrono::Duration::days(1), None).await;
         insert_log(&pool, now - chrono::Duration::days(2), None).await;
 

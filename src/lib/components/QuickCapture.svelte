@@ -12,45 +12,46 @@
   import { t } from "../i18n.svelte";
   import "../../app.css";
 
-  // "pinned" (v0.9.33) — полноценный третий режим, в отличие от "clipboard":
-  // тот схлопывался в "note", потому что тоже создавал заметку. Здесь окно
-  // ничего не создаёт, а правит существующее, поэтому и форма своя.
+  // "pinned" is a full third mode, unlike "clipboard": that one folded into "note"
+  // because it also created a note. Here the window creates nothing and edits
+  // something existing, so it has a form of its own.
   type Mode = "task" | "note" | "pinned";
   let mode = $state<Mode>("task");
 
-  // Закреплённое: null — слот пуст (не закрепляли, или объект удалён).
+  // The pinned item: null means the slot is empty (nothing was pinned, or the
+  // object was deleted).
   let pinned = $state<PinnedItem | null>(null);
   let pinnedTitle = $state("");
   let pinnedText = $state("");
   let saved = $state(false);
-  // v0.9.34: чек-лист закреплённой задачи. В отличие от TaskModal, где правки
-  // копятся и уезжают diff'ом по «Сохранить», здесь каждый клик уходит в БД
-  // сразу — слот открывают, чтобы отметить сделанное и закрыть, и потерять
-  // галочку на Escape было бы обиднее, чем в форме редактирования.
+  // The pinned task's checklist. Unlike TaskModal, where edits accumulate and leave
+  // as a diff on "Save", here every click goes to the DB at once: the slot is opened
+  // to tick something off and close, and losing a tick on Escape would sting more
+  // than in an editing form.
   //
-  // v0.9.45: чек-лист стал текстовым полем (как в TaskModal), поэтому «сразу»
-  // уточняется — на каждую букву в БД не пишем. Правка уезжает через паузу
-  // набора, а также при закрытии окна и по «Сохранить»: мгновенность нужна
-  // против потери галочки на Escape, а не буквально на каждый keypress.
+  // Once the checklist became a text field (as in TaskModal), "at once" needs
+  // qualifying: we do not write to the DB on every letter. An edit leaves after a
+  // typing pause, and also when the window closes and on "Save". The immediacy
+  // guards against losing a tick on Escape, not literally against every keypress.
   let subs = $state<Subtask[]>([]);
   let subsText = $state("");
   let subsBusy = $state(false);
   let subsTimer: ReturnType<typeof setTimeout> | null = null;
   const SUBS_DEBOUNCE_MS = 600;
-  // v0.9.26: подсказка «текст взят из буфера» — только для режима clipboard,
-  // снимается при первой же правке, чтобы не висеть над отредактированным
-  // текстом. Сам "clipboard" в Mode не входит: это не третья вкладка, а
-  // предзаполненная заметка, поэтому в UI он схлопывается в "note".
+  // The "text taken from the clipboard" hint, for clipboard mode only. It is removed
+  // at the first edit so it does not hang over text that has been changed.
+  // "clipboard" itself is not part of Mode: it is not a third tab but a pre-filled
+  // note, so in the UI it folds into "note".
   let fromClipboard = $state(false);
 
-  // Задача
+  // Task
   let title = $state("");
   let description = $state("");
   let priority = $state("Medium");
-  let category = $state("Other"); // фолбэк-категория существует всегда
+  let category = $state("Other"); // the fallback category always exists
   let showDescription = $state(false);
 
-  // Заметка
+  // Note
   let noteTitle = $state("");
   let noteContent = $state("");
 
@@ -59,16 +60,16 @@
 
   applyCachedTheme();
 
-  // Режим clipboard раскрывается в заметку, предзаполненную буфером обмена.
-  // Пустой буфер (или картинка/файл в нём) — не ошибка: открывается обычная
-  // пустая заметка, как по Ctrl+Shift+M.
+  // Clipboard mode expands into a note pre-filled from the clipboard. An empty
+  // clipboard (or one holding an image or a file) is not an error: an ordinary empty
+  // note opens, as with Ctrl+Shift+M.
   async function applyMode(m: string) {
     if (m === "pinned") {
       mode = "pinned";
       fromClipboard = false;
       saved = false;
-      // Слот читается при каждом открытии, а не кэшируется: закреплённое
-      // могли отредактировать в главном окне или удалить.
+      // The slot is read on every open rather than cached: the pinned item may have
+      // been edited in the main window or deleted.
       pinned = await api.getPinnedItem().catch(() => null);
       pinnedTitle = pinned?.title ?? "";
       pinnedText = pinned?.text ?? "";
@@ -94,11 +95,11 @@
   }
 
   onMount(() => {
-    // Начальный режим — из managed-state (покрывает случай, когда окно уже было
-    // смонтировано до эмита события).
+    // The initial mode comes from managed state (covering the case where the window
+    // was already mounted before the event was emitted).
     api.getQuickMode().then(applyMode).catch(() => {});
     categoryStore.load();
-    // Живая смена режима, пока окно открыто.
+    // A live mode change while the window is open.
     const un = listen<string>("quick-mode", (e) => { applyMode(e.payload); });
     return () => { un.then((f) => f()); };
   });
@@ -108,9 +109,9 @@
     noteTitle = ""; noteContent = "";
     errorMsg = null;
     fromClipboard = false;
-    // Сам слот (pinned) и его чек-лист не сбрасываем: reset чистит черновики
-    // создания, а закреплённое — не черновик, оно живёт в БД и переживает
-    // закрытие окна.
+    // The slot itself and its checklist are not reset: reset clears creation drafts,
+    // and a pinned item is not a draft — it lives in the DB and survives the window
+    // closing.
     saved = false;
   }
 
@@ -156,14 +157,14 @@
     }
   }
 
-  // Правка закреплённого. В отличие от createTask/createNote окно НЕ прячется
-  // после сохранения: слот — это то, к чему возвращаются, и дописывать в него
-  // обычно хочется несколькими подходами. Вместо закрытия — пометка «Сохранено».
+  // Editing the pinned item. Unlike createTask/createNote the window is NOT hidden
+  // after saving: the slot is something one returns to, and adding to it usually
+  // takes several passes. Instead of closing, a "Saved" marker appears.
   async function savePinned() {
     if (!pinned || busy) return;
     const title = pinnedTitle.trim();
-    // Пустой заголовок отклоняем: у задачи он обязателен на бэкенде, а у
-    // заметки превратился бы в безымянную строку в списке.
+    // An empty title is rejected: for a task the backend requires one, and for a note
+    // it would become an unnamed row in the list.
     if (!title) {
       errorMsg = t("Заголовок не может быть пустым");
       return;
@@ -187,22 +188,23 @@
     }
   }
 
-  // Операции чек-листа сохраняются мгновенно. Общая для всех трёх схема:
-  // сначала запрос, потом правка локального списка — при ошибке на экране
-  // остаётся то, что реально лежит в БД, а не оптимистично отрисованное.
-  // Перечитывать слот целиком после каждого клика не нужно: заголовок и текст
-  // могут быть отредактированы прямо сейчас, и перечитывание затёрло бы правку.
-  // Правка чек-листа: откладываем запись, пока пользователь печатает. Таймер
-  // перезапускается на каждое изменение, поэтому в БД уходит уже готовая
-  // строка, а не по букве на подзадачу.
+  // Checklist operations are saved immediately. The scheme is the same for all
+  // three: the request first, then the local list is updated — so on an error the
+  // screen keeps what is really in the DB rather than something drawn optimistically.
+  // Re-reading the whole slot after each click is unnecessary: the title and the text
+  // may be under edit right now, and re-reading would clobber that.
+  //
+  // Editing the checklist: the write is deferred while the user types. The timer
+  // restarts on every change, so a finished string reaches the DB rather than one
+  // letter per subtask.
   function scheduleSubsFlush() {
     if (subsTimer) clearTimeout(subsTimer);
     subsTimer = setTimeout(() => { subsTimer = null; flushSubs(); }, SUBS_DEBOUNCE_MS);
   }
 
-  // Тот же позиционный diff, что в TaskModal: i-я строка правит i-ю подзадачу.
-  // Локальный subs — то, что реально лежит в БД; при ошибке он не трогается,
-  // и следующий flush попробует применить ту же правку заново.
+  // The same positional diff as in TaskModal: line i edits subtask i. The local subs
+  // is what really sits in the DB; on an error it is left alone and the next flush
+  // retries the same edit.
   async function flushSubs() {
     if (subsTimer) { clearTimeout(subsTimer); subsTimer = null; }
     if (!pinned || pinned.kind !== "task" || subsBusy) return;
@@ -248,26 +250,26 @@
   }
 
   async function cancel() {
-    // Отложенную правку чек-листа дописываем ДО скрытия окна: Escape здесь —
-    // штатный способ закрыть слот, и потерять на нём набранное нельзя.
+    // A deferred checklist edit is flushed BEFORE hiding the window: Escape is the
+    // normal way to close the slot here, and what was typed must not be lost to it.
     await flushSubs();
     await getCurrentWindow().hide();
     reset();
   }
 
   function onKeydown(e: KeyboardEvent) {
-    // Ctrl+Tab переключает вкладки создания. В режиме правки закреплённого
-    // вкладок нет — уводить оттуда в форму создания значило бы бросить
-    // несохранённую правку, поэтому режим игнорирует переключение.
+    // Ctrl+Tab switches the creation tabs. In pinned-editing mode there are no tabs —
+    // moving away into a creation form would mean abandoning an unsaved edit, so that
+    // mode ignores the switch.
     if (e.ctrlKey && e.key === "Tab") {
       e.preventDefault();
       if (mode !== "pinned") mode = mode === "task" ? "note" : "task";
       return;
     }
     if (e.key === "Escape") { cancel(); return; }
-    // Enter создаёт: для задачи — в любом поле; для заметки — только с Ctrl
-    // (обычный Enter в textarea переносит строку). Правка закреплённого — как
-    // заметка: там тоже многострочный текст.
+    // Enter creates: for a task from any field, for a note only with Ctrl (a plain
+    // Enter in a textarea inserts a line break). Editing a pinned item behaves like a
+    // note: it is multi-line text as well.
     if (e.key === "Enter" && !e.shiftKey) {
       if (mode === "task") { e.preventDefault(); submit(); }
       else if (e.ctrlKey) { e.preventDefault(); submit(); }
@@ -305,9 +307,9 @@
       <textarea class="pin-text" bind:value={pinnedText} placeholder={t("Текст... (Ctrl+Enter — сохранить)")}
         rows={pinned.kind === "task" ? 3 : 6} autofocus oninput={() => saved = false}></textarea>
 
-      <!-- Чек-лист — только у задачи: у заметки подзадач не бывает. Правки
-           здесь уходят в БД сами (через паузу набора, а также по Escape и
-           «Сохранить»), поэтому кнопка «Сохранить» ниже про заголовок и текст. -->
+      <!-- The checklist belongs to a task only: notes have no subtasks. Edits here
+           reach the DB by themselves (after a typing pause, and also on Escape and
+           "Save"), so the "Save" button below is about the title and the text. -->
       {#if pinned.kind === "task"}
         <div class="subs">
           <div class="subs-head">
@@ -328,8 +330,9 @@
         </button>
       </div>
     {:else}
-      <!-- Пустой слот — не ошибка: пользователь ещё ничего не закреплял, либо
-           закреплённое удалено. Объясняем, как закрепить, вместо пустого окна. -->
+      <!-- An empty slot is not an error: the user has pinned nothing yet, or what was
+           pinned has been deleted. We explain how to pin instead of showing an
+           empty window. -->
       <div class="pin-empty">
         <p class="pin-empty-title">{t("⚡ Слот пуст")}</p>
         <p class="pin-empty-hint">
@@ -432,9 +435,10 @@
     justify-content: flex-end;
     margin-top: 2px;
   }
-  /* v0.9.33: правка закреплённого. Форма создания — «пустой бланк»,
-     здесь наоборот важно с первого взгляда понять, что правится уже
-     существующее, поэтому шапка с типом и акцентная рамка вокруг текста. */
+  /* Editing the pinned item. A creation form is a "blank sheet"; here, by
+     contrast, it matters to see at a glance that something existing is being
+     edited, hence the header with the type and the accent border around the
+     text. */
   .pin-head {
     display: flex;
     align-items: center;
@@ -460,8 +464,8 @@
     font-size: 13px;
     border-left: 2px solid var(--accent);
   }
-  /* v0.9.34: чек-лист в слоте. Отделён от текста заголовком с счётчиком —
-     без него две группы полей сливаются в одну простыню. */
+  /* The checklist in the slot, separated from the text by a heading with a
+     counter — without it the two groups of fields merge into one wall. */
   .subs {
     display: flex;
     flex-direction: column;
@@ -480,8 +484,8 @@
     font-weight: 600;
     color: var(--text-muted, #888);
   }
-  /* Строки чек-листа и счётчик переехали в ChecklistEditor (v0.9.45):
-     удаление строки — это удаление текста, отдельный крестик не нужен. */
+  /* The checklist rows and the counter moved into ChecklistEditor: deleting a
+     row means deleting text, so a separate cross is unnecessary. */
   .pin-empty {
     flex: 1;
     display: flex;

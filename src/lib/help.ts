@@ -1,16 +1,17 @@
-// Содержимое раздела «Справка» в Настройках (v0.9.29).
+// The contents of the "Help" section in Settings.
 //
-// Данными, а не разметкой: контент отделён от вью, поэтому его видно целиком
-// в одном месте и можно проверить тестом (что все темы непусты и id уникальны).
+// Data rather than markup: the content is separated from the view, so it can be
+// seen whole in one place and checked by a test (that every topic is non-empty and
+// the ids are unique).
 //
-// ВАЖНО, чтобы справка не устаревала молча:
-//   * Хоткеи здесь НЕ перечисляются — они уже есть данными в keybinds.ts
-//     (KEYBIND_ACTIONS) и рендерятся в разделе «Хоткеи» из этого же массива.
-//     Дублировать значения означало бы иметь два источника правды.
-//   * Пути (каталог модели, бэкапы) не пишутся текстом — их отдаёт бэкенд
-//     (см. model_path в v0.9.28: захардкоженная строка врала на всех ОС).
-//   * Описывается поведение, а не конкретные числа настроек: числа
-//     пользователь меняет сам, а поведение меняется вместе с кодом.
+// IMPORTANT, so the help does not go stale silently:
+//   * Hotkeys are NOT listed here — they already exist as data in keybinds.ts
+//     (KEYBIND_ACTIONS) and are rendered in the "Hotkeys" section from that same
+//     array. Duplicating the values would mean two sources of truth.
+//   * Paths (the model directory, backups) are not written as text — the backend
+//     provides them (see model_path: a hardcoded string lied on every OS).
+//   * Behaviour is described rather than particular setting values: the numbers are
+//     the user's to change, while behaviour changes together with the code.
 
 export type HelpItem = { term: string; desc: string };
 export type HelpTopic = { id: string; title: string; items: HelpItem[] };
@@ -202,9 +203,9 @@ export const HELP_TOPICS: HelpTopic[] = [
   },
   {
     id: "keys",
-    // Не «Хоткеи»: так называется соседняя вкладка Настроек, где живут сами
-    // комбинации. Разные названия — чтобы не путать «где почитать» и «где
-    // переназначить» (и чтобы селекторы в тестах оставались однозначными).
+    // Not "Hotkeys": that is the name of the neighbouring Settings tab where the
+    // combinations themselves live. Different names keep "where to read about it"
+    // and "where to rebind it" apart (and keep the test selectors unambiguous).
     title: "Клавиатура",
     items: [
       {

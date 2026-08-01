@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
-// Рекомендуемая по умолчанию модель — маленькая инструктивная GGUF, тянет на CPU.
-// Поле URL в UI редактируемое: можно подставить любую другую GGUF.
+// The recommended default model: a small instruction-tuned GGUF that runs on a
+// CPU. The URL field in the UI is editable, so any other GGUF can be used.
 pub const DEFAULT_MODEL_URL: &str =
     "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf";
 
@@ -19,14 +19,14 @@ pub struct ModelOption {
     pub recommended: bool,
 }
 
-// Курируемый список (v0.9.07) — только реальные GGUF-квантизации с HuggingFace,
-// проверенные вручную (не выдуманные URL/размеры). size_bytes — размер файла
-// квантизации на HF на момент добавления списка (может незначительно
-// отличаться от актуального, если автор перезалил файл — не критично, это
-// ориентир для пользователя перед скачиванием, а не проверка целостности).
-// download_model()/model_status() не меняются: любая модель из списка (или
-// вручную вставленный URL, поле остаётся редактируемым) кладётся под тем же
-// именем model.gguf — sidecar.rs не завязан на конкретную модель.
+// A curated list of real GGUF quantizations from HuggingFace, verified by hand
+// (no invented URLs or sizes). size_bytes is the size of the quantization file on
+// HF at the time it was added to the list; it may differ slightly from the
+// current one if the author re-uploaded the file, which is not critical — it is
+// a hint for the user before downloading, not an integrity check.
+// download_model() and model_status() are unaffected: any model from the list (or
+// a manually pasted URL, since the field stays editable) is stored under the same
+// model.gguf name — sidecar.rs is not tied to a particular model.
 pub fn model_catalog() -> Vec<ModelOption> {
     vec![
         ModelOption {
@@ -83,7 +83,7 @@ fn models_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-// Есть ли скачанная локальная модель. Без создания каталога — только проверка.
+// Whether a local model has been downloaded. Creates no directory — a check only.
 pub(crate) fn local_model_available(app: &AppHandle) -> bool {
     app.path()
         .app_data_dir()
@@ -91,12 +91,12 @@ pub(crate) fn local_model_available(app: &AppHandle) -> bool {
         .unwrap_or(false)
 }
 
-// Путь к файлу модели для показа в Настройках (v0.9.28). Раньше он был
-// зашит в UI строкой `~/.local/share/ai-notes/models/model.gguf` — неверной
-// на Windows/macOS и неверной даже на Linux (каталог называется по
-// identifier'у, com.ainotes.app, а не ai-notes). Отдаём то, что реально
-// использует models_dir, вместо того чтобы собирать строку по ОС на фронте:
-// подстановка по платформе разошлась бы с бэкендом при первом же изменении.
+// The path to the model file, shown in Settings. It used to be hardcoded in the
+// UI as `~/.local/share/ai-notes/models/model.gguf`, which was wrong on
+// Windows/macOS and wrong even on Linux (the directory is named after the
+// identifier, com.ainotes.app, not ai-notes). We return what models_dir actually
+// uses instead of assembling a per-OS string in the frontend: a platform
+// substitution there would drift from the backend at the first change.
 #[tauri::command]
 pub async fn model_path(app: AppHandle) -> Result<String, String> {
     Ok(models_dir(&app)?.join("model.gguf").display().to_string())
@@ -113,8 +113,8 @@ pub async fn model_status(app: AppHandle) -> Result<ModelStatus, String> {
 pub async fn download_model(app: AppHandle, url: String) -> Result<(), String> {
     let dir = models_dir(&app)?;
     let final_path = dir.join("model.gguf");
-    // Качаем в .part и переименовываем только после полной загрузки — чтобы
-    // прерванная закачка не выглядела как готовая модель.
+    // Download into .part and rename only once complete, so an interrupted
+    // download does not look like a ready model.
     let part_path = dir.join("model.gguf.part");
 
     let mut resp = reqwest::Client::new()
@@ -129,7 +129,7 @@ pub async fn download_model(app: AppHandle, url: String) -> Result<(), String> {
 
     let mut file = std::fs::File::create(&part_path).map_err(|e| e.to_string())?;
     let mut downloaded: u64 = 0;
-    let mut last_pct: u8 = 255; // заведомо невозможный, чтобы первый эмит прошёл
+    let mut last_pct: u8 = 255; // deliberately impossible so the first emit gets through
 
     while let Some(chunk) = resp.chunk().await.map_err(|e| e.to_string())? {
         if let Err(e) = file.write_all(&chunk) {

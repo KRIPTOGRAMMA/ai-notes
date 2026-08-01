@@ -1,3 +1,4 @@
--- v0.5 фаза 1: трекинг по приложениям. Каждая Active-строка лога знает класс
--- окна в фокусе на момент тика (NULL — провайдер окон недоступен или Idle).
+-- Per-application tracking. Every Active row of the log records the class of the
+-- focused window at the moment of the tick (NULL when no window provider is
+-- available, or when idle).
 ALTER TABLE activity_log ADD COLUMN app TEXT;

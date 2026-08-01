@@ -4,11 +4,11 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use crate::error::{AppError, AppResult};
 
-// Предикат умного списка: все заданные поля должны совпасть (AND). Пустой
-// объект — бессмысленный список, отклоняется на создании. Хранится как JSON
-// в smart_lists.filter_json; встроенные списки («Просроченные», «На этой
-// неделе») в БД не заводятся — их логика зависит от текущей даты и целиком
-// живёт на фронте.
+// A smart list predicate: every field given must match (AND). An empty object is
+// a meaningless list and is rejected on creation. Stored as JSON in
+// smart_lists.filter_json. The built-in lists ("Overdue", "This week") are not
+// created in the DB — their logic depends on the current date and lives entirely
+// in the frontend.
 #[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq)]
 pub struct SmartListFilter {
     pub category: Option<String>,

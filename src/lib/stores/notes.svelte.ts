@@ -3,10 +3,10 @@ import type { Note, CreateNotePayload, UpdateNotePayload } from "../types";
 
 let notes: Note[] = $state([]);
 let error: string | null = $state(null);
-// Сигнал «открыть эту заметку» — ставится из глобального поиска, Notes.svelte
-// реагирует через $effect и выбирает заметку в редакторе.
+// The "open this note" signal, set from global search; Notes.svelte reacts through
+// an $effect and selects the note in the editor.
 let focusNoteId: string | null = $state(null);
-let dailyRequested: number = $state(0); // инкремент как сигнал
+let dailyRequested: number = $state(0); // an increment acts as the signal
 
 function describeError(e: unknown): string {
   if (typeof e === "string") return e;
@@ -48,9 +48,9 @@ export const noteStore = {
       await api.updateNote(id, patch);
       await noteStore.load();
     } catch (e) {
-      // Гонка автосейва с удалением: заметку успели удалить, пока это
-      // сохранение ещё летело (debounce 800мс). Бэкенд шлёт сентинел —
-      // тихо игнорируем, список уже актуален через параллельный load().
+      // Autosave racing deletion: the note was deleted while this save was still in
+      // flight (an 800ms debounce). The backend sends a sentinel — we ignore it
+      // quietly, the list is already up to date thanks to a parallel load().
       if (typeof e === "string" && e.includes("__NOTE_DELETED__")) return;
       error = describeError(e);
     }

@@ -1,10 +1,10 @@
-// v0.9.33: «быстрый слот» — одна закреплённая задача или заметка, которую
-// глобальный хоткей открывает сразу на правку текста, без списка и поиска.
+// The "quick slot": a single pinned task or note that a global hotkey opens
+// straight into text editing, with no list and no search.
 //
-// Хранение — две строки в settings (`pinned_kind`, `pinned_id`), а не своя
-// таблица: слот ровно один, у него нет ни истории, ни связей, ни порядка.
-// Таблица на одну строку здесь была бы миграцией ради ключа-значения,
-// которое уже есть.
+// Stored as two rows in settings (`pinned_kind`, `pinned_id`) rather than in a
+// table of its own: there is exactly one slot, with no history, no relations and
+// no ordering. A one-row table here would be a migration for the sake of a
+// key-value pair that already exists.
 use crate::error::AppResult;
 use crate::commands::settings::{get_setting, set_setting};
 use crate::commands::subtasks::get_subtasks_impl;
@@ -13,12 +13,12 @@ use serde::Serialize;
 use sqlx::SqlitePool;
 use tauri::State;
 
-// Что лежит в слоте. `text` — description для задачи и content для заметки:
-// окно правит только текст, поэтому одно поле вместо двух разных.
+// What sits in the slot. `text` is the description for a task and the content
+// for a note: the window edits text only, hence one field instead of two.
 //
-// v0.9.34: у задачи вместе с текстом едет её чек-лист. У заметки он всегда
-// пуст — подзадачи есть только у задач, отдельного поля-заглушки заводить
-// не за чем: пустой Vec читается одинаково и там, и там.
+// A task carries its checklist along with the text. For a note it is always
+// empty — only tasks have subtasks, and there is no point in a separate
+// placeholder field: an empty Vec reads the same either way.
 #[derive(Debug, Serialize, PartialEq)]
 pub struct PinnedItem {
     pub kind: String, // "task" | "note"
@@ -28,8 +28,9 @@ pub struct PinnedItem {
     pub subtasks: Vec<Subtask>,
 }
 
-// Нормализация вида. Чужая строка — не ошибка, а пустой слот: значение может
-// прийти из БД, отредактированной руками, и падать из-за этого нельзя.
+// Normalizes the kind. An unrecognized string is not an error but an empty
+// slot: the value may come from a hand-edited DB, and crashing over that is not
+// acceptable.
 pub fn normalize_kind(kind: &str) -> Option<&'static str> {
     match kind {
         "task" => Some("task"),
@@ -38,14 +39,15 @@ pub fn normalize_kind(kind: &str) -> Option<&'static str> {
     }
 }
 
-// Чтение слота. None во всех «нечего показывать» случаях, и это не ошибка:
-// слот пуст, вид неизвестен, id пустой, объект удалён.
+// Reads the slot. None in every "nothing to show" case, and that is not an
+// error: the slot is empty, the kind is unknown, the id is empty, the object was
+// deleted.
 //
-// Про удаление важно, что оно у задач и заметок разное: задача уходит в
-// Корзину (`deleted_at` проставлен, строка на месте), заметка удаляется
-// строкой из таблицы. Поэтому у задачи мало проверить существование —
-// нужен ещё и фильтр по `deleted_at`, иначе хоткей открыл бы на правку то,
-// что пользователь выбросил.
+// What matters about deletion is that it differs between tasks and notes: a task
+// goes to the Trash (`deleted_at` is set, the row stays), while a note is
+// removed from the table outright. So checking that a task exists is not enough
+// — a `deleted_at` filter is needed too, otherwise the hotkey would open for
+// editing something the user has thrown away.
 pub async fn get_pinned_impl(pool: &SqlitePool) -> AppResult<Option<PinnedItem>> {
     let kind = match get_setting(pool, "pinned_kind").await.and_then(|k| {
         normalize_kind(&k).map(|s| s.to_string())
@@ -75,10 +77,10 @@ pub async fn get_pinned_impl(pool: &SqlitePool) -> AppResult<Option<PinnedItem>>
         None => return Ok(None),
     };
 
-    // Чек-лист берётся тем же запросом, что и везде в приложении
-    // (`get_subtasks_impl`), а не своим SELECT: порядок подзадач задаётся в
-    // одном месте, иначе слот однажды показал бы их не в том порядке, что
-    // список задач.
+    // The checklist is fetched with the same query used everywhere else in the
+    // app (`get_subtasks_impl`) rather than a private SELECT: subtask ordering is
+    // defined in one place, or the slot would one day show them in a different
+    // order than the task list does.
     let subtasks = if kind == "task" {
         get_subtasks_impl(pool, &id).await?
     } else {
@@ -94,7 +96,7 @@ pub async fn get_pinned_impl(pool: &SqlitePool) -> AppResult<Option<PinnedItem>>
     }))
 }
 
-// Запись слота. kind = None очищает слот (кнопка «открепить»).
+// Writes the slot. kind = None clears it (the "unpin" button).
 pub async fn set_pinned_impl(
     pool: &SqlitePool,
     kind: Option<String>,
@@ -140,7 +142,7 @@ mod tests {
     fn normalize_kind_accepts_only_known() {
         assert_eq!(normalize_kind("task"), Some("task"));
         assert_eq!(normalize_kind("note"), Some("note"));
-        // Мусор в БД не должен ронять чтение слота — просто «пусто».
+        // Junk in the DB must not break reading the slot — it is simply empty.
         assert_eq!(normalize_kind("clipboard"), None);
         assert_eq!(normalize_kind(""), None);
         assert_eq!(normalize_kind("Task"), None);
@@ -203,13 +205,13 @@ mod tests {
         assert_eq!(got.id, task.id);
         assert_eq!(got.title, "Дописать главу");
         assert_eq!(got.text, "план на вечер");
-        // Задача без чек-листа — пустой список, а не отсутствие поля.
+        // A task with no checklist yields an empty list, not a missing field.
         assert!(got.subtasks.is_empty());
     }
 
-    // v0.9.34: чек-лист приезжает вместе со слотом — иначе окно правки знало бы
-    // о задаче меньше, чем список задач, и подзадачи пришлось бы догружать
-    // вторым запросом уже после отрисовки.
+    // The checklist arrives together with the slot — otherwise the editing
+    // window would know less about the task than the task list does, and the
+    // subtasks would have to be fetched by a second request after rendering.
     #[tokio::test]
     async fn pinned_task_carries_its_subtasks_in_order() {
         let pool = test_pool().await;
@@ -227,7 +229,7 @@ mod tests {
             .await
             .unwrap();
 
-        // Чужая задача со своим чек-листом — её подзадачи не должны протечь в слот.
+        // An unrelated task with its own checklist: its subtasks must not leak into the slot.
         let other = crate::commands::tasks::create_task_impl(&pool, new_task("Другая", ""))
             .await
             .unwrap();
@@ -246,9 +248,9 @@ mod tests {
         assert!(got.subtasks[1].done);
     }
 
-    // У заметки подзадач не бывает: поле есть, но всегда пустое. Проверяется,
-    // чтобы фронт мог рисовать чек-лист по одному и тому же полю без ветвления
-    // на «а есть ли оно вообще».
+    // A note never has subtasks: the field exists but is always empty. Checked so
+    // the frontend can render the checklist from one and the same field without
+    // branching on whether it is there at all.
     #[tokio::test]
     async fn pinned_note_has_no_subtasks() {
         let pool = test_pool().await;
@@ -263,9 +265,10 @@ mod tests {
         assert!(got.subtasks.is_empty());
     }
 
-    // Задача в Корзине не должна открываться хоткеем: пользователь её выбросил.
-    // Проверяется отдельно от заметок, потому что удаление у них разное —
-    // здесь строка остаётся в таблице, и без фильтра по deleted_at слот бы «жил».
+    // A task in the Trash must not open by hotkey: the user threw it away.
+    // Checked separately from notes because deletion differs between them — here
+    // the row stays in the table, and without a deleted_at filter the slot would
+    // keep "living".
     #[tokio::test]
     async fn trashed_task_reads_as_empty_slot() {
         let pool = test_pool().await;

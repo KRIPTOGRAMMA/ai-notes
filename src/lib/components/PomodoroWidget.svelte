@@ -4,8 +4,8 @@
   import Icon from "./Icon.svelte";
 
   import { t } from "../i18n.svelte";
-  // Опрос раз в секунду — состояние живёт в БД (settings), пишется циклом
-  // на бэкенде при каждой смене фазы; здесь просто отражаем его.
+  // Polled once a second: the state lives in the DB (settings) and is written by a
+  // loop on the backend at every phase change; here we merely reflect it.
   let phase = $state<"work" | "break" | "paused" | "off">("off");
   let until: Date | null = $state(null);
   let now = $state(new Date());
@@ -19,8 +19,8 @@
       phase = (s.phase as typeof phase) ?? "off";
       until = s.until ? new Date(s.until) : null;
     } catch {
-      // ИИ-провайдер тут ни при чём, а вот трекер могло не поднять —
-      // тихо оставляем предыдущее состояние
+      // The AI provider has nothing to do with it, but the tracker may have failed to
+      // start — we quietly keep the previous state
     }
   }
 
@@ -42,7 +42,7 @@
     return `${m}:${String(s).padStart(2, "0")}`;
   });
 
-  // Иконка фазы — SVG (v0.8.1): timer для работы/паузы, coffee для перерыва
+  // The phase icon is an SVG: timer for work and pauses, coffee for a break
   const phaseLabel = $derived(
     phase === "work" ? t("Фокус") : phase === "break" ? t("Перерыв") : phase === "paused" ? t("Пауза") : ""
   );

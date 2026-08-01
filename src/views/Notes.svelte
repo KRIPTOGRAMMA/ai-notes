@@ -16,13 +16,13 @@
   let editorRef: EditorExports | undefined = $state();
 
   let selectedId: string | null = $state(null);
-  let dailyKey = $state(0); // отслеживаем dailyRequested
+  let dailyKey = $state(0); // tracks dailyRequested
   let editTitle = $state("");
   let editContent = $state("");
   let editTags: string[] = $state([]);
   let editLinkedTaskId: string | null = $state(null);
   let editProjectId: string | null = $state(null);
-  // Напоминание (v0.9.18): datetime-local хранит локальное время, "" = без напоминания.
+  // Reminder: datetime-local holds local time, "" means no reminder.
   let editReminderAt = $state("");
   let tagInput = $state("");
   let saveTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -34,15 +34,15 @@
   const selected = $derived(noteStore.notes.find(n => n.id === selectedId) ?? null);
   const otherTitles = $derived(noteStore.notes.filter(n => n.id !== selectedId).map(n => n.title));
 
-  // Фильтр списка заметок
+  // The notes list filter
   let noteFilter = $state("");
   let filterTag = $state("");
   let filterProjectId = $state("");
   const allTags = $derived([...new Set(noteStore.notes.flatMap(n => n.tags))].sort());
-  // Закреплённые — всегда сверху (стабильно, иначе порядок внутри группы
-  // "прыгал" бы при равном pinned: Array.prototype.sort гарантирует
-  // стабильность спецификацией ES2019+, порядок backend'а — updated_at DESC —
-  // сохраняется внутри каждой группы).
+  // Pinned notes always come first, and stably: otherwise the order within a group
+  // would jump around for equal pinned values. Array.prototype.sort is guaranteed
+  // stable since ES2019, so the backend's order (updated_at DESC) is preserved
+  // inside each group.
   const filteredNotes = $derived(noteStore.notes.filter(n => {
     if (noteFilter && !n.title.toLowerCase().includes(noteFilter.toLowerCase())) return false;
     if (filterTag && !n.tags.includes(filterTag)) return false;
@@ -51,13 +51,13 @@
   }).sort((a, b) => Number(b.pinned) - Number(a.pinned)));
 
   async function togglePin(note: Note, e: MouseEvent) {
-    e.stopPropagation(); // не открывать заметку кликом по кнопке пина
+    e.stopPropagation(); // clicking the pin button must not open the note
     await noteStore.update(note.id, { pinned: !note.pinned });
   }
 
-  // --- Мультивыбор заметок (v0.9.15, следом за мультивыбором задач): тот же
-  // паттерн — Ctrl тоггл, Shift диапазон от последней выбранной строки в
-  // порядке видимого (отфильтрованного) списка.
+  // --- Multi-select for notes, following the one for tasks: the same pattern,
+  // where Ctrl toggles a row and Shift selects a range from the last selected row
+  // in the order of the visible (filtered) list.
   let selectedNoteIds = $state<Set<string>>(new Set());
   let lastSelectedNoteId: string | null = $state(null);
   let bulkNotesBusy = $state(false);
@@ -129,7 +129,7 @@
     }
   }
 
-  // Заметки, ссылающиеся на текущую через [[название]] (без учёта регистра).
+  // Notes referring to the current one via [[title]] (case-insensitively).
   const backlinks = $derived.by<Note[]>(() => {
     if (!selectedId) return [];
     const title = editTitle.trim().toLowerCase();
@@ -144,9 +144,10 @@
     return noteStore.notes.find(n => n.title.trim().toLowerCase() === key) ?? null;
   }
 
-  // Пишет title/content и, если название реально изменилось, обновляет
-  // [[ссылки]] в остальных заметках (v0.6.7). oldTitle берём из stale-snapshot
-  // (selected.title до этого save) — не из editTitle, который уже новый.
+  // Writes the title and content and, if the title actually changed, updates the
+  // [[links]] in the other notes. oldTitle comes from a stale snapshot
+  // (selected.title before this save), not from editTitle, which already holds the
+  // new value.
   async function persistNote(id: string, oldTitle: string, newTitle: string, content: string) {
     await noteStore.update(id, { title: newTitle, content });
     const trimmed = newTitle.trim();
@@ -161,8 +162,8 @@
     }
   }
 
-  // Отложенное сохранение нельзя терять при смене заметки: сбрасываем таймер
-  // и пишем сразу, пока selectedId/editContent ещё указывают на старую.
+  // A deferred save must not be lost when switching notes: we clear the timer and
+  // write immediately, while selectedId and editContent still point at the old one.
   async function flushPendingSave() {
     if (!saveTimeout) return;
     clearTimeout(saveTimeout);
@@ -174,8 +175,8 @@
     saving = false;
   }
 
-  // datetime-local работает в локальном времени — тот же приём, что TaskModal.svelte,
-  // иначе каждое открытие+сохранение сдвигало бы напоминание на смещение пояса.
+  // datetime-local works in local time — the same approach as TaskModal.svelte,
+  // otherwise every open-and-save would shift the reminder by the timezone offset.
   function toLocalInput(iso: string): string {
     const d = new Date(iso);
     const p = (n: number) => String(n).padStart(2, "0");
@@ -199,9 +200,9 @@
     extractedTasks = null;
   }
 
-  // CodeMirror меняет editContent напрямую через bind:value (без oninput-хука),
-  // поэтому автосохранение вешаем на $effect. suppressNextContentSave гасит
-  // срабатывание, вызванное самим selectNote (программная подмена, не ввод).
+  // CodeMirror changes editContent directly through bind:value (with no oninput
+  // hook), so autosave hangs off an $effect. suppressNextContentSave suppresses the
+  // run triggered by selectNote itself (a programmatic swap, not typing).
   let suppressNextContentSave = false;
   $effect(() => {
     editContent;
@@ -227,7 +228,7 @@
     const title = `${yyyy}-${mm}-${dd}`;
     const existing = findByTitle(title);
     if (existing) { selectNote(existing); return; }
-    // Дата вчера
+    // Yesterday's date
     const yesterday = new Date(today);
     yesterday.setDate(yesterday.getDate() - 1);
     const yy = yesterday.getFullYear();
@@ -237,7 +238,7 @@
     if (created) selectNote(created);
   }
 
-  // Открытие заметки по сигналу из глобального поиска (Ctrl+K).
+  // Opening a note on a signal from global search (Ctrl+K).
   $effect(() => {
     const id = noteStore.focusNoteId;
     if (!id) return;
@@ -246,7 +247,7 @@
     noteStore.clearFocus();
   });
 
-  // Сигнал «открыть заметку дня» (Ctrl+D из другого раздела).
+  // The "open today's note" signal (Ctrl+D from another section).
   $effect(() => {
     dailyKey;
     if (noteStore.dailyRequested === 0) return;
@@ -271,7 +272,7 @@
     }, 800);
   }
 
-  // Теги и привязка сохраняются сразу (без дебаунса).
+  // Tags and the task link are saved immediately (no debounce).
   async function saveMeta() {
     if (!selectedId) return;
     await noteStore.update(selectedId, {
@@ -302,12 +303,12 @@
 
   async function deleteSelected() {
     if (!selectedId) return;
-    // Отложенное сохранение удаляемой заметки не нужно — просто гасим таймер.
+    // A deferred save of a note being deleted is pointless — we just clear the timer.
     if (saveTimeout) { clearTimeout(saveTimeout); saveTimeout = null; }
     saving = false;
-    // Панель версий могла быть открыта на этой же заметке — её ревизии удаляются
-    // каскадом на бэкенде; закрываем панель, иначе клик по уже несуществующей
-    // ревизии («Восстановить», повторный просмотр) вернёт ошибку с бэкенда.
+    // The revisions panel may have been open on this very note, and its revisions
+    // are cascade-deleted on the backend. We close the panel, or clicking a revision
+    // that no longer exists ("Restore", or viewing it again) would return an error.
     revisionsOpen = false;
     viewingRevisionId = null;
     await noteStore.remove(selectedId);
@@ -318,11 +319,11 @@
     editLinkedTaskId = null;
   }
 
-  // Zen-режим (v0.9.03): полноэкранный редактор без панели списка/меты —
-  // хоткей Ctrl+Shift+Z (не входит в переназначаемые KEYBIND_ACTIONS — это
-  // локальное для раздела Заметок действие, не глобальная навигация) и Escape
-  // для выхода. Выбор другой заметки/переход из раздела молча закрывают режим
-  // через $effect ниже — иначе можно было бы «застрять» в zen с чужой заметкой.
+  // Zen mode: a fullscreen editor with no list or meta panel, toggled by
+  // Ctrl+Shift+Z (not one of the rebindable KEYBIND_ACTIONS — it is local to the
+  // Notes section rather than global navigation) and left with Escape. Selecting
+  // another note or leaving the section closes the mode silently via the $effect
+  // below, otherwise one could get "stuck" in zen with someone else's note.
   function toggleZen() {
     zenMode = !zenMode;
   }
@@ -338,10 +339,10 @@
     if (!selectedId) zenMode = false;
   });
 
-  // Локаль даты идёт за выбранным языком, а не зашита в "ru-RU" (v0.9.36):
-  // иначе в английском интерфейсе даты оставались бы «28 июл.». Остальные
-  // места в проекте форматируют через `[]` — системную локаль; здесь нужен
-  // именно выбранный язык, потому что он мог быть переключён вручную.
+  // The date locale follows the chosen language rather than being hardcoded to
+  // "ru-RU": otherwise dates would stay Russian in an English interface. Elsewhere
+  // the project formats through `[]`, i.e. the system locale; here the chosen
+  // language is what matters, because it may have been switched by hand.
   function formatDate(iso: string) {
     return new Date(iso).toLocaleDateString(i18n.lang === "en" ? "en-US" : "ru-RU",
       { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
@@ -351,7 +352,7 @@
     editLinkedTaskId ? taskStore.tasks.find(t => t.id === editLinkedTaskId) ?? null : null
   );
 
-  // --- ИИ-автолинковка (v0.6.8): «Предложить связи» ---
+  // --- AI auto-linking: "Suggest links" ---
   let aiEnabled = $state(false);
   let linkSuggesting = $state(false);
   let linkSuggestions: { noteId: string; titles: string[]; error: string | null } | null = $state(null);
@@ -370,16 +371,16 @@
 
   function acceptLinkSuggestion(title: string) {
     const sep = editContent && !editContent.endsWith("\n") ? "\n" : "";
-    editContent = `${editContent}${sep}[[${title}]]`; // сохранение — через $effect на editContent
+    editContent = `${editContent}${sep}[[${title}]]`; // saving happens via the $effect on editContent
     linkSuggestions = linkSuggestions
       ? { ...linkSuggestions, titles: linkSuggestions.titles.filter(t => t !== title) }
       : null;
   }
 
-  // --- ИИ по выделению в редакторе (v0.9.09): выделил текст -> меню действий
-  // рядом -> модель предлагает замену -> подтверждение/отмена. Тот же
-  // suggest-then-confirm паттерн, что автолинковка выше, просто с выбором
-  // одного из 4 действий и предпросмотром результата вместо списка чипов.
+  // --- AI on an editor selection: select text -> an action menu appears beside it
+  // -> the model proposes a replacement -> confirm or cancel. The same
+  // suggest-then-confirm pattern as auto-linking above, only with a choice among
+  // four actions and a preview of the result instead of a list of chips.
   type SelectionMenu = { text: string; from: number; to: number; left: number; top: number };
   type SelectionAction = "rewrite" | "shorten" | "expand" | "grammar";
   const SELECTION_ACTION_LABELS: Record<SelectionAction, string> = $derived({
@@ -391,8 +392,8 @@
   let selectionRequestId: string | null = null;
 
   function onEditorSelectionChange(sel: SelectionMenu | null) {
-    // Пока идёт запрос или показан результат — не даём меню выделения
-    // перескочить на новый диапазон под курсором.
+    // While a request is in flight or a result is shown, the selection menu must
+    // not jump to a new range under the cursor.
     if (selectionBusy || selectionResult) return;
     selectionMenu = sel;
   }
@@ -423,11 +424,11 @@
     selectionMenu = null;
   }
 
-  // --- ИИ: резюме заметки (v0.9.10) — окошко с 3-5 пунктами, клик по тексту
-  // копирует его в буфер и закрывает окно. Read-only результат без
-  // подтверждения-в-документ (в отличие от автолинковки/ИИ по выделению) —
-  // резюме не подставляется в заметку, оно просто для быстрого копирования
-  // куда угодно (чат, другую заметку, задачу).
+  // --- AI note summary: a small window with 3-5 bullet points, where clicking the
+  // text copies it to the clipboard and closes the window. A read-only result with
+  // no confirm-into-document step (unlike auto-linking or AI on a selection): the
+  // summary is not inserted into the note, it is simply there to be copied
+  // anywhere — a chat, another note, a task.
   let summarizing = $state(false);
   let summaryResult: { requestId: string; text: string; error: string | null } | null = $state(null);
   let summaryRequestId: string | null = null;
@@ -455,7 +456,7 @@
       await writeText(summaryResult.text);
       summaryCopied = true;
     } catch {
-      // буфер обмена недоступен — окно всё равно закрываем ниже, просто без копии
+      // the clipboard is unavailable — we still close the window below, just without a copy
     }
     setTimeout(() => { summaryResult = null; summaryCopied = false; }, summaryCopied ? 400 : 0);
   }
@@ -465,20 +466,20 @@
     summaryCopied = false;
   }
 
-  // --- ИИ: извлечение задач из заметки (v0.9.11) — suggest-then-confirm,
-  // как автолинковка/резюме: модель только предлагает список, каждая задача
-  // создаётся отдельным явным кликом (или разом через «Принять все»), ничего
-  // не создаётся автоматически.
+  // --- AI extraction of tasks from a note: suggest-then-confirm, like auto-linking
+  // and the summary. The model only proposes a list; every task is created by an
+  // explicit click (or all at once via "Accept all"), and nothing is created
+  // automatically.
   let extractingTasks = $state(false);
-  // v0.9.44: список строк заменён на строки с состоянием. Каждый пункт —
-  // свой id, галочка и редактируемый текст.
+  // A list of plain strings was replaced by rows with state: each item has its own
+  // id, a checkbox and editable text.
   //
-  // id, а не текст, как ключ: модель нередко выдаёт два похожих пункта, и
-  // прежний фильтр `items.filter(t => t !== title)` удалял оба сразу.
+  // The key is an id rather than the text: the model often produces two similar
+  // items, and the previous filter `items.filter(t => t !== title)` deleted both.
   //
-  // Формулировки модели черновые почти всегда («позвонить в сервис» вместо
-  // «позвонить в сервис и записаться на четверг»), поэтому текст правится
-  // здесь же — до создания, а не потом через модалку задачи.
+  // The model's wording is almost always a draft ("call the workshop" instead of
+  // "call the workshop and book Thursday"), so the text is edited right here,
+  // before creation, rather than afterwards through the task modal.
   type ExtractedTask = { id: string; title: string; checked: boolean };
   type ExtractedState = { requestId: string; items: ExtractedTask[]; error: string | null };
   let extractedTasks = $state<ExtractedState | null>(null);
@@ -503,8 +504,8 @@
     }
   }
 
-  // Создаёт только отмеченное. Пункты уходят из списка по мере создания,
-  // поэтому прерванная на середине операция не создаёт дублей при повторе.
+  // Creates only what is ticked. Items leave the list as they are created, so an
+  // operation interrupted halfway does not create duplicates when retried.
   async function createSelectedExtracted() {
     if (!extractedTasks || creatingExtractedTask) return;
     creatingExtractedTask = true;
@@ -522,7 +523,7 @@
           : null;
       }
       await taskStore.load();
-      // Пустой список закрывается сам: держать панель «создано 0 из 0» незачем.
+      // An empty list closes itself: there is no point keeping a "0 of 0 created" panel.
       if (extractedTasks && extractedTasks.items.length === 0) extractedTasks = null;
     } finally {
       creatingExtractedTask = false;
@@ -558,18 +559,18 @@
     extractedTasks = null;
   }
 
-  // --- Версии заметки (v0.7.12) ---
+  // --- Note revisions ---
   let revisionsOpen = $state(false);
   let revisions: NoteRevision[] = $state([]);
   let viewingRevisionId: string | null = $state(null);
   let viewingRevisionContent = $state("");
   let revisionsBusy = $state(false);
 
-  // --- Экспорт заметки в HTML (v0.9.08) ---
-  // Картинки хранятся файлами на диске (images_dir/<uuid>.<ext>), в редакторе
-  // они резолвятся через asset:// (convertFileSrc). Экспорт должен быть
-  // самодостаточным файлом — поэтому вместо asset:// зашиваем содержимое
-  // картинок как data: URI прямо в HTML.
+  // --- Exporting a note to HTML ---
+  // Images are stored as files on disk (images_dir/<uuid>.<ext>) and resolved in the
+  // editor through asset:// (convertFileSrc). An export must be a self-contained
+  // file, so instead of asset:// we embed the images' contents as data: URIs
+  // directly in the HTML.
   let exporting = $state(false);
 
   async function embedImages(html: string): Promise<string> {
@@ -597,7 +598,7 @@
           });
           replacements.set(filename, dataUrl);
         } catch {
-          // картинка недоступна — оставляем исходный src как есть
+          // the image is unavailable — the original src is left as is
         }
       })
     );
@@ -693,7 +694,7 @@ ${bodyHtml}
     noteStore.load();
     taskStore.load();
     pinnedStore.load();
-    // Капабилити-детект: при выключенном ИИ кнопка «Предложить связи» скрыта
+    // Capability detection: with AI turned off the "Suggest links" button is hidden
     api.getSettings().then(s => aiEnabled = s.ai_provider !== "none").catch(() => {});
     const unlisteners: UnlistenFn[] = [];
     (async () => {
@@ -702,7 +703,7 @@ ${bodyHtml}
         linkSuggestions = { noteId: e.payload.note_id, titles: e.payload.titles, error: e.payload.error };
       }));
       unlisteners.push(await listen<{ request_id: string; result: string | null; error: string | null }>("ai-selection-result", (e) => {
-        if (e.payload.request_id !== selectionRequestId) return; // ответ на уже закрытый/сменённый запрос
+        if (e.payload.request_id !== selectionRequestId) return; // a reply to an already closed or superseded request
         selectionBusy = false;
         selectionResult = { requestId: e.payload.request_id, text: e.payload.result ?? "", error: e.payload.error };
       }));
@@ -716,8 +717,8 @@ ${bodyHtml}
         extractingTasks = false;
         extractedTasks = {
           requestId: e.payload.request_id,
-          // отмечены по умолчанию: обычный сценарий — принять почти всё,
-          // а не отбирать по одному
+          // ticked by default: the usual case is accepting nearly everything rather
+          // than picking items one by one
           items: e.payload.items.map((title) => ({ id: crypto.randomUUID(), title, checked: true })),
           error: e.payload.error,
         };
@@ -730,7 +731,7 @@ ${bodyHtml}
 <svelte:window onkeydown={onZenKeydown} />
 
 <div class="notes card">
-  <!-- Список заметок -->
+  <!-- The notes list -->
   <div class="list-pane">
     <div class="list-head">
       <button class="btn-primary btn-sm" style="width:100%;" onclick={newNote}>{t("+ Новая заметка")}</button>
@@ -791,10 +792,10 @@ ${bodyHtml}
             >
               <Icon name="pin" size={13} />
             </button>
-            <!-- v0.9.33: «быстрый слот» — не путать с закреплением выше.
-                 Пин поднимает заметку наверх списка, молния кладёт её под
-                 глобальный хоткей. Разные иконки и разные подписи именно
-                 потому, что кнопки соседние. -->
+            <!-- The "quick slot" — not to be confused with pinning above. The pin
+                 raises a note to the top of the list, the bolt puts it under a
+                 global hotkey. Different icons and different labels precisely
+                 because the buttons sit next to each other. -->
             <button
               class="slot-btn"
               class:pinned={pinnedStore.is("note", note.id)}
@@ -809,11 +810,11 @@ ${bodyHtml}
     {/if}
   </div>
 
-  <!-- Редактор. В zen-режиме та же разметка становится fullscreen-оверлеем
-       через CSS (class:zen на .editor-pane) — не отдельная копия редактора:
-       два экземпляра LiveMarkdownEditor на одном bind:value означали бы два
-       независимых CodeMirror-состояния/undo-истории на один и тот же текст
-       (тот самый класс бага, что чинили в v0.6.9/v0.7 для смены заметок). -->
+  <!-- The editor. In zen mode the same markup becomes a fullscreen overlay via CSS
+       (class:zen on .editor-pane) rather than a separate copy of the editor: two
+       LiveMarkdownEditor instances over one bind:value would mean two independent
+       CodeMirror states and undo histories for the very same text — the same class
+       of bug that was fixed for switching between notes. -->
   <div class="editor-pane" class:zen={zenMode}>
     {#if !selected}
       <div class="empty" style="margin:auto;">{t("Выберите заметку или создайте новую")}</div>
@@ -858,8 +859,8 @@ ${bodyHtml}
             <span class="muted">{t("Связей не найдено")}</span>
           {:else}
             <span class="muted">{t("Связанные:")}</span>
-            <!-- Переменная цикла названа title, а не t: короткое `t` затеняло бы
-                 функцию перевода внутри блока (v0.9.46). -->
+            <!-- The loop variable is called title rather than t: a short `t` would
+                 shadow the translation function inside the block. -->
             {#each linkSuggestions.titles as title (title)}
               <button class="chip link-chip" onclick={() => acceptLinkSuggestion(title)} title="{t('Добавить связь')}: [[{title}]]">
                 + {title}
@@ -870,8 +871,8 @@ ${bodyHtml}
         </div>
       {/if}
 
-      <!-- v0.9.44: не чипы, а список строк — формулировки модели длинные и
-           почти всегда требуют правки, в чип они не помещались. -->
+      <!-- A list of rows rather than chips: the model's wording is long and almost
+           always needs editing, and it did not fit into a chip. -->
       {#if !zenMode && extractedTasks}
         <div class="extracted">
           {#if extractedTasks.error}
@@ -927,7 +928,7 @@ ${bodyHtml}
         </div>
       {/if}
 
-      <!-- Мета: привязка к задаче + теги — скрыта в zen-режиме -->
+      <!-- Meta: the task link and tags, hidden in zen mode -->
       {#if !zenMode}
         <div class="editor-meta">
           <label class="meta-label">
@@ -973,12 +974,12 @@ ${bodyHtml}
         </div>
       {/if}
 
-      <!-- Панель форматирования (v0.9.05): кнопки оборачивают выделение
-           markdown-маркерами через editorRef, тот же путь, что и хоткеи
-           (Ctrl+B/Ctrl+I/Ctrl+Shift+K), зарегистрированные внутри CM6-кеймапа
-           редактора — единая логика, а не дублирование в двух местах.
-           Скрыта в zen-режиме вместе с остальным «хромом» — хоткеи там
-           продолжают работать, панель не нужна. -->
+      <!-- The formatting toolbar: the buttons wrap the selection in markdown
+           markers through editorRef, the same path the hotkeys take
+           (Ctrl+B / Ctrl+I / Ctrl+Shift+K) as registered inside the editor's CM6
+           keymap — one shared implementation rather than two copies. Hidden in zen
+           mode along with the rest of the chrome; the hotkeys keep working there,
+           so the toolbar is not needed. -->
       {#if !zenMode}
         <div class="format-toolbar">
           <button class="btn-icon" title={t("Жирный (Ctrl+B)")} onclick={() => editorRef?.formatBold()}><Icon name="bold" /></button>
@@ -1011,10 +1012,11 @@ ${bodyHtml}
         {/key}
 
         {#if selectionMenu && aiEnabled && !zenMode}
-          <!-- position: fixed — coordsAtPos отдаёт viewport-relative координаты,
-               .editor-body не единственный positioned-предок в дереве (zen-режим
-               делает fixed-оверлей на .editor-pane), так что fixed надёжнее, чем
-               пересчёт в систему координат ближайшего relative-родителя. -->
+          <!-- position: fixed because coordsAtPos returns viewport-relative
+               coordinates and .editor-body is not the only positioned ancestor in
+               the tree (zen mode makes .editor-pane a fixed overlay), so fixed is
+               more reliable than recomputing into the nearest relative parent's
+               coordinate system. -->
           <div class="selection-menu" style="left:{selectionMenu.left}px; top:{selectionMenu.top}px;">
             {#if selectionBusy}
               <span class="muted" style="padding:4px 8px;">{t("Думаю…")}</span>
@@ -1256,11 +1258,12 @@ ${bodyHtml}
     opacity: 1;
   }
 
-  /* Быстрый слот (v0.9.33). Свой класс, а не .pin-btn с модификатором:
-     e2e закрепления ищет `.pin-btn` внутри строки и на двух совпадениях
-     падает — и по делу, это две разные функции, а не варианты одной.
-     Цвет активного состояния жёлтый, а не акцентный: рядом стоит пин,
-     активный как раз акцентным, одинаковый цвет их бы слил. */
+  /* The quick slot. Its own class rather than .pin-btn with a modifier: the
+     pinning e2e test looks for `.pin-btn` inside a row and fails on two
+     matches — rightly so, these are two different functions rather than
+     variants of one. The active colour is yellow rather than the accent:
+     the pin sits right beside it and is active in the accent colour, so the
+     same colour would blur the two together. */
   .slot-btn {
     flex-shrink: 0;
     padding: 4px;
@@ -1314,8 +1317,8 @@ ${bodyHtml}
     align-items: center;
     gap: 8px;
     padding: 8px 12px;
-    /* см. Tasks.svelte: место под кнопки окна (v0.9.40) — редактор занимает
-       правую часть окна, его шапка упирается прямо в них. */
+    /* see Tasks.svelte: room for the window buttons — the editor occupies the
+       right side of the window and its header runs straight into them. */
     padding-right: var(--wincontrols-w);
     border-bottom: 1px solid var(--border);
   }
@@ -1347,8 +1350,8 @@ ${bodyHtml}
     background: color-mix(in srgb, var(--accent) 12%, transparent);
   }
 
-  /* Извлечённые задачи (v0.9.44): вертикальный список вместо ряда чипов —
-     формулировки модели длинные, и в строке их видно целиком. */
+  /* Extracted tasks: a vertical list instead of a row of chips, because the
+     model's wording is long and a row shows it in full. */
   .extracted {
     padding: 6px 12px 8px;
     border-bottom: 1px solid var(--border);
@@ -1364,8 +1367,8 @@ ${bodyHtml}
     list-style: none;
     margin: 6px 0;
     padding: 0;
-    /* панель делит высоту с редактором: длинный список прокручивается сам,
-       а не выдавливает текст заметки за пределы окна */
+    /* the panel shares its height with the editor: a long list scrolls on its
+       own rather than pushing the note's text out of the window */
     max-height: 30vh;
     overflow-y: auto;
     display: flex;
@@ -1379,8 +1382,8 @@ ${bodyHtml}
     gap: 8px;
   }
 
-  /* Снятая галочка гасит строку, но текст остаётся читаемым и правится:
-     пользователь может передумать, не набирая заново. */
+  /* Unticking dims the row, but the text stays readable and editable: the
+     user may change their mind without retyping it. */
   .extracted-row.off .extracted-title {
     opacity: .5;
   }

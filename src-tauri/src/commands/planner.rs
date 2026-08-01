@@ -1,10 +1,10 @@
-// ИИ-планировщик (v0.5 фаза 4): «Спланируй день» и «Что делать сейчас».
-// Работает поверх данных фаз 1–3: бэклог, тайм-блоки, дедлайны, приоритеты.
+// The AI planner: "Plan my day" and "What should I do now".
+// Works over the backlog, time blocks, deadlines and priorities.
 //
-// Паттерн как у остальных ИИ-команд: команда спавнит задачу, результат летит
-// событием. Ответ модели для плана — строгий JSON, но парсим снисходительно
-// (вырезаем [...]), а валидацию (id, окно, пересечения) делаем сами: модели
-// доверять нельзя.
+// The pattern matches the other AI commands: the command spawns a task and the
+// result arrives as an event. The model's answer for a plan is strict JSON, but
+// we parse it leniently (cutting out [...]) and do the validation ourselves
+// (ids, the window, overlaps): the model cannot be trusted.
 
 use chrono::{DateTime, Timelike, Utc};
 use serde::{Deserialize, Serialize};
@@ -20,9 +20,9 @@ const SYSTEM_PLAN: &str = "Ты планировщик дня. Разложи с
 Планировать все задачи не обязательно — только что реально успеть. \
 Ответь ТОЛЬКО JSON-массивом объектов вида {\"id\": \"...\", \"start\": \"HH:MM\", \"mins\": N}, без пояснений.";
 
-// Пара промптов по языку интерфейса (v0.9.42): ответ читает пользователь.
-// Одной приписки «Reply in English» к русскому промпту оказалось мало —
-// см. комментарий у Prompt в commands/ai.rs.
+// A prompt pair keyed on the interface language: a user reads the answer.
+// Appending "Reply in English" to the Russian prompt was not enough — see the
+// comment on Prompt in commands/ai.rs.
 pub const SYSTEM_WHAT_NOW: Prompt = Prompt {
     ru: "Ты коуч по продуктивности. По контексту посоветуй, чем заняться \
 прямо сейчас, и почему — одним-двумя предложениями, без списков и вступлений.",
@@ -30,14 +30,14 @@ pub const SYSTEM_WHAT_NOW: Prompt = Prompt {
 right now and why — in one or two sentences, no lists and no preambles.",
 };
 
-const PLAN_END_HOUR: u32 = 22; // до скольки планируем день
+const PLAN_END_HOUR: u32 = 22; // how late into the day we plan
 const MAX_CANDIDATES: i64 = 15;
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct PlannedBlock {
     pub id: String,
     pub title: String,
-    pub scheduled_at: String, // RFC3339 — готово для update_task
+    pub scheduled_at: String, // RFC3339, ready for update_task
     pub mins: i64,
 }
 
@@ -47,7 +47,7 @@ pub struct PlanPayload {
     pub error: Option<String>,
 }
 
-// Минуты от полуночи локального дня.
+// Minutes since midnight of the local day.
 fn local_mins(dt: DateTime<Utc>) -> i64 {
     let l = dt.with_timezone(&chrono::Local);
     (l.hour() * 60 + l.minute()) as i64
@@ -60,12 +60,13 @@ fn fmt_hm(mins: i64) -> String {
 pub struct PlanContext {
     pub prompt: String,
     pub candidates: HashMap<String, String>, // id -> title
-    pub busy: Vec<(i64, i64)>,               // занятые интервалы, мин от полуночи
-    pub window: (i64, i64),                  // свободное окно
+    pub busy: Vec<(i64, i64)>,               // busy intervals, minutes since midnight
+    pub window: (i64, i64),                  // the free window
 }
 
-// Контекст «Спланируй день»: свободное окно от «сейчас» (кратно 15 мин) до 22:00,
-// занятость — сегодняшние блоки, кандидаты — бэклог по приоритету и дедлайну.
+// Context for "Plan my day": the free window from now (rounded to 15 minutes)
+// until 22:00, busy time taken from today's blocks, and candidates from the
+// backlog ordered by priority and deadline.
 pub async fn plan_day_context(pool: &SqlitePool, now: DateTime<Utc>) -> Result<PlanContext, String> {
     let now_mins = local_mins(now);
     let window_start = ((now_mins + 14) / 15) * 15;
@@ -74,7 +75,7 @@ pub async fn plan_day_context(pool: &SqlitePool, now: DateTime<Utc>) -> Result<P
         return Err(format!("День уже закончился (планирование до {}:00)", PLAN_END_HOUR));
     }
 
-    // Занятость: блоки на сегодня (по локальной дате)
+    // Busy time: today's blocks (by local date)
     let today = now.with_timezone(&chrono::Local).date_naive();
     let rows = sqlx::query(
         "SELECT title, scheduled_at, COALESCE(scheduled_mins, 60) AS mins
@@ -98,7 +99,7 @@ pub async fn plan_day_context(pool: &SqlitePool, now: DateTime<Utc>) -> Result<P
     }
     busy.sort();
 
-    // Рутины на сегодня: занятость, которую не отменяют
+    // Today's routines: busy time that does not get cancelled
     let routine_busy = routines::today_routine_busy(pool).await.map_err(|e| e.to_string())?;
     for (start, end, title) in &routine_busy {
         busy.push((*start, *end));
@@ -106,7 +107,7 @@ pub async fn plan_day_context(pool: &SqlitePool, now: DateTime<Utc>) -> Result<P
     }
     busy.sort();
 
-    // Кандидаты: бэклог без блока, важные и горящие — первыми
+    // Candidates: backlog items with no block; important and urgent ones first
     let rows = sqlx::query(
         "SELECT id, title, priority, deadline FROM tasks
          WHERE hidden = 0 AND scheduled_at IS NULL AND status IN ('Todo', 'InProgress') AND deleted_at IS NULL
@@ -161,8 +162,9 @@ struct RawPlanItem {
     mins: i64,
 }
 
-// Разбор и валидация ответа модели: неизвестные id, кривое время, выход за окно
-// и пересечения (с занятым и друг с другом) молча выбрасываются.
+// Parses and validates the model's answer: unknown ids, malformed times, items
+// outside the window and overlaps (with busy time and with each other) are
+// silently discarded.
 pub fn parse_plan(raw: &str, ctx: &PlanContext) -> Vec<(String, i64, i64)> {
     let start_idx = raw.find('[');
     let end_idx = raw.rfind(']');
@@ -187,7 +189,7 @@ pub fn parse_plan(raw: &str, ctx: &PlanContext) -> Vec<(String, i64, i64)> {
     for (id, start, mins) in parsed {
         if start < ctx.window.0 || start + mins > ctx.window.1 { continue; }
         if taken.iter().any(|&(f, t)| start < t && start + mins > f) { continue; }
-        if plan.iter().any(|p| p.0 == id) { continue; } // дубль задачи
+        if plan.iter().any(|p| p.0 == id) { continue; } // a duplicate task
         taken.push((start, start + mins));
         plan.push((id, start, mins));
     }
@@ -201,9 +203,9 @@ pub async fn ai_plan_day(app: tauri::AppHandle) -> Result<(), String> {
         let r = async {
             let pool = app.state::<SqlitePool>();
             let ctx = plan_day_context(pool.inner(), now).await?;
-            // verbatim: ответ — чистый JSON из id и времён, ни одного слова
-            // для человека. Требование языка здесь бессмысленно и только
-            // повышает шанс, что модель добавит пояснение вместо массива.
+            // verbatim: the answer is pure JSON of ids and times, not a single
+            // word for a human. A language requirement here is meaningless and
+            // only raises the chance the model adds prose instead of an array.
             let raw = ask_ai_verbatim(&app, SYSTEM_PLAN, &ctx.prompt).await?;
             let plan = parse_plan(&raw, &ctx);
             if plan.is_empty() {
@@ -237,7 +239,7 @@ pub async fn ai_plan_day(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-// Контекст «Что делать сейчас»: текущий/следующий блок, просрочки, топ-приоритеты.
+// Context for "What should I do now": the current/next block, overdue items, top priorities.
 pub async fn what_now_context(pool: &SqlitePool, now: DateTime<Utc>, lang: crate::i18n::Lang) -> Result<String, String> {
     let mut lines = vec![crate::i18n::tr_args("Сейчас {time}.", lang, &[("time", fmt_hm(local_mins(now)))])];
 
@@ -362,7 +364,7 @@ mod tests {
     }
 
     fn noon_utc() -> DateTime<Utc> {
-        // Сегодняшний локальный полдень — окно 12:00–22:00 гарантированно открыто
+        // Local noon today — the 12:00-22:00 window is guaranteed to be open
         chrono::Local::now()
             .date_naive()
             .and_hms_opt(12, 0, 0)
@@ -379,15 +381,15 @@ mod tests {
         let now = noon_utc();
         insert_task(&pool, "мелочь", "Low", None, None).await;
         insert_task(&pool, "горящая", "Critical", Some(now.to_rfc3339()), None).await;
-        // блок сегодня в 14:00 — занятость
+        // a block today at 14:00 — busy time
         let block_start = noon_utc() + chrono::Duration::hours(2);
         insert_task(&pool, "встреча", "Medium", None, Some(block_start.to_rfc3339())).await;
 
         let ctx = plan_day_context(&pool, now).await.unwrap();
-        assert_eq!(ctx.candidates.len(), 2); // запланированная не кандидат
+        assert_eq!(ctx.candidates.len(), 2); // an already-scheduled task is not a candidate
         assert_eq!(ctx.window.0, 12 * 60);
         assert_eq!(ctx.busy, vec![(14 * 60, 15 * 60)]);
-        // критичная в промпте раньше мелочи
+        // the critical one comes before the trivial one in the prompt
         let crit = ctx.prompt.find("горящая").unwrap();
         let low = ctx.prompt.find("мелочь").unwrap();
         assert!(crit < low, "{}", ctx.prompt);
@@ -397,10 +399,10 @@ mod tests {
     #[tokio::test]
     async fn plan_context_errors_when_empty_or_late() {
         let pool = test_pool().await;
-        assert!(plan_day_context(&pool, noon_utc()).await.is_err()); // пустой бэклог
+        assert!(plan_day_context(&pool, noon_utc()).await.is_err()); // an empty backlog
 
         insert_task(&pool, "задача", "Medium", None, None).await;
-        let late = noon_utc() + chrono::Duration::hours(10); // 22:00 — окно закрыто
+        let late = noon_utc() + chrono::Duration::hours(10); // 22:00, the window is closed
         assert!(plan_day_context(&pool, late).await.is_err());
     }
 
@@ -424,8 +426,10 @@ mod tests {
          {"id":"a","start":"16:00","mins":30},
          {"id":"c","start":"10:20","mins":600}]"#;
         let plan = parse_plan(raw, &ctx);
-        // a в 10:00 (mins снап к 45), zzz — чужой id, b пересекает занятое,
-        // c в 08:00 — до окна, второй a — дубль, c в 10:20 — кламп 240 мин но пересекает a? нет: a 10:00–10:45, c 10:20 пересекает → выброшен
+        // a at 10:00 (mins snapped to 45); zzz is an unknown id; b overlaps busy
+        // time; c at 08:00 is before the window; the second a is a duplicate;
+        // c at 10:20 is clamped to 240 min but overlaps a (10:00-10:45), so it
+        // is discarded.
         assert_eq!(plan.len(), 1);
         assert_eq!(plan[0], ("a".to_string(), 10 * 60, 45));
     }
@@ -450,10 +454,10 @@ mod tests {
     async fn what_now_context_mentions_block_overdue_and_priorities() {
         let pool = test_pool().await;
         let now = noon_utc();
-        // идущий блок: начался в 11:30 на 60 мин
+        // a running block: started at 11:30 for 60 minutes
         insert_task(&pool, "фокус", "Medium", None,
             Some((now - chrono::Duration::minutes(30)).to_rfc3339())).await;
-        // следующий блок в 15:00
+        // the next block at 15:00
         insert_task(&pool, "созвон", "Medium", None,
             Some((now + chrono::Duration::hours(3)).to_rfc3339())).await;
         insert_task(&pool, "просроченная", "High",
@@ -466,15 +470,15 @@ mod tests {
         assert!(s.contains("Важные задачи:"), "{s}");
     }
 
-    // См. english_context_has_no_russian_left в commands/ai.rs: контекст для
-    // модели обязан быть на языке интерфейса, иначе английский промпт тонет
-    // в русских данных и ответ приходит русским.
+    // See english_context_has_no_russian_left in commands/ai.rs: the context sent
+    // to the model must be in the interface language, or an English prompt drowns
+    // in Russian data and the answer comes back in Russian.
     #[tokio::test]
     async fn english_what_now_context_has_no_russian_left() {
         let pool = test_pool().await;
         let now = noon_utc();
-        // названия задач намеренно английские: проверяем строки-обёртки,
-        // а не пользовательские данные — их переводить нельзя
+        // the task titles are deliberately English: we check the wrapper strings,
+        // not user data, which must never be translated
         insert_task(&pool, "focus", "Medium", None,
             Some((now - chrono::Duration::minutes(30)).to_rfc3339())).await;
         insert_task(&pool, "call", "Medium", None,

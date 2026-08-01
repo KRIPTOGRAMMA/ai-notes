@@ -68,8 +68,8 @@ describe("Quadtree repulsion", () => {
   });
 
   it("approximates a distant cluster as roughly the same total force as brute force (theta default)", () => {
-    // Плотный кластер из 50 узлов далеко от тестируемой точки — с theta=0.8
-    // приближение должно быть в пределах разумной погрешности от точного счёта.
+    // A dense cluster of 50 nodes far from the point under test: with theta=0.8 the
+    // approximation must stay within a reasonable margin of the exact computation.
     const bodies: QuadBody[] = [];
     for (let i = 0; i < 50; i++) {
       bodies.push({ id: `n${i}`, x: 1000 + (i % 10) * 2, y: 1000 + Math.floor(i / 10) * 2, mass: 1 });
@@ -91,11 +91,11 @@ describe("Quadtree repulsion", () => {
     expect(() => new Quadtree(boundsFor(bodies), bodies)).not.toThrow();
   });
 
-  // Регрессия: на пределе глубины дерева совпадающие координаты когда-то
-  // молча теряли тела (лист делился на 4 пустых потомка, а тело
-  // отбрасывалось) — масса всего дерева схлопывалась и отталкивание умирало
-  // на весь граф. Узлы у края канваса зажимаются в одну точку клампом
-  // позиций, так что случай достижим в обычной работе, а не только в теории.
+  // A regression: at the tree's depth limit identical coordinates once silently lost
+  // bodies (the leaf split into 4 empty children while the body was discarded) — the
+  // whole tree's mass collapsed and repulsion died across the entire graph. Nodes at
+  // the canvas edge are clamped into a single point by the position clamp, so the
+  // case is reachable in ordinary use rather than only in theory.
   it("conserves mass when bodies share coordinates", () => {
     const bodies: QuadBody[] = [];
     for (let i = 0; i < 30; i++) bodies.push({ id: `dup${i}`, x: 50, y: 50, mass: 1 });
@@ -106,7 +106,7 @@ describe("Quadtree repulsion", () => {
     expect(Math.hypot(approx.fx, approx.fy)).toBeGreaterThan(Math.hypot(exact.fx, exact.fy) * 0.8);
   });
 
-  // Даже две совпадающие точки роняли массу всего дерева до 1.
+  // Even two coincident points dropped the whole tree's mass to 1.
   it("keeps repulsion alive for the whole graph when two nodes coincide", () => {
     const bodies: QuadBody[] = [
       { id: "a", x: 100, y: 100, mass: 1 },
@@ -119,7 +119,7 @@ describe("Quadtree repulsion", () => {
     expect(Math.hypot(approx.fx, approx.fy)).toBeGreaterThan(Math.hypot(exact.fx, exact.fy) * 0.8);
   });
 
-  // Соседей с теми же координатами исключать нельзя — только себя.
+  // Neighbours sharing our coordinates must not be excluded — only ourselves.
   it("still repels a body sitting at the same spot as the excluded one", () => {
     const bodies: QuadBody[] = [
       { id: "self", x: 100, y: 100, mass: 1 },
@@ -134,7 +134,7 @@ describe("Quadtree repulsion", () => {
     const bodies: QuadBody[] = [{ id: "only", x: 10, y: 10, mass: 2 }];
     const tree = new Quadtree(boundsFor(bodies), bodies);
     const { fx, fy } = tree.repulsion(0, 0, "someone-else", 100, 0.5);
-    expect(fx).toBeLessThan(0); // отталкивается влево от (10,10)
-    expect(fy).toBeLessThan(0); // и вверх
+    expect(fx).toBeLessThan(0); // pushed left, away from (10,10)
+    expect(fy).toBeLessThan(0); // and upward
   });
 });

@@ -1,9 +1,9 @@
-// Barnes-Hut quadtree (v0.9.23) — приближённый расчёт отталкивания узлов в
-// force-directed графе заметок (NotesGraph.svelte) за O(n log n) вместо
-// точного O(n²) перебора всех пар на каждый кадр симуляции. Дальние группы
-// узлов приближаются одной точкой с суммарной массой в её центре масс —
-// чем дальше узел от группы (относительно её размера), тем грубее и дешевле
-// приближение; theta регулирует этот компромисс точность/скорость.
+// A Barnes-Hut quadtree: an approximate computation of node repulsion in the
+// force-directed notes graph (NotesGraph.svelte) in O(n log n) instead of an exact
+// O(n²) pass over every pair on each simulation frame. Distant groups of nodes are
+// approximated by a single point carrying their total mass at the centre of mass —
+// the further a node is from a group (relative to the group's size), the coarser
+// and cheaper the approximation; theta governs that accuracy/speed trade-off.
 
 export type QuadBody = { id: string; x: number; y: number; mass: number };
 
@@ -11,12 +11,12 @@ type Bounds = { x: number; y: number; size: number };
 
 type QuadNode = {
   bounds: Bounds;
-  // Лист хранит список тел, а не одно: на пределе глубины (совпадающие
-  // координаты) деление больше не разносит тела по квадрантам, и они
-  // обязаны копиться здесь — иначе их масса теряется, см. insert().
+  // A leaf holds a list of bodies rather than one: at the depth limit (identical
+  // coordinates) subdividing no longer separates bodies into quadrants, so they must
+  // accumulate here — otherwise their mass is lost, see insert().
   bodies: QuadBody[];
   mass: number;
-  cx: number; cy: number; // центр масс поддерева
+  cx: number; cy: number; // the subtree's centre of mass
   children: [QuadNode, QuadNode, QuadNode, QuadNode] | null; // NW NE SW SE
 };
 
@@ -44,10 +44,10 @@ function insert(node: QuadNode, body: QuadBody, depth: number): void {
     const q = quadrantOf(node.bounds, body.x, body.y);
     insert(node.children[q], body, depth + 1);
   } else if (node.bodies.length === 0 || depth >= MAX_DEPTH) {
-    // Пустой лист — просто кладём тело. На пределе глубины (совпадающие или
-    // почти совпадающие координаты) деление уже не разнесёт тела по разным
-    // квадрантам и рекурсировало бы до переполнения стека, поэтому лист
-    // становится «толстым»: копит несколько тел и сохраняет их массу.
+    // An empty leaf simply takes the body. At the depth limit (identical or nearly
+    // identical coordinates) subdividing would no longer separate the bodies into
+    // different quadrants and would recurse until the stack overflowed, so the leaf
+    // becomes "fat": it accumulates several bodies and preserves their mass.
     node.bodies.push(body);
   } else {
     const existing = node.bodies;
@@ -79,8 +79,8 @@ function insert(node: QuadNode, body: QuadBody, depth: number): void {
   node.cy = mass > 0 ? cy / mass : 0;
 }
 
-// Стабильный «случайный» угол из id — детерминированный, чтобы совпавшие
-// узлы расталкивались одинаково от кадра к кадру, а не дрожали.
+// A stable "random" angle derived from the id — deterministic, so coincident nodes
+// are pushed apart the same way from frame to frame instead of jittering.
 function hashAngle(id: string): number {
   let h = 0;
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
@@ -99,10 +99,10 @@ export class Quadtree {
     for (const b of bodies) insert(this.root, b, 0);
   }
 
-  // Приближённая сила отталкивания на тело с координатами (x,y,excludeId),
-  // по закону force = strength / distSq (та же формула, что была в прямом
-  // O(n²) переборе) — theta контролирует точность/скорость приближения:
-  // меньше theta -> точнее (ближе к прямому перебору), больше -> быстрее.
+  // The approximate repulsion force on a body at (x, y, excludeId), following
+  // force = strength / distSq (the same formula the direct O(n²) pass used). theta
+  // controls the approximation's accuracy versus speed: a smaller theta is more
+  // accurate (closer to the direct pass), a larger one is faster.
   repulsion(x: number, y: number, excludeId: string, strength: number, theta = 0.8): { fx: number; fy: number } {
     let fx = 0, fy = 0;
     const stack: QuadNode[] = [this.root];
@@ -111,15 +111,17 @@ export class Quadtree {
       if (node.mass === 0) continue;
 
       if (!node.children) {
-        // Лист: считаем каждое тело точно. Себя пропускаем, но соседей с
-        // теми же координатами — нет, иначе «толстый» лист терял бы их вклад.
+        // A leaf: every body is computed exactly. We skip ourselves but not the
+        // neighbours sharing our coordinates, or a "fat" leaf would lose their
+        // contribution.
         for (const b of node.bodies) {
           if (b.id === excludeId) continue;
           let dx = x - b.x, dy = y - b.y;
           if (dx === 0 && dy === 0) {
-            // Тела ровно друг на друге: сила есть, а направления нет —
-            // (dx/dist) обнуляет обе оси и узлы залипают навсегда. Даём
-            // детерминированный по id толчок, чтобы они разъехались.
+            // Bodies exactly on top of one another: there is a force but no
+            // direction — (dx/dist) zeroes both axes and the nodes stick together
+            // forever. We give them a nudge derived deterministically from the id so
+            // they drift apart.
             const a = hashAngle(b.id);
             dx = Math.cos(a) * 0.5;
             dy = Math.sin(a) * 0.5;
@@ -135,11 +137,12 @@ export class Quadtree {
 
       const ddx = x - node.cx, ddy = y - node.cy;
       const ddistSq = Math.max(ddx * ddx + ddy * ddy, 1);
-      // Barnes-Hut критерий: если узел квадродерева достаточно мал и далёк
-      // (size/dist < theta), приближаем всё поддерево одной точкой массы.
-      // Центр масс ровно в точке запроса — направления нет, приближать
-      // нельзя (сила молча обнулится): спускаемся к листьям, там тела
-      // разбираются поимённо и себя можно исключить точно.
+      // The Barnes-Hut criterion: if a quadtree node is small and distant enough
+      // (size/dist < theta), the whole subtree is approximated by a single point mass.
+      // When the centre of mass sits exactly at the query point there is no direction
+      // and approximating is not allowed (the force would silently zero out), so we
+      // descend to the leaves, where the bodies are handled individually and we can
+      // exclude ourselves exactly.
       if (node.bounds.size / Math.sqrt(ddistSq) < theta && (ddx !== 0 || ddy !== 0)) {
         const dist = Math.sqrt(ddistSq);
         const force = (strength * node.mass) / ddistSq;
@@ -153,8 +156,8 @@ export class Quadtree {
   }
 }
 
-// Границы квадрата, накрывающего все точки с запасом — квадродерево требует
-// квадратную (не прямоугольную) область, иначе quadrantOf делит неровно.
+// The bounds of a square covering all the points with room to spare: a quadtree
+// requires a square (not rectangular) region, or quadrantOf divides it unevenly.
 export function boundsFor(points: { x: number; y: number }[], padding = 50): Bounds {
   if (points.length === 0) return { x: 0, y: 0, size: 1 };
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;

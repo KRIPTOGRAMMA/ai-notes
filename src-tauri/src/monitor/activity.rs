@@ -37,7 +37,7 @@ impl ActivityTracker {
         }
     }
 
-    // Вызывается с фронта когда есть mousemove/keydown
+    // Called from the frontend on mousemove/keydown
     pub fn record_input(&self) {
         let mut last = self.last_input.lock().unwrap();
         *last = Utc::now();
@@ -58,18 +58,18 @@ impl ActivityTracker {
     }
 }
 
-// Результат одного тика конечного автомата простоя. Чистые данные — без БД,
-// уведомлений и блокировок, чтобы логику можно было покрыть юнит-тестами.
+// The result of one tick of the idle state machine. Pure data — no DB, no
+// notifications, no locks — so the logic can be covered by unit tests.
 #[derive(Debug, Clone, PartialEq)]
 pub struct IdleTick {
     pub state: ActivityState,
     pub idle_since: Option<chrono::DateTime<Utc>>,
-    // Some(минуты) — если это переход Idle→Active и стоит подумать об уведомлении
+    // Some(minutes) when this is an Idle->Active transition worth considering a notification for
     pub notify_return_mins: Option<i64>,
 }
 
-// Чистая логика одного тика: по предыдущему состоянию и таймингу считает новое
-// состояние, момент начала простоя и надо ли уведомить о возвращении.
+// The pure logic of one tick: from the previous state and the timing it derives
+// the new state, when idleness began, and whether to notify about the return.
 pub fn step_idle(
     prev_state: &ActivityState,
     idle_since: Option<chrono::DateTime<Utc>>,
@@ -110,8 +110,8 @@ pub fn start_activity_loop(
 ) {
     tokio::spawn(async move {
         let mut tick = interval(Duration::from_secs(log_interval_secs));
-        // Локальное prev_state: tracker.state мгновенно сбрасывается в Active
-        // из record_input, поэтому переход Idle→Active по нему не поймать.
+        // A local prev_state: tracker.state is reset to Active immediately by
+        // record_input, so an Idle->Active transition cannot be caught from it.
         let mut prev_state = ActivityState::Active;
         let mut idle_since: Option<chrono::DateTime<Utc>> = None;
         loop {
@@ -129,9 +129,9 @@ pub fn start_activity_loop(
                 *state = new_state.clone();
             }
 
-            // Переход Idle→Active: уведомление о возвращении (кроме Focus/паузы)
+            // An Idle->Active transition: notify about the return (except in Focus mode or while paused)
             if let Some(away_mins) = step.notify_return_mins {
-                // Копируем режим в локальную переменную: держать lock через .await нельзя
+                // Copy the mode into a local variable: a lock must not be held across .await
                 let mode = work_mode.lock().unwrap().clone();
                 if !crate::notifier::mute::muted_now(&pool, &mode).await {
                     notify_return(&app, &pool, away_mins).await;
@@ -139,7 +139,7 @@ pub fn start_activity_loop(
             }
             prev_state = new_state.clone();
 
-            // Накапливаем статистику
+            // Accumulate the statistics
             match new_state {
                 ActivityState::Active => {
                     let mut secs = tracker.active_secs.lock().unwrap();
@@ -151,8 +151,9 @@ pub fn start_activity_loop(
                 }
             }
 
-            // Логируем в БД каждый тик. Для Active-тика фиксируем класс окна
-            // в фокусе (если провайдер есть): локальный сокет, цена нулевая.
+            // Log to the DB on every tick. For an Active tick we record the class
+            // of the focused window if a provider exists: a local socket, so the
+            // cost is nil.
             let state_str = match new_state {
                 ActivityState::Idle => "Idle",
                 ActivityState::Active => "Active",
@@ -162,12 +163,12 @@ pub fn start_activity_loop(
                 _ => None,
             };
 
-            // Домен (v0.9.31) — только при явно включённой настройке и только
-            // для браузеров. Заголовок живёт в этой функции и дальше не идёт:
-            // в БД уходит либо домен, либо NULL. Настройка читается каждый тик,
-            // а не кэшируется при старте, чтобы выключение действовало сразу,
-            // без перезапуска приложения — для приватностной галочки это
-            // важнее, чем сэкономленный запрос раз в минуту.
+            // The domain is extracted only when the setting is explicitly on and
+            // only for browsers. The title lives inside this function and goes no
+            // further: either a domain or NULL reaches the DB. The setting is read
+            // every tick rather than cached at startup so that turning it off takes
+            // effect immediately, without restarting the app — for a privacy
+            // checkbox that matters more than one saved query per minute.
             let domain = match &window {
                 Some(w) if crate::monitor::domain::is_browser(&w.app) => {
                     if crate::commands::settings::get_bool_setting(&pool, "track_domains", false).await {
@@ -199,8 +200,9 @@ pub fn start_activity_loop(
     });
 }
 
-// Нотификация при возвращении после простоя: топ-задача = ближайший дедлайн,
-// затем наивысший приоритет. Не шлём, если пользователь отходил ненадолго.
+// The notification shown on returning from idleness: the top task is the one
+// with the nearest deadline, then the highest priority. Nothing is sent if the
+// user was away only briefly.
 async fn notify_return(app: &tauri::AppHandle, pool: &SqlitePool, away_mins: i64) {
     let min_mins = crate::commands::settings::get_u64_setting(pool, "idle_notify_min_mins", 10).await;
     if away_mins < min_mins as i64 {
@@ -212,8 +214,8 @@ async fn notify_return(app: &tauri::AppHandle, pool: &SqlitePool, away_mins: i64
         .as_deref()
         != Some("false");
 
-    // Контекстный триггер (§5.4): долго отсутствовал и есть задача «в работе» —
-    // любая InProgress, не обязательно топовая по дедлайну.
+    // A contextual trigger: the user was away for a long time and there is a task
+    // in progress — any InProgress one, not necessarily the top by deadline.
     let in_progress = if context_on && away_mins >= CONTEXT_RETURN_MINS {
         nearest_task(pool, &["InProgress"]).await
     } else {
@@ -238,8 +240,8 @@ async fn notify_return(app: &tauri::AppHandle, pool: &SqlitePool, away_mins: i64
     crate::notifier::scheduler::send_notification(app, pool, "activity_return", "AI Notes", &body).await;
 }
 
-// Ближайшая (по дедлайну, затем по приоритету) видимая задача с одним из
-// заданных статусов. Статусы — фиксированные строки из кода, не ввод пользователя.
+// The nearest visible task (by deadline, then by priority) in one of the given
+// statuses. The statuses are fixed strings from the code, not user input.
 pub async fn nearest_task(pool: &SqlitePool, statuses: &[&str]) -> Option<String> {
     use sqlx::Row;
     let placeholders = vec!["?"; statuses.len()].join(", ");
@@ -267,7 +269,7 @@ pub async fn nearest_task(pool: &SqlitePool, statuses: &[&str]) -> Option<String
         .map(|row| row.get("title"))
 }
 
-// Порог «долгого» отсутствия для контекстного сообщения про InProgress-задачу.
+// The threshold for a "long" absence before the contextual InProgress message.
 const CONTEXT_RETURN_MINS: i64 = 40;
 
 #[derive(serde::Serialize)]
@@ -296,9 +298,9 @@ pub struct ActiveIdleRatio {
     pub week_idle: i64,
 }
 
-// Простой внутри запланированного тайм-блока (v0.9.30). Блок — это план,
-// а сколько времени реально работалось, знает мониторинг: сопоставление
-// даёт честное «план vs факт» вместо расписания, принятого за факт.
+// Idle time inside a planned time block. A block is a plan, while monitoring
+// knows how much time was really worked: matching the two gives an honest
+// plan-versus-actual instead of a schedule mistaken for a fact.
 #[derive(Debug, serde::Serialize, PartialEq)]
 pub struct BlockIdle {
     pub task_id: String,
@@ -308,11 +310,11 @@ pub struct BlockIdle {
     pub active_mins: i64,
 }
 
-// Пересечение двух полуинтервалов [a_start, a_end) и [b_start, b_end)
-// в секундах. Вынесено отдельной чистой функцией: это единственная
-// арифметика во всей фиче, и именно в ней легко ошибиться на границах
-// (тик мониторинга частично попадает в блок, начинается до него или
-// заканчивается после).
+// The intersection of two half-open intervals [a_start, a_end) and
+// [b_start, b_end), in seconds. Extracted as a pure function because it is the
+// only arithmetic in the whole feature and precisely where boundary mistakes are
+// easy (a monitoring tick partly falls inside a block, starts before it, or ends
+// after it).
 pub fn overlap_secs(a_start: i64, a_end: i64, b_start: i64, b_end: i64) -> i64 {
     let start = a_start.max(b_start);
     let end = a_end.min(b_end);
@@ -324,28 +326,28 @@ mod tests {
     use super::*;
     use chrono::Duration as ChronoDuration;
 
-    // v0.9.30: границы — единственное место, где эта фича может тихо
-    // соврать (посчитать простой, которого не было, или потерять реальный).
+    // The boundaries are the one place where this feature can quietly lie: count
+    // idleness that never happened, or lose idleness that did.
     #[test]
     fn overlap_handles_all_boundary_cases() {
-        // Тик целиком внутри блока
+        // The tick lies entirely inside the block
         assert_eq!(overlap_secs(100, 160, 0, 600), 60);
-        // Блок целиком внутри тика (длинный idle-тик поглощает короткий блок)
+        // The block lies entirely inside the tick (a long idle tick swallows a short block)
         assert_eq!(overlap_secs(0, 600, 100, 160), 60);
-        // Частичное перекрытие слева и справа
+        // Partial overlap on the left and on the right
         assert_eq!(overlap_secs(0, 120, 60, 600), 60);
         assert_eq!(overlap_secs(540, 660, 0, 600), 60);
-        // Точное совпадение границ
+        // Exactly coinciding boundaries
         assert_eq!(overlap_secs(0, 600, 0, 600), 600);
 
-        // Никакого перекрытия — ноль, а НЕ отрицательное число: иначе
-        // суммирование по тикам вычитало бы чужое время.
+        // No overlap yields zero, NOT a negative number: otherwise summing over
+        // ticks would subtract unrelated time.
         assert_eq!(overlap_secs(0, 60, 600, 660), 0);
         assert_eq!(overlap_secs(600, 660, 0, 60), 0);
-        // Касание в точке — полуинтервалы, поэтому ноль, а не 1 секунда
+        // Touching at a point: the intervals are half-open, so zero, not 1 second
         assert_eq!(overlap_secs(0, 600, 600, 660), 0);
         assert_eq!(overlap_secs(600, 660, 0, 600), 0);
-        // Пустой интервал
+        // An empty interval
         assert_eq!(overlap_secs(300, 300, 0, 600), 0);
     }
 
@@ -365,10 +367,10 @@ mod tests {
     #[test]
     fn threshold_is_inclusive_boundary() {
         let now = Utc::now();
-        // ровно порог → Idle (>=)
+        // exactly at the threshold -> Idle (>=)
         let step = step_idle(&ActivityState::Active, None, now, at(now, 300), 300);
         assert_eq!(step.state, ActivityState::Idle);
-        // на секунду меньше порога → всё ещё Active
+        // one second below the threshold -> still Active
         let step = step_idle(&ActivityState::Active, None, now, at(now, 299), 300);
         assert_eq!(step.state, ActivityState::Active);
     }
@@ -396,7 +398,7 @@ mod tests {
     #[test]
     fn idle_to_active_notifies_with_away_minutes_and_clears_idle_since() {
         let now = Utc::now();
-        // ушёл в простой 30 минут назад, только что вернулся (last_input = сейчас)
+        // went idle 30 minutes ago and has just returned (last_input = now)
         let idle_since = at(now, 30 * 60);
         let step = step_idle(&ActivityState::Idle, Some(idle_since), now, now, 300);
         assert_eq!(step.state, ActivityState::Active);
@@ -407,7 +409,7 @@ mod tests {
     #[test]
     fn idle_to_active_without_idle_since_reports_zero() {
         let now = Utc::now();
-        // idle_since не выставлен (крайний случай) — away = 0, но уведомление рассматривается
+        // idle_since is unset (an edge case): away = 0, but a notification is still considered
         let step = step_idle(&ActivityState::Idle, None, now, now, 300);
         assert_eq!(step.notify_return_mins, Some(0));
     }
@@ -427,20 +429,20 @@ mod tests {
             .execute(pool).await.unwrap();
     }
 
-    // Регресс: контекстный триггер должен находить задачу «в работе», даже если
-    // топовая по дедлайну — Todo (раньше проверялся только статус топовой).
+    // Regression: the contextual trigger must find a task in progress even when
+    // the top task by deadline is Todo (only the top task's status used to be checked).
     #[tokio::test]
     async fn nearest_task_finds_in_progress_behind_todo_with_nearer_deadline() {
         let pool = test_pool().await;
         insert_task(&pool, "срочная todo", "Todo", Some("2026-07-15T00:00:00+00:00")).await;
         insert_task(&pool, "в работе без дедлайна", "InProgress", None).await;
 
-        // топовая среди всех — Todo с ближайшим дедлайном
+        // the top task overall is a Todo with the nearest deadline
         assert_eq!(
             nearest_task(&pool, &["Todo", "InProgress"]).await.as_deref(),
             Some("срочная todo")
         );
-        // но InProgress-задача находится отдельным запросом
+        // but the InProgress task is found by a separate query
         assert_eq!(
             nearest_task(&pool, &["InProgress"]).await.as_deref(),
             Some("в работе без дедлайна")

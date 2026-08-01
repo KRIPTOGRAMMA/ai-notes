@@ -1,39 +1,40 @@
-// Чек-лист подзадач как обычный текст (v0.9.45).
+// The subtask checklist as plain text.
 //
-// До этой версии подзадачи были набором отдельных <input>: по строкам нельзя
-// было ходить стрелками, нельзя было выделить несколько строк, вставка списка
-// из буфера создавала одну подзадачу с переводами строк внутри. Теперь весь
-// чек-лист — один <textarea>, а строка с префиксом `[x] ` / `[ ] ` означает
-// отметку. Стрелки, выделение, Ctrl+Z и вставка работают сами собой, потому
-// что это обычный текст, а не эмуляция навигации по инпутам.
+// Subtasks used to be a set of separate <input>s: arrow keys could not move
+// between lines, several lines could not be selected, and pasting a list from
+// the clipboard created one subtask with newlines inside it. Now the whole
+// checklist is a single <textarea>, and a line prefixed with `[x] ` / `[ ] `
+// means a tick. Arrow keys, selection, Ctrl+Z and pasting all work by
+// themselves, because this is ordinary text rather than emulated navigation
+// between inputs.
 //
-// Логика вынесена отдельным модулем, а не оставлена в компонентах: vitest в
-// проекте покрывает только чистые ts (vitest.config.ts) — тот же приём, что в
-// clipboardNote.ts и guard.ts. Плюс парсер общий для TaskModal и быстрого
-// слота, а сохраняют они по-разному (diff при «Сохранить» против мгновенной
-// записи), поэтому общим может быть только разбор текста, но не запись в БД.
+// The logic lives in its own module rather than in the components: vitest in
+// this project covers pure ts only (vitest.config.ts) — the same approach as in
+// clipboardNote.ts and guard.ts. Besides, the parser is shared by TaskModal and
+// the quick slot while they save differently (a diff on "Save" versus an
+// immediate write), so only parsing the text can be shared, never the write.
 
 export type ChecklistLine = { title: string; done: boolean };
 
-// Префикс отметки. Допускаем `[x]`, `[X]` и `[]` без пробела внутри: первое
-// пишет сам компонент, остальное пользователь набирает руками или приносит
-// вставкой из markdown. Ведущие пробелы съедаем — вставленный список часто
-// приходит с отступом. `- ` перед скобками — тоже markdown-список.
+// The tick prefix. We accept `[x]`, `[X]` and `[]` with no space inside: the
+// first is what the component writes, the rest are typed by hand or arrive by
+// pasting markdown. Leading spaces are consumed — a pasted list often comes
+// indented. A `- ` before the brackets is a markdown list as well.
 const LINE_RE = /^\s*(?:[-*]\s+)?\[( |x|X)?\]\s?(.*)$/;
 
-// Тот же префикс, но с сохранением ведущей части отдельной группой — нужен
-// редактору, чтобы знать точные границы разметки и спрятать её виджетом.
-// Группа 1 — то, что перед скобками (отступ, маркер списка), группа 2 — сама
-// отметка. Совпадение целиком включает пробел после скобок, если он есть.
+// The same prefix but keeping the leading part as a separate group — the editor
+// needs it to know the markup's exact bounds and hide it behind a widget. Group
+// 1 is what precedes the brackets (indent, list marker) and group 2 is the tick
+// itself. The whole match includes the space after the brackets, if present.
 export const CHECK_RE = /^(\s*(?:[-*]\s+)?)\[( |x|X)?\]\s?/;
 
-// Разбор текста в строки чек-листа.
+// Parses text into checklist lines.
 //
-// Пустые строки выбрасываем: в текстовом поле они неизбежны (пользователь
-// жмёт Enter, ещё не начав печатать), но подзадачей быть не могут. Строка без
-// префикса — невыполненная подзадача, а не ошибка: так работает вставка
-// обычного списка из буфера, и требовать от пользователя ручной разметки
-// значило бы сломать главный сценарий ради формальной строгости.
+// Empty lines are dropped: in a text field they are unavoidable (the user
+// presses Enter before typing anything) but cannot be a subtask. A line with no
+// prefix is an unfinished subtask rather than an error: that is how pasting an
+// ordinary list from the clipboard works, and demanding manual markup from the
+// user would break the main scenario for the sake of formal strictness.
 export function parseChecklist(raw: string): ChecklistLine[] {
   const out: ChecklistLine[] = [];
   for (const line of raw.split("\n")) {
@@ -45,29 +46,29 @@ export function parseChecklist(raw: string): ChecklistLine[] {
   return out;
 }
 
-// Обратная сборка: строки → текст поля.
+// The reverse assembly: lines back into the field's text.
 //
-// Префикс пишем всегда, в том числе у невыполненных: без него отметить
-// подзадачу было бы нечем — пришлось бы печатать `[ ]` вручную, а так
-// достаточно поставить x между скобками.
+// The prefix is always written, including for unfinished items: without it there
+// would be nothing to tick — one would have to type `[ ]` by hand, whereas this
+// way it is enough to put an x between the brackets.
 export function formatChecklist(items: ChecklistLine[]): string {
   return items.map((i) => `[${i.done ? "x" : " "}] ${i.title}`).join("\n");
 }
 
-// Позиция каретки → индекс строки чек-листа (пустые строки не считаются, как
-// и в parseChecklist). Нужна, чтобы клик по чекбоксу знал, какую строку
-// текста менять, и чтобы после переключения вернуть каретку на место.
+// A caret position into a checklist line index (empty lines are not counted, as
+// in parseChecklist). Needed so a click on a checkbox knows which line of text to
+// change, and so the caret can be restored after the toggle.
 export function lineIndexAt(raw: string, caret: number): number {
-  // К тексту до каретки дописываем непробельный символ, чтобы текущая строка
-  // считалась даже когда она пустая: каретка в начале поля или сразу после
-  // Enter иначе дала бы -1 (пустых строк parseChecklist не считает), и клик по
-  // чекбоксу ушёл бы не в ту строку.
+  // A non-space character is appended to the text before the caret so the current
+  // line counts even when empty: a caret at the start of the field, or right after
+  // Enter, would otherwise yield -1 (parseChecklist does not count empty lines) and
+  // a click on a checkbox would land on the wrong line.
   const before = raw.slice(0, Math.max(0, caret));
   return parseChecklist(before + "x").length - 1;
 }
 
-// Границы строки, содержащей позицию `caret`, в исходном тексте.
-// Возвращает [start, end] без символа перевода строки.
+// The bounds of the line containing position `caret` in the source text.
+// Returns [start, end] without the newline character.
 function lineBounds(raw: string, caret: number): [number, number] {
   const pos = Math.max(0, Math.min(caret, raw.length));
   const start = raw.lastIndexOf("\n", pos - 1) + 1;
@@ -75,98 +76,98 @@ function lineBounds(raw: string, caret: number): [number, number] {
   return [start, nl === -1 ? raw.length : nl];
 }
 
-// Удалить строку целиком вместе с разметкой `[ ] ` (v0.9.48).
+// Deletes a line entirely, along with its `[ ] ` markup.
 //
-// Разметка спрятана виджетом, поэтому «стереть подзадачу» для пользователя —
-// это стереть видимый текст. После этого оставалась строка `[ ] ` без текста:
-// на экране пустая строка с чекбоксом, в данных — ничего (parseChecklist её
-// выбрасывает). Backspace в начале строки должен убирать саму строку, а не
-// невидимые скобки по одному символу.
+// The markup is hidden behind a widget, so to the user "erase the subtask" means
+// erasing the visible text. That used to leave a `[ ] ` line with no text: an
+// empty line with a checkbox on screen and nothing in the data (parseChecklist
+// drops it). Backspace at the start of a line must remove the line itself rather
+// than the invisible brackets one character at a time.
 //
-// Вместе со строкой удаляем предшествующий перевод строки — иначе на её месте
-// остаётся пустая строка, и чек-лист набирает пустоты по мере правок.
-// Для первой строки удаляем перевод после неё, чтобы вторая поднялась вверх.
+// The preceding newline goes with the line — otherwise an empty line is left in
+// its place and the checklist accumulates gaps as it is edited. For the first
+// line we delete the newline after it instead, so the second moves up.
 export function removeLineAt(raw: string, caret: number): string {
   const [start, end] = lineBounds(raw, caret);
   if (start > 0) return raw.slice(0, start - 1) + raw.slice(end);
   return raw.slice(0, start) + raw.slice(end === raw.length ? end : end + 1);
 }
 
-// Начало текста строки — сразу после скрытой разметки. Не экспортируется:
-// снаружи нужен ответ на вопрос «останется ли текст» (emptyAfterBackspace),
-// а не позиция в символах — с ней вызывающий неизбежно начал бы считать
-// колонки сам и разошёлся бы с CHECK_RE.
+// The start of a line's text, right after the hidden markup. Not exported: what
+// callers need is the answer to "will any text remain" (emptyAfterBackspace),
+// not a position in characters — with that the caller would inevitably start
+// counting columns itself and drift apart from CHECK_RE.
 function textStartOf(line: string): number {
   const m = CHECK_RE.exec(line);
   return m ? m[0].length : 0;
 }
 
-// Останется ли в строке текст, если нажать Backspace при каретке в колонке
-// `col` (v0.9.48).
+// Whether any text will remain in the line if Backspace is pressed with the caret
+// at column `col`.
 //
-// Именно это отличает «укоротить подзадачу» от «удалить подзадачу»:
-// пользователь стирает её с конца, и когда исчезает последняя буква, строка
-// должна уйти вместе с ней. Разметка `[ ] ` за текст не считается — она
-// спрятана виджетом, пользователь её не видит и не воспринимает как
-// содержимое строки.
+// This is exactly what separates "shorten a subtask" from "delete a subtask":
+// the user erases it from the end, and when the last letter goes the line must go
+// with it. The `[ ] ` markup does not count as text — it is hidden behind a
+// widget, so the user neither sees it nor treats it as the line's content.
 export function emptyAfterBackspace(line: string, col: number): boolean {
   const start = textStartOf(line);
-  // Каретка в разметке или левее — удалять внутри строки уже нечего.
+  // The caret is inside the markup or to its left — there is nothing left to delete
+  // within the line.
   const text = col > start
     ? line.slice(start, col - 1) + line.slice(col)
     : line.slice(start);
   return !text.trim();
 }
 
-// Испорченный остаток разметки в начале строки (v0.9.50).
+// A corrupted remnant of the markup at the start of a line.
 //
-// Целую разметку ловит CHECK_RE; сюда попадает то, что осталось от неё после
-// удаления слова или куска текста: `[`, `[ `, `[x`, `]`, `- [`. Виджет такой
-// строке не рисуется (CHECK_RE не совпал), и пользователь видит голые скобки —
-// ровно то, что разбор APK Xiaomi Notes запрещает показывать.
+// Intact markup is caught by CHECK_RE; what lands here is what remains of it after
+// a word or a chunk of text was deleted: `[`, `[ `, `[x`, `]`, `- [`. No widget is
+// drawn for such a line (CHECK_RE did not match) and the user sees bare brackets —
+// precisely what taking apart the Xiaomi Notes APK says must never be shown.
 //
-// Огрызок обязан быть отделён от текста: `[x` — это остаток отметки, а `[xyz]`
-// и `[важно]` — обычный текст в скобках, который пользователь написал сам.
-// Без этого различения `[важно] сделать` превращалось бы в
-// `[ ] важно] сделать`, а `[xyz] код` — в `[ ] yz] код`: правка портила бы
-// данные вместо того, чтобы чинить разметку.
+// The stump must be separated from the text: `[x` is a leftover tick, whereas
+// `[xyz]` and `[important]` are ordinary text in brackets that the user wrote
+// themselves. Without that distinction `[important] do it` would turn into
+// `[ ] important] do it` and `[xyz] code` into `[ ] yz] code`: the repair would
+// corrupt data instead of fixing markup.
 //
-// Поэтому после отметки требуется граница (пробел или конец строки), а сама
-// отметка — либо пустая, либо ровно один символ из ` xX`.
+// Hence a boundary (a space or the end of the line) is required after the tick,
+// and the tick itself must be either empty or exactly one character from ` xX`.
 const BROKEN_RE = /^(\s*(?:[-*]\s+)?)(?:\[[ xX]?\]?|\])(?=\s|$)\s?/;
 
-// Починить разметку строк, испорченную произвольным удалением (v0.9.50).
+// Repairs line markup corrupted by an arbitrary deletion.
 //
-// Свой Backspace закрывал одну клавишу; Ctrl+Backspace, Delete и вставка
-// поверх выделения шли мимо и оставляли огрызки вроде «[ ». Чинится результат,
-// а не перечень клавиш: строка с текстом получает корректный префикс, строка
-// из одного огрызка становится пустой (её потом уберёт dropEmptyLines).
+// A custom Backspace covered one key; Ctrl+Backspace, Delete and pasting over a
+// selection went past it and left stumps such as "[ ". The result is repaired
+// rather than a list of keys: a line with text gets a correct prefix, and a line
+// consisting of nothing but a stump becomes empty (dropEmptyLines removes it later).
 export function repairChecklistMarkup(raw: string): string {
   return raw.split("\n").map((line) => {
-    if (CHECK_RE.test(line)) return line;      // разметка цела
+    if (CHECK_RE.test(line)) return line;      // the markup is intact
     const m = BROKEN_RE.exec(line);
-    if (!m) return line;                        // строка без разметки вообще
+    if (!m) return line;                        // a line with no markup at all
     const rest = line.slice(m[0].length);
     return rest.trim() ? `${m[1]}[ ] ${rest}` : "";
   }).join("\n");
 }
 
-// Выбросить строки без текста (v0.9.49).
+// Drops lines with no text.
 //
-// Пустая строка — это либо подзадача без названия (`[ ] ` после Enter), либо
-// голая пустая строка. `parseChecklist` не считает подзадачей ни ту, ни
-// другую, поэтому в БД они не попадают: на экране их видно, в данных нет.
-// Чистим при потере фокуса, а не по ходу набора — иначе строка исчезала бы
-// под кареткой ровно в тот момент, когда пользователь собрался печатать.
+// An empty line is either a subtask with no name (`[ ] ` after Enter) or a bare
+// blank line. parseChecklist counts neither as a subtask, so they never reach the
+// DB: visible on screen, absent from the data. We clean up on losing focus rather
+// than as the user types — otherwise a line would vanish under the caret at exactly
+// the moment they were about to type.
 export function dropEmptyLines(raw: string): string {
   return formatChecklist(parseChecklist(raw));
 }
 
-// Переключить отметку у n-й непустой строки, сохранив всё остальное как есть
-// (в том числе пустые строки и любой текст, который пользователь набрал, но
-// ещё не оформил). Возвращаем новый текст целиком — вызывающий кладёт его в
-// поле, не пересобирая содержимое из распарсенных строк: пересборка потеряла
-// бы недописанные пустые строки и сдвинула бы каретку.
+// Toggles the tick on the nth non-empty line, leaving everything else as it is
+// (including empty lines and any text the user has typed but not yet formatted).
+// The whole new text is returned and the caller puts it into the field without
+// reassembling the content from parsed lines: reassembly would lose unfinished
+// empty lines and move the caret.
 export function toggleLine(raw: string, index: number): string {
   const lines = raw.split("\n");
   let seen = -1;

@@ -1,24 +1,24 @@
-// Зависимости задач (v0.9.56): «Б заблокирована задачей А».
+// Task dependencies: "B is blocked by A".
 //
-// Два решения пользователя, определившие эту логику:
-//  1. Блокер в Корзине НЕ блокирует, но связь сохраняется и возвращается
-//     вместе с ним при восстановлении. Корзина мягкая (tasks.deleted_at),
-//     поэтому терять зависимость насовсем нельзя — иначе восстановление
-//     задачи молча теряет часть смысла.
-//  2. Заблокированную задачу нельзя выполнить (не просто приглушить).
-//     Запрет живёт в complete_task, здесь — только источник правды о том,
-//     кто кем заблокирован.
+// Two product decisions shaped this logic:
+//  1. A blocker in the Trash does NOT block, but the link is kept and comes back
+//     with it on restore. The Trash is soft (tasks.deleted_at), so the
+//     dependency must not be lost for good — otherwise restoring a task quietly
+//     loses part of its meaning.
+//  2. A blocked task cannot be completed, not merely dimmed. The prohibition
+//     lives in complete_task; this module is only the source of truth about who
+//     is blocked by whom.
 use tauri::State;
 use sqlx::SqlitePool;
 use crate::core::task::{Blocker, Task};
 
-/// Блокером считается задача, которая ещё не закрыта и не в Корзине.
-/// Одно условие на оба места, где нужен этот вопрос, — список задач и
-/// проверка при выполнении.
+/// A blocker is a task that is neither closed nor in the Trash. One condition
+/// shared by both places that ask the question: the task list and the check on
+/// completion.
 const OPEN_BLOCKER: &str = "b.completed_at IS NULL AND b.hidden = 0 AND b.deleted_at IS NULL";
 
-/// Проставляет `blocked_by` пачке задач одним запросом (тот же приём, что
-/// attach_subtasks): иначе на списке из N задач вышло бы N запросов.
+/// Fills in `blocked_by` for a batch of tasks with a single query (the same
+/// trick as attach_subtasks): otherwise a list of N tasks would cost N queries.
 pub async fn attach_blockers(pool: &SqlitePool, tasks: &mut [Task]) -> Result<(), String> {
   if tasks.is_empty() {
     return Ok(());
@@ -44,8 +44,8 @@ pub async fn attach_blockers(pool: &SqlitePool, tasks: &mut [Task]) -> Result<()
   Ok(())
 }
 
-/// Незакрытые блокеры одной задачи. Используется в complete_task для запрета
-/// выполнения и во фронтенде после точечных изменений.
+/// The open blockers of a single task. Used by complete_task to forbid
+/// completion, and by the frontend after individual changes.
 pub async fn blockers_of(pool: &SqlitePool, task_id: &str) -> Result<Vec<Blocker>, String> {
   sqlx::query_as::<_, Blocker>(&format!(
     "SELECT b.id, b.title
@@ -85,8 +85,9 @@ pub async fn add_task_dependency_impl(
   if task_id == blocker_id {
     return Err("Задача не может блокировать саму себя".into());
   }
-  // Цикл (А ждёт Б, Б ждёт А) навсегда заблокировал бы обе задачи: ни одну
-  // нельзя выполнить, а значит и разблокировать другую. Проверяем до записи.
+  // A cycle (A waits for B, B waits for A) would block both tasks forever:
+  // neither can be completed, so neither can unblock the other. Checked before
+  // writing.
   if depends_on(pool, blocker_id, task_id).await? {
     return Err("Циклическая зависимость: эта задача уже блокирует выбранную".into());
   }
@@ -102,11 +103,11 @@ pub async fn add_task_dependency_impl(
   Ok(())
 }
 
-/// Есть ли путь «from ждёт ... ждёт to» по всей цепочке зависимостей.
-/// Обход в ширину: цепочка длиннее одного звена тоже даёт цикл (А→Б→В→А).
-/// Удалённые блокеры здесь НЕ отфильтрованы намеренно: связь с задачей в
-/// Корзине жива и вернётся при восстановлении, поэтому цикл через неё —
-/// такой же цикл, просто отложенный.
+/// Whether there is a "from waits for ... waits for to" path anywhere along the
+/// dependency chain. A breadth-first walk: a chain longer than one link is a
+/// cycle too (A->B->C->A). Deleted blockers are deliberately NOT filtered out
+/// here: a link to a task in the Trash is alive and returns on restore, so a
+/// cycle through it is the same cycle, merely deferred.
 async fn depends_on(pool: &SqlitePool, from: &str, to: &str) -> Result<bool, String> {
   let mut seen = std::collections::HashSet::new();
   let mut queue = vec![from.to_string()];
@@ -155,14 +156,15 @@ pub async fn remove_task_dependency_impl(
   Ok(())
 }
 
-/// Пишет в Центр уведомлений «теперь можно взяться» по каждой задаче, которую
-/// разблокировало закрытие `blocker_id`.
+/// Writes a "ready to start" entry into the Notification Centre for every task
+/// that closing `blocker_id` unblocked.
 ///
-/// Пишем прямо в notification_log, а не через notifier::send_notification:
-/// тот требует AppHandle, которого в командах задач нет, и протаскивать его
-/// через complete_task ради этого пришлось бы во все места, откуда задачу
-/// можно закрыть (трей, быстрый слот, палитра). Запись в ленту даёт то же
-/// самое там, где пользователь её и увидит, и кликом откроет задачу.
+/// Written straight into notification_log rather than through
+/// notifier::send_notification: that requires an AppHandle, which the task
+/// commands do not have, and threading one through complete_task for this would
+/// mean touching every place a task can be closed from (the tray, the quick
+/// slot, the palette). A feed entry gives the same result where the user will
+/// actually see it, and a click opens the task.
 pub async fn notify_unblocked(pool: &SqlitePool, blocker_id: &str) -> Result<(), String> {
   let lang = crate::i18n::current_lang(pool).await;
   for task in unblocked_by(pool, blocker_id).await? {
@@ -187,8 +189,8 @@ pub async fn notify_unblocked(pool: &SqlitePool, blocker_id: &str) -> Result<(),
   Ok(())
 }
 
-/// Задачи, которые разблокируются закрытием этой (т.е. она была их
-/// последним незакрытым блокером). Нужно для уведомления «теперь можно».
+/// Tasks that closing this one unblocks, i.e. those for which it was the last
+/// open blocker. Needed for the "ready to start" notification.
 pub async fn unblocked_by(pool: &SqlitePool, blocker_id: &str) -> Result<Vec<Blocker>, String> {
   sqlx::query_as::<_, Blocker>(&format!(
     "SELECT t.id, t.title
@@ -251,7 +253,7 @@ mod tests {
     let walls = tasks.iter().find(|t| t.id == b).unwrap();
     assert_eq!(walls.blocked_by.len(), 1);
     assert_eq!(walls.blocked_by[0].title, "фундамент");
-    // Блокер сам ничем не заблокирован
+    // The blocker itself is not blocked by anything
     assert!(tasks.iter().find(|t| t.id == a).unwrap().blocked_by.is_empty());
   }
 
@@ -265,14 +267,14 @@ mod tests {
     let err = complete_task_impl(&pool, b.clone()).await.unwrap_err();
     assert!(err.contains("фундамент"), "в ошибке должно быть имя блокера: {err}");
 
-    // Закрыли блокер — задача освободилась
+    // The blocker is closed, so the task is free
     complete_task_impl(&pool, a).await.unwrap();
     assert!(blockers_of(&pool, &b).await.unwrap().is_empty());
     complete_task_impl(&pool, b).await.unwrap();
   }
 
-  // Решение пользователя: Корзина мягкая, поэтому блокер в ней не блокирует,
-  // но связь жива и возвращается вместе с задачей при восстановлении.
+  // A product decision: the Trash is soft, so a blocker in it does not block,
+  // but the link is alive and returns with the task on restore.
   #[tokio::test]
   async fn trashed_blocker_unblocks_but_link_survives_restore() {
     let pool = test_pool().await;
@@ -324,7 +326,7 @@ mod tests {
     add_task_dependency_impl(&pool, &b, &a).await.unwrap();
     assert!(add_task_dependency_impl(&pool, &a, &b).await.is_err(), "прямой цикл");
 
-    // Цепочка длиннее одного звена: в ждёт б, б ждёт а => а не может ждать в
+    // A chain longer than one link: в waits for б, б waits for а => а cannot wait for в
     add_task_dependency_impl(&pool, &c, &b).await.unwrap();
     assert!(add_task_dependency_impl(&pool, &a, &c).await.is_err(), "цикл через цепочку");
   }
@@ -338,7 +340,7 @@ mod tests {
     add_task_dependency_impl(&pool, &c, &a).await.unwrap();
     add_task_dependency_impl(&pool, &c, &b).await.unwrap();
 
-    // Первый из двух блокеров задачу ещё не освобождает — уведомления нет
+    // The first of two blockers does not free the task yet — no notification
     assert!(unblocked_by(&pool, &a).await.unwrap().is_empty());
 
     complete_task_impl(&pool, a).await.unwrap();

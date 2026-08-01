@@ -1,7 +1,8 @@
-// Парсер инлайн-композера задач. Текст из textarea, где Shift+Enter добавляет
-// строку-подзадачу с префиксом «☐ »: первая обычная непустая строка — название,
-// остальные обычные строки — описание, строки с «☐» — подзадачи.
-// Чистая функция: UI вставляет префиксы, здесь только разбор.
+// The parser for the inline task composer. The text comes from a textarea where
+// Shift+Enter adds a subtask line prefixed with "☐ ": the first ordinary non-empty
+// line is the title, the remaining ordinary lines are the description, and lines
+// with "☐" are subtasks. A pure function: the UI inserts the prefixes, this only
+// parses them.
 
 export const SUBTASK_PREFIX = "☐ ";
 
@@ -31,22 +32,23 @@ export function parseComposer(src: string): ComposerDraft {
   return { title, description, subtasks };
 }
 
-// --- Естественный язык в названии задачи (v0.9.17) ---
-// «завтра 15:00 созвон !высокий @работа #важное» → title "созвон" + метаданные.
-// Токены распознаются только в строке названия (title из parseComposer), не в
-// описании/подзадачах — естественная граница: остальной текст остаётся как есть.
+// --- Natural language in a task's title ---
+// "tomorrow 15:00 call !high @work #important" becomes title "call" plus metadata.
+// The tokens are recognized only in the title line (the title from parseComposer),
+// not in the description or subtasks — a natural boundary that leaves the rest of
+// the text as is.
 //
-// Синтаксис маркеров (не пересекается с уже существующим #tag на задачах):
-//   !маркер   — приоритет (низкий/средний/высокий/критический + синонимы)
-//   @маркер   — категория (сопоставляется по имени категории, регистр не важен)
-//   #маркер   — тег (как и раньше, просто добавляется в tags)
-//   дата/время — "завтра", "послезавтра", "сегодня", день недели, "HH:MM" —
-//                любая комбинация даты и времени, в любом порядке относительно текста
+// Marker syntax (it does not clash with the existing #tag on tasks):
+//   !marker    — priority (low/medium/high/critical plus synonyms)
+//   @marker    — category (matched by category name, case-insensitively)
+//   #marker    — tag (as before, simply added to tags)
+//   date/time  — "tomorrow", "the day after tomorrow", "today", a weekday, "HH:MM":
+//                any combination of date and time, in any order relative to the text
 
 export interface ParsedTaskMeta {
   title: string;
   priority: "Low" | "Medium" | "High" | "Critical" | null;
-  categoryQuery: string | null; // сырое слово после @ — сопоставление с categoryStore снаружи
+  categoryQuery: string | null; // the raw word after @ — matched against categoryStore outside
   tags: string[];
   deadline: Date | null;
 }
@@ -71,9 +73,9 @@ function matchPriority(word: string): ParsedTaskMeta["priority"] {
   return null;
 }
 
-// Ближайшая дата с этим днём недели (0=вс), включая сегодня, если совпадает
-// и время ещё не прошло — иначе следующая неделя. Упрощённо: всегда следующее
-// вхождение, не считая "сегодня" отдельным случаем (пользователь скажет "сегодня").
+// The nearest date with this weekday (0 = Sunday), including today when it matches
+// and the time has not passed yet; otherwise next week. Simplified: always the next
+// occurrence, without treating "today" as a special case (the user will say "today").
 function nextWeekday(from: Date, targetDow: number): Date {
   const d = new Date(from);
   const diff = (targetDow - d.getDay() + 7) % 7 || 7;
@@ -94,7 +96,7 @@ export function parseTaskText(rawTitle: string, now: Date = new Date()): ParsedT
   let categoryQuery: string | null = null;
   const tags: string[] = [];
 
-  let datePart: Date | null = null; // только дата (00:00), выставляется словами дня
+  let datePart: Date | null = null; // the date only (00:00), set by day words
   let timeHH: number | null = null;
   let timeMM: number | null = null;
 
@@ -161,9 +163,9 @@ export function parseTaskText(rawTitle: string, now: Date = new Date()): ParsedT
   };
 }
 
-// Сопоставление @категория с существующими категориями по имени/id — тот же
-// нормализующий принцип, что match_category на бэкенде (commands/categories.rs)
-// для ИИ-классификации: подрезаем пунктуацию по краям, без учёта регистра.
+// Matching @category against existing categories by name or id, on the same
+// normalizing principle as match_category on the backend (commands/categories.rs)
+// for AI classification: trim punctuation at the edges, ignore case.
 export function matchCategoryQuery(
   categories: { id: string; name: string }[],
   query: string,

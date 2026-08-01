@@ -7,12 +7,12 @@
   import TaskOpener from "../lib/components/TaskOpener.svelte";
   import type { Task } from "../lib/types";
 
-  // `t` здесь занято локальной переменной, перевод импортируется как `tr`.
+  // `t` is taken here by a local variable, so the translation helper is imported as `tr`.
   import { t as tr, i18n } from "../lib/i18n.svelte";
-  // Задача открывается прямо здесь, без ухода на экран Задач (v0.9.53)
+  // A task opens right here, without leaving for the Tasks screen
   let openTaskId = $state<string | null>(null);
 
-  const HOUR_H = 48; // px на час — компактнее недельной сетки Календаря, но хватает на 2 строки блока
+  const HOUR_H = 48; // px per hour: tighter than the Calendar's week grid but enough for a block's 2 lines
   const DAY_START_H = 6;
   const DAY_END_H = 24;
 
@@ -29,8 +29,8 @@
     return d.toDateString() === now.toDateString();
   }
 
-  // Блоки сегодня — та же выборка, что и «day-plan» в Tasks.svelte (chip-список),
-  // здесь рендерятся на вертикальной таймлайн-полосе одного дня.
+  // Today's blocks: the same selection as "day-plan" in Tasks.svelte (the chip
+  // list), rendered here on a single day's vertical timeline.
   const todayBlocks = $derived.by(() =>
     taskStore.activeTasks
       .filter(t => t.scheduled_at && isToday(t.scheduled_at))
@@ -45,7 +45,7 @@
   function blockHeight(t: Task): number {
     return Math.max(((t.scheduled_mins ?? 60) / 60) * HOUR_H, 22);
   }
-  // Меньше 34px — время и название не помещаются друг под другом, показываем в одну строку.
+  // Below 34px the time and the title do not fit one above the other, so we show them on one line.
   function blockCompact(t: Task): boolean {
     return blockHeight(t) < 34;
   }
@@ -64,7 +64,7 @@
 
   const hours = Array.from({ length: DAY_END_H - DAY_START_H }, (_, i) => DAY_START_H + i);
 
-  // Компактный дедлайн: тот же формат, что Tasks.svelte::deadlineInfo.
+  // A compact deadline in the same format as Tasks.svelte::deadlineInfo.
   function deadlineInfo(iso: string): { label: string; overdue: boolean } {
     const d = new Date(iso);
     const startOfDay = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
@@ -76,7 +76,7 @@
     return { label: "", overdue: false };
   }
 
-  // Дедлайны сегодня + просрочка — не блоки времени, отдельный список задач.
+  // Deadlines today plus overdue ones: not time blocks but a separate task list.
   const dueTasks = $derived.by(() =>
     taskStore.activeTasks
       .filter(t => t.status !== "Done" && t.deadline)
@@ -84,8 +84,8 @@
       .sort((a, b) => a.deadline!.localeCompare(b.deadline!))
   );
 
-  // Прогресс дня: доля выполненных задач среди тех, что относятся к сегодня
-  // (дедлайн сегодня ИЛИ блок сегодня), плюс завершённые сегодня без того и другого.
+  // The day's progress: the share of completed tasks among those that belong to
+  // today (due today OR blocked today), plus anything completed today with neither.
   const todayRelevant = $derived.by(() => {
     const ids = new Set<string>();
     const list: Task[] = [];
@@ -210,7 +210,7 @@
     justify-content: space-between;
     flex-wrap: wrap;
     gap: 10px;
-    /* см. Tasks.svelte: место под кнопки окна (v0.9.40) */
+    /* see Tasks.svelte: room for the window buttons */
     padding-right: var(--wincontrols-w);
   }
 

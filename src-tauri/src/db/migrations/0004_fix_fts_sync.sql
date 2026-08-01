@@ -1,10 +1,11 @@
--- 0001/0002 баг: триггеры синхронизации tasks_fts использовали `id` (TEXT UUID)
--- как будто это rowid. content_rowid='rowid' требует именно tasks.rowid.
--- Итог: после первого же UPDATE индекс расходится с таблицей, а MATCH по новым
--- данным падает с "database disk image is malformed". Подтверждено вручную.
+-- A bug in 0001/0002: the tasks_fts sync triggers used `id` (a TEXT UUID) as if
+-- it were the rowid, whereas content_rowid='rowid' requires tasks.rowid itself.
+-- The result: after the very first UPDATE the index diverges from the table and
+-- MATCH over the new data fails with "database disk image is malformed".
+-- Confirmed by hand.
 --
--- Чиним: пересоздаём виртуальную таблицу и триггеры на rowid, перестраиваем индекс
--- из текущих данных.
+-- The fix: recreate the virtual table and the triggers against rowid, then
+-- rebuild the index from the current data.
 
 DROP TRIGGER IF EXISTS tasks_ai;
 DROP TRIGGER IF EXISTS tasks_au;
@@ -36,11 +37,11 @@ CREATE TRIGGER tasks_ad AFTER DELETE ON tasks BEGIN
     VALUES ('delete', old.rowid, old.title, old.description, old.tags);
 END;
 
--- Перестраиваем индекс из текущего состояния tasks (на случай, если у пользователя
--- уже есть данные, проиндексированные сломанными триггерами).
+-- Rebuild the index from the current state of tasks, in case the user already has
+-- data indexed by the broken triggers.
 INSERT INTO tasks_fts(rowid, title, description, tags)
 SELECT rowid, title, description, tags FROM tasks;
 
--- id не было ни PRIMARY KEY, ни уникальным — WHERE id = ? делал full scan,
--- и ничего не мешало вставить дубликат id.
+-- id was neither a PRIMARY KEY nor unique, so WHERE id = ? did a full scan and
+-- nothing prevented inserting a duplicate id.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_id ON tasks(id);

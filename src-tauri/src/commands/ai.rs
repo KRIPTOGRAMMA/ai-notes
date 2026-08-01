@@ -6,12 +6,11 @@ use crate::ai::sidecar::{SharedSidecar, ensure_running};
 use crate::ai::engine::ask;
 use crate::ai::cloud::{ask_openai, ask_anthropic};
 
-// Промпты, чей ответ читает пользователь, существуют парами: русской и
-// английской (v0.9.42). Приписать требование языка к русскому промпту, как
-// делал v0.9.41, оказалось недостаточно — проверено на живой модели: ответ
-// приходил русским и при английском интерфейсе. Основной текст промпта
-// перевешивает одну строку-требование в конце, поэтому язык задаёт сам
-// промпт целиком.
+// Prompts whose answer the user reads exist in pairs, Russian and English.
+// Appending a language requirement to the Russian prompt was not enough —
+// verified against a live model: the answer still came back in Russian even
+// with an English interface. The body of the prompt outweighs a single
+// requirement line at the end, so the language is set by the whole prompt.
 const SYSTEM_REWRITE: Prompt = Prompt {
     ru: "Перепиши задачу в SMART-формат: чёткая цель, измеримый результат, срок. Только результат, без пояснений.",
     en: "Rewrite the task in SMART format: a clear goal, a measurable result, a deadline. Reply with the result only, no explanations.",
@@ -30,10 +29,10 @@ const SYSTEM_SUMMARY: Prompt = Prompt {
     en: "You are a productivity assistant. Write a short summary of the period (3-5 sentences): what was done, how much active time, progress on goals (if any), what needs attention. Text only.",
 };
 
-// ИИ по выделению в редакторе заметок (v0.9.09): выделил текст -> одно из
-// действий ниже -> модель возвращает только заменяющий текст, без пояснений
-// и без markdown-обёртки цитаты — иначе пришлось бы чистить ответ так же,
-// как parse_subtasks чистит списки.
+// AI on an editor selection: select text -> pick one of the actions below ->
+// the model returns only the replacement text, with no commentary and no
+// markdown quote wrapper. Otherwise the answer would need the same scrubbing
+// that parse_subtasks applies to lists.
 const SYSTEM_SELECTION_REWRITE: &str =
     "Перепиши следующий фрагмент текста, сохранив смысл и язык оригинала, но улучшив стиль и ясность. Ответь только новым текстом, без пояснений и кавычек.";
 const SYSTEM_SELECTION_SHORTEN: &str =
@@ -70,9 +69,9 @@ pub async fn ai_edit_selection(
     tokio::spawn(async move {
         let r = async {
             let system = selection_system_prompt(&mode)?;
-            // verbatim: промпты выделения сами требуют «сохранив язык
-            // оригинала». Навязать сюда язык интерфейса значило бы
-            // переводить чужой текст по нажатию «сократить».
+            // verbatim: the selection prompts already require "keeping the
+            // original language". Forcing the interface language here would
+            // translate someone's text at the press of "shorten".
             ask_ai_verbatim(&app, system, &text).await
         }.await;
         let payload = match r {
@@ -84,9 +83,9 @@ pub async fn ai_edit_selection(
     Ok(())
 }
 
-// ИИ: резюме длинной заметки (v0.9.10) — кнопка сжимает содержимое заметки
-// в 3-5 пунктов. Отдельный промпт от SYSTEM_SUMMARY (тот — про сводку
-// активности/задач за период, а не про текст произвольной заметки).
+// AI: summary of a long note — the button compresses the note into 3-5 bullet
+// points. A separate prompt from SYSTEM_SUMMARY, which covers an activity/task
+// digest for a period rather than the text of an arbitrary note.
 const SYSTEM_NOTE_SUMMARY: &str =
     "Сожми следующую заметку в 3-5 кратких пунктов с ключевыми мыслями. Ответь только списком пунктов \
 через перенос строки, каждый начинается с \"- \", без вступления и пояснений, на языке заметки.";
@@ -101,8 +100,9 @@ pub struct NoteSummaryPayload {
 #[tauri::command]
 pub async fn ai_summarize_note(app: tauri::AppHandle, request_id: String, text: String) -> Result<(), String> {
     tokio::spawn(async move {
-        // verbatim: промпт требует «на языке заметки» — резюме русской
-        // заметки не должно приходить по-английски из-за языка интерфейса.
+        // verbatim: the prompt requires "in the language of the note" — a
+        // summary of a Russian note must not arrive in English merely because
+        // the interface is English.
         let r = ask_ai_verbatim(&app, SYSTEM_NOTE_SUMMARY, &text).await;
         let payload = match r {
             Ok(result) => NoteSummaryPayload { request_id, result: Some(result.trim().to_string()), error: None },
@@ -113,12 +113,12 @@ pub async fn ai_summarize_note(app: tauri::AppHandle, request_id: String, text: 
     Ok(())
 }
 
-// ИИ: извлечение задач из заметки (v0.9.11) — кнопка в редакторе предлагает
-// список задач по тексту заметки (особенно полезно для daily note),
-// подтверждение создаёт их. Тот же suggest-then-confirm, что подзадачи
-// задачи (ai_subtasks) — и тот же промпт/парсер: "предложи 3-7 пунктов
-// действий" по смыслу совпадает с "раздели на подзадачи", а parse_subtasks
-// уже умеет надёжно чистить JSON/нумерацию/маркеры/мусор модели.
+// AI: extracting tasks from a note — the editor button proposes a list of
+// tasks based on the note text (especially useful for a daily note), and
+// confirming creates them. The same suggest-then-confirm flow as task subtasks
+// (ai_subtasks), and the same prompt and parser: "propose 3-7 action items"
+// means the same thing as "split into subtasks", and parse_subtasks already
+// scrubs JSON, numbering, bullets and model noise reliably.
 const SYSTEM_EXTRACT_TASKS: &str =
     "You are a task planner. Read the note below and extract concrete actionable tasks mentioned or implied \
 in it (things to do), 1-7 items. Reply ONLY with a JSON array of strings, nothing else. If there are no \
@@ -138,7 +138,7 @@ pub async fn ai_extract_tasks(app: tauri::AppHandle, request_id: String, text: S
             let raw = ask_ai(&app, SYSTEM_EXTRACT_TASKS, &text).await?;
             match parse_subtasks(&raw) {
                 Some(joined) => Ok(joined.split("|||").map(|s| s.to_string()).collect::<Vec<_>>()),
-                None => Ok(vec![]), // пустой список — не ошибка, просто нечего извлекать
+                None => Ok(vec![]), // an empty list is not an error, there is simply nothing to extract
             }
         }.await;
         let payload = match r {
@@ -159,8 +159,8 @@ pub struct AiResult {
     pub error: Option<String>,
 }
 
-// Убирает по одной паре внешних markdown/кавычка-символов с концов строки:
-// "**текст**" -> "текст", "`текст`" -> "текст", «текст» -> "текст".
+// Strips one pair of outer markdown/quote characters from the ends of a line:
+// "**text**" -> "text", "`text`" -> "text", "«text»" -> "text".
 fn strip_wrapping(s: &str) -> &str {
     let s = s.trim();
     for (open, close) in [("**", "**"), ("__", "__"), ("`", "`"), ("«", "»"), ("\"", "\""), ("'", "'")] {
@@ -171,27 +171,27 @@ fn strip_wrapping(s: &str) -> &str {
     s
 }
 
-// Строка-мусор, которую модель могла добавить вокруг настоящих подзадач:
-// кодовый забор (``` или ```json) и типичные преамбулы/пустые заголовки.
+// A junk line the model may have added around the real subtasks: a code fence
+// (``` or ```json) and the usual preambles or empty headings.
 fn is_noise_line(line: &str) -> bool {
     let l = line.trim();
     if l.is_empty() { return true; }
     if l.starts_with("```") { return true; }
     let lower = l.to_lowercase();
     let colon_like_ending = l.ends_with(':') || l.ends_with('：');
-    if colon_like_ending && lower.len() < 80 { return true; } // «Вот список подзадач:» и т.п.
+    if colon_like_ending && lower.len() < 80 { return true; } // "Here is the list of subtasks:" and the like
     false
 }
 
-// Один пункт списка -> очищенный текст подзадачи, либо None если после чистки
-// ничего разумного не осталось (пустая строка, кодовый забор, чистая пунктуация,
-// либо строка — на самом деле кусок JSON, а не текст подзадачи).
+// One list item -> the cleaned subtask text, or None when nothing sensible
+// survives the scrubbing (an empty line, a code fence, bare punctuation, or a
+// line that is really a piece of JSON rather than subtask text).
 fn clean_subtask_line(line: &str) -> Option<String> {
     let l = line.trim();
     if is_noise_line(l) { return None; }
-    // Нумерация ("1." "2)") и маркер списка ("-", "•", одиночная "* "), но не
-    // пара "**" — это markdown-жирное, которое должно остаться нетронутым
-    // для strip_wrapping ниже.
+    // Numbering ("1." "2)") and list bullets ("-", "•", a lone "* "), but not a
+    // "**" pair — that is markdown bold and must reach strip_wrapping below
+    // untouched.
     let stripped = l
         .trim_start_matches(|c: char| c.is_ascii_digit())
         .trim_start_matches(['.', ')'])
@@ -204,26 +204,27 @@ fn clean_subtask_line(line: &str) -> Option<String> {
     let stripped = stripped.trim();
     let stripped = strip_wrapping(stripped);
     if stripped.is_empty() || is_noise_line(stripped) { return None; }
-    // Похоже на сырой JSON-литерал ("[1, 2, 3]", "{...}"), а не на текст
-    // подзадачи — модель могла не собрать валидный массив строк.
+    // Looks like a raw JSON literal ("[1, 2, 3]", "{...}") rather than subtask
+    // text — the model may have failed to build a valid array of strings.
     let looks_like_json = (stripped.starts_with('[') && stripped.ends_with(']'))
         || (stripped.starts_with('{') && stripped.ends_with('}'));
     if looks_like_json { return None; }
     Some(stripped.to_string())
 }
 
-const MAX_SUBTASKS: usize = 15; // защита от зацикленного/мусорного ответа модели
+const MAX_SUBTASKS: usize = 15; // guards against a looping or garbage answer from the model
 
-// Строгий разбор ответа модели в список подзадач: не доверяем модели —
-// как parse_plan в planner.rs, при малейшем сомнении отбрасываем элемент,
-// а не пытаемся угадать. Оба пути (JSON и построчный фолбэк) прогоняются
-// через одну и ту же чистку/фильтрацию мусора.
+// Strict parsing of the model's answer into a list of subtasks. We do not
+// trust the model: like parse_plan in planner.rs, at the slightest doubt an
+// item is dropped rather than guessed at. Both paths (JSON and the line-by-line
+// fallback) run through the same scrubbing and junk filtering.
 fn parse_subtasks(raw: &str) -> Option<String> {
     let trimmed = raw.trim();
 
-    // JSON-массив: ищем сбалансированную пару [...] (не просто первую [ и
-    // последнюю ] — иначе строка вида "сделай [важно]: [\"a\",\"b\"]" ломается),
-    // пробуя от каждого '[' до последнего ']' после него, пока разбор не удастся.
+    // JSON array: look for a balanced [...] pair rather than simply the first [
+    // and the last ], which would break on a string like
+    // "do [important]: [\"a\",\"b\"]". We try from each '[' to the last ']' after
+    // it until parsing succeeds.
     let brackets: Vec<usize> = trimmed.match_indices('[').map(|(i, _)| i).collect();
     let last_close = trimmed.rfind(']');
     if let Some(end) = last_close {
@@ -239,7 +240,7 @@ fn parse_subtasks(raw: &str) -> Option<String> {
         }
     }
 
-    // Фолбэк: построчный список (нумерация/маркеры/markdown), с той же чисткой.
+    // Fallback: a line-by-line list (numbering/bullets/markdown), same scrubbing.
     let mut items: Vec<String> = trimmed.lines().filter_map(clean_subtask_line).collect();
     if items.is_empty() { return None; }
     items.truncate(MAX_SUBTASKS);
@@ -258,8 +259,9 @@ pub enum Provider {
     Anthropic,
 }
 
-// Порядок обхода провайдеров при автопереключении: от выбранного основного,
-// недоступные (нет ключа / нет model.gguf) выкидываются сразу. Чистая функция.
+// The order providers are tried in when auto-switching: starting from the
+// chosen primary, with unavailable ones (no key / no model.gguf) dropped
+// immediately. A pure function.
 pub fn resolve_provider_order(
     primary: &str,
     local_available: bool,
@@ -303,23 +305,23 @@ async fn ask_provider(
     }
 }
 
-// Язык ответа модели (v0.9.41 → переделано в v0.9.42).
+// The language of the model's answer.
 //
-// v0.9.41 дописывала к русскому промпту строку «Reply in English.» и на этом
-// останавливалась. На живой модели это не сработало: ответ приходил русским
-// и при английском интерфейсе. Причина в том, что модель ориентируется на
-// язык основного текста инструкции, а не на одну строку в конце — особенно
-// малые локальные GGUF. Поэтому язык теперь задаёт сам промпт целиком:
-// промпты для человека объявлены парами _RU/_EN.
+// The first attempt appended a "Reply in English." line to the Russian prompt
+// and stopped there. Against a live model that did not work: the answer came
+// back in Russian even with an English interface. The model follows the
+// language of the instruction's main text rather than one line at the end —
+// small local GGUF models especially. So the language is now set by the whole
+// prompt: prompts meant for a human are declared as _RU/_EN pairs.
 //
-// Приписка сохранена как второй, дублирующий сигнал — она ничего не стоит и
-// помогает в пограничных случаях (например, русские названия задач внутри
-// английского промпта).
+// The appended line is kept as a second, duplicating signal. It costs nothing
+// and helps in edge cases, such as Russian task titles inside an English
+// prompt.
 //
-// ВАЖНО: промпты, работающие с текстом заметки (резюме, переписать, сжать,
-// исправить грамматику), сюда не попадают — они обязаны отвечать на языке
-// самого текста. Менять язык чужой заметки при нажатии «сократить» — баг, а
-// не локализация. Такие вызовы идут через ask_ai_verbatim.
+// IMPORTANT: prompts that work on note text (summarize, rewrite, shorten, fix
+// grammar) are not covered here — they must answer in the language of the text
+// itself. Changing the language of someone's note at the press of "shorten" is
+// a bug, not localization. Those calls go through ask_ai_verbatim.
 fn with_lang(system: &str, lang: crate::i18n::Lang) -> String {
     let req = match lang {
         crate::i18n::Lang::Ru => "Отвечай на русском языке.",
@@ -328,7 +330,7 @@ fn with_lang(system: &str, lang: crate::i18n::Lang) -> String {
     format!("{system}\n{req}")
 }
 
-/// Пара промптов «русский / английский» для одного действия.
+/// A Russian/English prompt pair for a single action.
 pub struct Prompt {
     pub ru: &'static str,
     pub en: &'static str,
@@ -343,21 +345,21 @@ impl Prompt {
     }
 }
 
-/// Спросить модель, не навязывая язык ответа. Для промптов, где язык задаёт
-/// содержимое запроса (текст заметки), а не интерфейс.
+/// Ask the model without forcing the answer's language. For prompts where the
+/// language is set by the request's content (the note text), not the interface.
 pub async fn ask_ai_verbatim(app: &tauri::AppHandle, system: &str, user: &str) -> Result<String, String> {
     ask_ai_inner(app, system.to_string(), user).await
 }
 
-/// Спросить модель на языке интерфейса: выбирается промпт нужного языка,
-/// плюс дублирующее требование в конце.
+/// Ask the model in the interface language: the prompt of the right language is
+/// selected, plus the duplicating requirement at the end.
 pub async fn ask_ai_localized(app: &tauri::AppHandle, prompt: &Prompt, user: &str) -> Result<String, String> {
     let lang = crate::i18n::current_lang(app.state::<SqlitePool>().inner()).await;
     ask_ai_inner(app, with_lang(prompt.pick(lang), lang), user).await
 }
 
-/// Промпт без языковой пары (машинный JSON, где текст один на все языки),
-/// но с требованием языка — содержимое ответа читает человек.
+/// A prompt with no language pair (machine JSON, where the text is the same for
+/// every language) but with the language requirement — a human reads the answer.
 pub async fn ask_ai(app: &tauri::AppHandle, system: &str, user: &str) -> Result<String, String> {
     let lang = crate::i18n::current_lang(app.state::<SqlitePool>().inner()).await;
     ask_ai_inner(app, with_lang(system, lang), user).await
@@ -369,13 +371,13 @@ async fn ask_ai_inner(app: &tauri::AppHandle, system: String, user: &str) -> Res
         .await
         .map_err(|e| e.to_string())?;
 
-    // Явно выключенный ИИ: не поднимаем локальную модель и не ходим в облако
+    // AI explicitly turned off: do not start the local model or call the cloud
     if settings.ai_provider == "none" {
         return Err("ИИ отключён в настройках".into());
     }
 
     if !settings.ai_fallback {
-        // Прежнее поведение: один провайдер, без отката
+        // The former behaviour: a single provider, no fallback
         return match settings.ai_provider.as_str() {
             "openai" if !settings.openai_key.is_empty() => {
                 ask_openai(&settings.openai_key, &settings.openai_model, system, user).await
@@ -437,8 +439,8 @@ pub async fn ai_classify(
 ) -> Result<(), String> {
     let pool = pool.inner().clone();
     tokio::spawn(async move {
-        // Категории пользовательские (v0.6.3): промпт строится из таблицы,
-        // ответ модели сопоставляется с ней и наружу уходит id категории.
+        // Categories are user-defined: the prompt is built from the table, the
+        // model's answer is matched against it, and a category id goes out.
         let r = async {
             let cats = crate::commands::categories::get_categories_impl(&pool)
                 .await
@@ -463,14 +465,14 @@ pub struct InsightPayload {
     pub error: Option<String>,
 }
 
-// Краткая сводка активности за последние дни — вход для ИИ-инсайта.
+// A short activity digest for the last few days — the input for the AI insight.
 //
-// Язык контекста обязан совпадать с языком промпта (v0.9.43). Английская
-// инструкция поверх русского контекста не работает: модель видит стену
-// русских данных («Активные минуты по дням…», названия задач, категории) и
-// отвечает на её языке — проверено пользователем на локальной модели, где
-// инсайт и сводка оставались русскими, хотя короткий SMART-промпт без
-// контекста переводился нормально.
+// The language of the context must match the language of the prompt. An English
+// instruction on top of Russian context does not work: the model sees a wall of
+// Russian data (activity minutes per day, task titles, categories) and answers
+// in that language. Verified by the user against a local model, where the
+// insight and the digest stayed Russian even though the short SMART prompt,
+// which carries no context, translated fine.
 async fn insight_summary(pool: &SqlitePool, lang: crate::i18n::Lang) -> Result<String, String> {
     use crate::commands::monitor::{
         get_activity_by_day_impl, get_category_distribution_impl, get_task_completions_by_day_impl,
@@ -532,7 +534,7 @@ pub struct SummaryPayload {
     pub error: Option<String>,
 }
 
-// Данные за период для резюме: выполненные задачи, активные минуты, просрочки.
+// Period data for the digest: completed tasks, active minutes, overdue items.
 async fn period_summary(pool: &SqlitePool, days: i64, label: &str, lang: crate::i18n::Lang) -> Result<String, String> {
     use sqlx::Row;
     let since = (chrono::Utc::now() - chrono::Duration::days(days)).to_rfc3339();
@@ -572,7 +574,7 @@ async fn period_summary(pool: &SqlitePool, days: i64, label: &str, lang: crate::
         ],
     );
 
-    // Недельное ревью (v0.5.6): цели проектов и топ приложений — данные фаз 1–2
+    // Weekly review: project goals and top apps — the data from phases 1-2
     if days >= 7 {
         let projects = crate::commands::projects::get_projects_impl(pool).await.unwrap_or_default();
         let goals: Vec<String> = projects
@@ -644,17 +646,18 @@ mod tests {
         let en = with_lang("Ты ассистент.", crate::i18n::Lang::En);
         assert!(ru.contains("Отвечай на русском языке."), "{ru}");
         assert!(en.contains("Reply in English."), "{en}");
-        // исходный промпт не потерян
+        // the original prompt is not lost
         assert!(ru.starts_with("Ты ассистент."));
         assert!(en.starts_with("Ты ассистент."));
-        // и языки не перепутаны
+        // and the languages are not swapped
         assert!(!en.contains("Отвечай на русском"));
         assert!(!ru.contains("Reply in English"));
     }
 
-    // verbatim-промпты обязаны молчать про язык: их язык задаёт содержимое
-    // запроса (текст заметки) или он вообще не важен (машинный JSON).
-    // Требование «по-русски» здесь сломало бы правку английской заметки.
+    // verbatim prompts must say nothing about language: theirs is set by the
+    // request's content (the note text), or it does not matter at all (machine
+    // JSON). A "in Russian" requirement here would break editing an English
+    // note.
     #[test]
     fn verbatim_prompts_do_not_demand_a_language() {
         let sources = [
@@ -665,8 +668,8 @@ mod tests {
         for src in sources {
             for (idx, _) in src.match_indices("const SYSTEM_") {
                 let rest = &src[idx..];
-                // пары _RU/_EN объявлены как `Prompt {` — они язык задают
-                // намеренно, проверка не про них
+                // _RU/_EN pairs are declared as `Prompt {` — they set the
+                // language on purpose, so this check is not about them
                 let head = rest.lines().next().unwrap_or("");
                 if head.contains("Prompt") {
                     continue;
@@ -683,10 +686,10 @@ mod tests {
         }
     }
 
-    // Главный инвариант v0.9.42: у каждой пары обе стороны заполнены и
-    // действительно различаются. Скопировать русский текст в поле en (или
-    // забыть его заполнить) — самый вероятный способ незаметно вернуть
-    // прежний баг: интерфейс английский, ответ русский.
+    // The central invariant: both sides of every pair are filled in and really
+    // differ. Copying the Russian text into the en field (or forgetting to fill
+    // it) is the likeliest way to quietly bring the old bug back: an English
+    // interface with a Russian answer.
     #[test]
     fn localized_prompt_pairs_are_filled_and_distinct() {
         let pairs: [(&str, &Prompt); 4] = [
@@ -699,7 +702,7 @@ mod tests {
             assert!(!p.ru.trim().is_empty(), "{name}: пустой русский промпт");
             assert!(!p.en.trim().is_empty(), "{name}: пустой английский промпт");
             assert_ne!(p.ru, p.en, "{name}: en скопирован с ru");
-            // русская сторона обязана быть русской, английская — без кириллицы
+            // the Russian side must be Russian, the English one free of Cyrillic
             assert!(
                 p.ru.chars().any(|c| ('а'..='я').contains(&c) || ('А'..='Я').contains(&c)),
                 "{name}: в поле ru нет кириллицы"
@@ -711,12 +714,12 @@ mod tests {
         }
     }
 
-    // Пары мало объявить — их надо и вызывать через ask_ai_localized.
-    // Обращение к `.ru`/`.en` на месте вызова прибивает язык намертво, минуя
-    // настройку, и это ровно тот баг, который чинит версия: объявленная
-    // пара при этом выглядит корректной, а пользователь всё равно получает
-    // один язык. Проверка по исходникам, потому что вызовы асинхронные и
-    // требуют живого AppHandle.
+    // Declaring the pairs is not enough — they must also be called through
+    // ask_ai_localized. Reaching for `.ru`/`.en` at the call site nails the
+    // language down, bypassing the setting, and that is exactly the bug this
+    // guards against: the declared pair still looks correct while the user gets
+    // one language anyway. The check reads the sources because the calls are
+    // async and need a live AppHandle.
     #[test]
     fn localized_prompts_are_not_pinned_to_one_side_at_call_sites() {
         let sources = [
@@ -728,12 +731,12 @@ mod tests {
                 let rest = &src[idx..];
                 let end = rest.find(|c: char| c == ')' || c == ',' || c == '\n').unwrap_or(rest.len());
                 let frag = &rest[..end];
-                // объявление пары (`ru:`/`en:` внутри Prompt {}) — не вызов
+                // a pair declaration (`ru:`/`en:` inside Prompt {}), not a call
                 if frag.contains("Prompt") {
                     continue;
                 }
                 for pinned in [".ru", ".en"] {
-                    // в тестах обращение к полям законно — там сверяют пары
+                    // in tests reaching for the fields is legitimate: they compare pairs
                     let in_test_mod = idx > src.find("#[cfg(test)]").unwrap_or(usize::MAX);
                     assert!(
                         !frag.contains(pinned) || in_test_mod,
@@ -752,7 +755,7 @@ mod tests {
 
     #[test]
     fn fallback_order_from_cloud_primary() {
-        // Основной openai: облако первым, потом второй ключ, потом локалка
+        // Primary openai: cloud first, then the second key, then local
         assert_eq!(
             resolve_provider_order("openai", true, true, true),
             vec![Provider::OpenAi, Provider::Anthropic, Provider::Local]
@@ -773,12 +776,12 @@ mod tests {
 
     #[test]
     fn unavailable_providers_are_skipped() {
-        // Нет локальной модели и нет ключа anthropic
+        // No local model and no anthropic key
         assert_eq!(
             resolve_provider_order("openai", false, true, false),
             vec![Provider::OpenAi]
         );
-        // Основной без ключа: сразу откат на доступного
+        // Primary without a key: fall back to an available one straight away
         assert_eq!(
             resolve_provider_order("openai", true, false, false),
             vec![Provider::Local]
@@ -836,11 +839,12 @@ mod tests {
         assert!(s.contains("Топ-категория выполненных задач: Work"), "{s}");
     }
 
-    // Главный инвариант v0.9.43: контекст, уходящий в промпт, обязан быть на
-    // языке интерфейса. Английская инструкция поверх русского контекста не
-    // работает — проверено пользователем на локальной модели: инсайт и сводка
-    // оставались русскими, хотя короткий SMART-промпт (там контекста нет)
-    // переводился нормально. Модель следует языку данных, а не инструкции.
+    // The central invariant: the context sent into the prompt must be in the
+    // interface language. An English instruction on top of Russian context does
+    // not work — verified by the user against a local model: the insight and the
+    // digest stayed Russian even though the short SMART prompt, which has no
+    // context, translated fine. The model follows the language of the data, not
+    // of the instruction.
     #[tokio::test]
     async fn english_context_has_no_russian_left() {
         let pool = test_pool().await;
@@ -854,12 +858,12 @@ mod tests {
         let insight = insight_summary(&pool, crate::i18n::Lang::En).await.unwrap();
         assert!(!has_cyrillic(&insight), "кириллица в английском инсайте: {insight}");
 
-        // days >= 7 включает ветки целей проектов и топа приложений
+        // days >= 7 enables the project-goals and top-apps branches
         let period = period_summary(&pool, 7, "последняя неделя", crate::i18n::Lang::En)
             .await
             .unwrap();
         assert!(!has_cyrillic(&period), "кириллица в английской сводке: {period}");
-        // метка периода тоже переведена, а не оставлена ключом
+        // the period label is translated too, not left as a key
         assert!(period.contains("the last week"), "{period}");
     }
 
@@ -881,10 +885,10 @@ mod tests {
         let old = (now - chrono::Duration::days(30)).to_rfc3339();
 
         insert_completed_task(&pool, "свежая", &recent).await;
-        insert_completed_task(&pool, "старая", &old).await; // вне периода
+        insert_completed_task(&pool, "старая", &old).await; // outside the period
         insert_activity(&pool, &recent, "Active", 300).await;
-        insert_activity(&pool, &recent, "Idle", 3600).await; // Idle не считается
-        insert_activity(&pool, &old, "Active", 3600).await; // вне периода
+        insert_activity(&pool, &recent, "Idle", 3600).await; // Idle is not counted
+        insert_activity(&pool, &old, "Active", 3600).await; // outside the period
 
         let s = period_summary(&pool, 7, "неделя", crate::i18n::Lang::Ru).await.unwrap();
         assert!(s.contains("Выполнено задач: 1 (свежая)"), "{s}");
@@ -892,7 +896,7 @@ mod tests {
         assert!(s.contains("Активное время: 5 мин"), "{s}");
     }
 
-    // --- parse_subtasks: v0.8.11, "модели не доверять" — грязные ответы LLM ---
+    // --- parse_subtasks: "do not trust the model" — dirty LLM answers ---
 
     #[test]
     fn parses_clean_json_array() {
@@ -927,7 +931,7 @@ mod tests {
 
     #[test]
     fn json_array_of_non_strings_does_not_produce_garbage_literal() {
-        // Раньше "[1, 2, 3]" целиком выживало как один поддельный пункт.
+        // "[1, 2, 3]" used to survive whole as a single bogus item.
         assert_eq!(parse_subtasks("[1, 2, 3]"), None);
     }
 
@@ -958,7 +962,7 @@ mod tests {
         assert_eq!(result.split("|||").count(), MAX_SUBTASKS);
     }
 
-    // --- ИИ по выделению (v0.9.09) ---
+    // --- AI on a selection ---
 
     #[test]
     fn selection_mode_maps_to_distinct_prompts() {

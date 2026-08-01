@@ -11,9 +11,9 @@ function escapeHtml(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
-// Вики-ссылки: [[Название]] или [[Название|текст]]. Расширение marked, а не
-// пре-процессинг текста — так [[...]] внутри `кода` и ```блоков``` остаётся
-// текстом. Резолвинг по названию делает UI (data-wikilink), рендер лишь метит.
+// Wiki links: [[Title]] or [[Title|text]]. A marked extension rather than text
+// pre-processing, so [[...]] inside `code` and ```blocks``` stays text. Resolving by
+// title is the UI's job (data-wikilink); the renderer only tags them.
 const WIKILINK_RE = /^\[\[([^\[\]|]+)(?:\|([^\[\]]+))?\]\]/;
 
 marked.use({
@@ -45,8 +45,8 @@ marked.use({
   ],
 });
 
-// Названия заметок, на которые ссылается текст (для бэклинков). Работает по
-// сырому markdown — ссылки в code-блоках тоже попадут, для бэклинков это ок.
+// The titles of notes the text links to (for backlinks). It works over the raw
+// markdown, so links inside code blocks are included too — fine for backlinks.
 export function extractWikiLinks(src: string): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
@@ -61,34 +61,36 @@ export function extractWikiLinks(src: string): string[] {
   return out;
 }
 
-// Рендер Markdown в безопасный HTML. Санитизация обязательна: контент может
-// прийти из импорта/вставки, а не только из ручного ввода.
+// Renders Markdown into safe HTML. Sanitization is mandatory: the content may come
+// from an import or a paste rather than only from manual typing.
 export function renderMarkdown(src: string): string {
   const raw = marked.parse(src ?? "", { async: false }) as string;
   return DOMPurify.sanitize(raw);
 }
 
-// Картинки ![alt](filename) — filename без пути (то, что вернул save_note_image).
-// Общий regex для парсинга (LiveMarkdownEditor) и построения markdown при вставке.
+// Images ![alt](filename), where filename carries no path (what save_note_image
+// returned). A shared regex for parsing (LiveMarkdownEditor) and for building the
+// markdown on paste.
 export const IMAGE_RE = /!\[([^\[\]]*)\]\(([^()\s]+)\)/g;
 
 export function imageMarkdown(filename: string): string {
   return `![](${filename})`;
 }
 
-// Расширение картинки для save_note_image: из MIME-типа (image/png → png,
-// image/jpeg → jpg) или, если MIME отсутствует, из имени файла; дефолт — png.
+// The image extension for save_note_image: from the MIME type (image/png -> png,
+// image/jpeg -> jpg) or, when the MIME type is absent, from the filename; the
+// default is png.
 export function extImageExt(mimeOrName: string): string {
   const fromMime = /^image\/([a-z0-9]+)/i.exec(mimeOrName)?.[1];
   if (fromMime) return fromMime === "jpeg" ? "jpg" : fromMime;
   return (/\.([a-z0-9]+)$/i.exec(mimeOrName)?.[1] ?? "png").toLowerCase();
 }
 
-// --- Таблицы (v0.9.06) ---
-// Простой построчный парсер GFM pipe-таблиц — не завязан на Lezer-дерево,
-// т.к. виджету редактора нужен полный контроль над границами ячеек при
-// сериализации обратно в текст (Lezer даёт позиции для подсветки, но не для
-// надёжной round-trip пересборки при редактировании отдельной ячейки).
+// --- Tables ---
+// A simple line-by-line parser for GFM pipe tables, not tied to the Lezer tree:
+// the editor widget needs full control over cell boundaries when serializing back
+// to text (Lezer gives positions for highlighting, but not for a reliable
+// round-trip rebuild when a single cell is edited).
 export type TableAlign = "left" | "center" | "right" | null;
 export interface ParsedTable {
   header: string[];
@@ -123,10 +125,10 @@ function parseAlign(cell: string): TableAlign {
   return null;
 }
 
-// Пытается разобрать таблицу, начинающуюся на строке `startLine` (1-based).
-// Возвращает null, если это не таблица (нет разделительной строки вида
-// | --- | :--: | сразу после заголовка) — тогда вызывающий код просто не
-// рендерит виджет, текст остаётся обычным абзацем.
+// Tries to parse a table starting at line `startLine` (1-based). Returns null if it
+// is not a table (no separator row of the form | --- | :--: | right after the
+// header), in which case the caller simply does not render the widget and the text
+// stays an ordinary paragraph.
 export function parseTableAt(doc: string, startLine: number): { table: ParsedTable; endLine: number } | null {
   const lines = doc.split("\n");
   const header = lines[startLine - 1];
@@ -147,9 +149,9 @@ export function parseTableAt(doc: string, startLine: number): { table: ParsedTab
   return { table: { header: headerCells, align, rows }, endLine: i };
 }
 
-// Сериализация обратно в markdown — выравнивает столбцы пробелами для
-// читаемости сырого текста (не обязательно для GFM, но так таблицу приятно
-// видеть и вне live-preview, напр. при экспорте в .md).
+// Serialization back into markdown, padding the columns with spaces for the sake of
+// the raw text's readability (not required by GFM, but it makes the table pleasant
+// to look at outside live preview too, for instance when exported to .md).
 export function serializeTable(table: ParsedTable): string {
   const cols = table.header.length;
   const widths = Array.from({ length: cols }, (_, c) => {
@@ -167,9 +169,9 @@ export function serializeTable(table: ParsedTable): string {
   };
   const row = (cells: string[]) =>
     "| " + cells.map((c, i) => pad(c ?? "", widths[i], table.align[i] ?? null)).join(" | ") + " |";
-  // Разделительная строка: дефисы заполняют ширину столбца, двоеточия
-  // выравнивания остаются на своих краях (":--", "--:", ":--:") — так
-  // маркер остаётся однозначно читаемым при любой ширине столбца.
+  // The separator row: hyphens fill the column's width and the alignment colons stay
+  // at their edges (":--", "--:", ":--:"), so the marker remains unambiguous at any
+  // column width.
   const delimCell = (w: number, a: TableAlign) => {
     const left = a === "left" || a === "center" ? ":" : "";
     const right = a === "right" || a === "center" ? ":" : "";
@@ -190,8 +192,9 @@ export function emptyTable(cols: number, rows: number): ParsedTable {
 
 const TASK_LINE = /^(\s*[-*+]\s+)\[( |x|X)\]/;
 
-// Индексы строк editContent, содержащих markdown-чекбокс, по порядку. Порядок
-// совпадает с порядком <input type=checkbox> в отрендеренном HTML (gfm task list).
+// The indices of editContent's lines containing a markdown checkbox, in order. That
+// order matches the order of <input type=checkbox> in the rendered HTML (a GFM task
+// list).
 export function taskLineIndices(src: string): number[] {
   const out: number[] = [];
   const lines = src.split("\n");
@@ -201,8 +204,8 @@ export function taskLineIndices(src: string): number[] {
   return out;
 }
 
-// Переключает N-й (по порядку) чекбокс в markdown-тексте: `- [ ]` ↔ `- [x]`.
-// Чистая функция — возвращает новый текст; вне диапазона возвращает исходный.
+// Toggles the Nth checkbox (in order) in the markdown text: `- [ ]` <-> `- [x]`.
+// A pure function returning new text; out of range it returns the original.
 export function toggleTaskListItem(src: string, checkboxIndex: number): string {
   const lines = src.split("\n");
   const indices = taskLineIndices(src);

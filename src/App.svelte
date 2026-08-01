@@ -31,40 +31,39 @@
   let showNotifications = $state(false);
   let unreadNotifications = $state(0);
 
-  // Онбординг: пока настройки не загружены — ничего не показываем,
-  // чтобы главный экран не мелькал перед онбордингом
+  // Onboarding: while the settings are still loading we show nothing, so the main
+  // screen does not flash before it
   let loadedSettings: AppSettings | null = $state(null);
   let showOnboarding = $state(false);
   let isWayland = $state(false);
   let keybinds: Keybinds = $state({});
-  // Идёт запись новой комбинации в Настройках — хоткеи временно не выполняются.
+  // A new combination is being recorded in Settings — hotkeys are suspended.
   let keybindRecording = $state(false);
 
-  // Тема: сначала из кеша (анти-мигание), затем — источник истины из БД.
+  // The theme: from the cache first (to avoid a flash), then the source of truth from the DB.
   applyCachedTheme();
 
   onMount(async () => {
-    // Заметки нужны глобально для поиска (Ctrl+K), даже если раздел ещё не открывали.
+    // Notes are needed globally for search (Ctrl+K), even if the section was never opened.
     noteStore.load();
-    // Проекты нужны модалу задачи из любого раздела (например, из Календаря).
+    // Projects are needed by the task modal from any section (the Calendar, for one).
     projectStore.load();
-    // Создание в окне быстрого ввода — подхватываем глобально: раздел задач
-    // может быть не смонтирован (открыт Календарь/Дашборд), а store общий.
+    // Creation in the quick-capture window is picked up globally: the tasks section
+    // may not be mounted (the Calendar or Dashboard is open) while the store is shared.
     const unlistenNote = listen("note-created", () => noteStore.load());
     const unlistenTask = listen("task-created", () => taskStore.load());
     void unlistenNote;
     void unlistenTask;
-    // Settings.svelte живёт в том же вебвью — обычное window-событие,
-    // без Tauri IPC, чтобы переназначенный хоткей заработал сразу, без reload.
+    // Settings.svelte lives in the same webview, so this is an ordinary window event
+    // with no Tauri IPC — a rebound hotkey then works at once, without a reload.
     const onKeybindsSaved = (e: Event) => {
       keybinds = parseKeybinds((e as CustomEvent<string>).detail ?? "");
     };
     window.addEventListener("keybinds-saved", onKeybindsSaved);
-    // v0.9.35: пока в Настройках записывают комбинацию, приложение не должно
-    // выполнять её как хоткей. Иначе запись Ctrl+K открывала бы командную
-    // палитру поверх поля записи и уводила фокус — комбинацию, совпадающую с
-    // существующим хоткеем, стало бы невозможно даже ввести, чтобы увидеть
-    // сообщение о конфликте.
+    // While a combination is being recorded in Settings the app must not execute it
+    // as a hotkey. Otherwise recording Ctrl+K would open the command palette over the
+    // recording field and steal focus — a combination clashing with an existing hotkey
+    // could not even be entered to see the conflict message.
     const onRecording = (e: Event) => {
       keybindRecording = (e as CustomEvent<boolean>).detail === true;
     };
@@ -74,8 +73,8 @@
       loadedSettings = await api.getSettings();
       showOnboarding = !loadedSettings.onboarding_complete;
       applyTheme(loadedSettings.theme_mode, loadedSettings);
-      // Язык до отрисовки интерфейса (v0.9.32): пустая настройка означает
-      // «пользователь не выбирал» — тогда берём системную локаль.
+      // The language before the interface renders: an empty setting means the user
+      // never chose one, in which case we take the system locale.
       i18n.init(loadedSettings.language);
       keybinds = parseKeybinds(loadedSettings.keybinds);
     } catch {
@@ -90,8 +89,8 @@
     unreadNotifications = await api.getUnreadNotificationCount().catch(() => 0);
   }
 
-  // Подписи переводятся при отрисовке (`{t(item.label)}` ниже), а не здесь:
-  // это данные, а не разметка. /* i18n-ok */
+  // The labels are translated at render time (`{t(item.label)}` below) rather than
+  // here: this is data, not markup. /* i18n-ok */
   const NAV: { view: View; label: string; icon: string; actionId: string }[] = [
     { view: "today",     label: "Сегодня",   actionId: "view_today",     icon: "M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10Z M12 1v2 M12 21v2 M4.22 4.22l1.42 1.42 M18.36 18.36l1.42 1.42 M1 12h2 M21 12h2 M4.22 19.78l1.42-1.42 M18.36 5.64l1.42-1.42" },
     { view: "tasks",     label: "Задачи",    actionId: "view_tasks",     icon: "M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z M9 12l2 2 4-4" },
@@ -102,8 +101,8 @@
     { view: "settings",  label: "Настройки", actionId: "view_settings", icon: "M21 5h-7 M10 5H3 M21 12h-9 M8 12H3 M21 19h-5 M12 19H3 M14 3v4 M8 10v4 M16 17v4" },
   ];
 
-  // Командная палитра: «Сменить тему» — цикл light → dark → system, применяет
-  // сразу и сохраняет (та же логика сохранения, что и Settings.svelte::save()).
+  // Command palette: "Switch theme" cycles light -> dark -> system, applying it at
+  // once and saving (the same save logic as Settings.svelte::save()).
   async function cycleTheme() {
     if (!loadedSettings) return;
     const order: AppSettings["theme_mode"][] = ["light", "dark", "system"];
@@ -114,8 +113,8 @@
   }
 
   let lastActivityPing = 0;
-  // label/hint переводятся в SearchOverlay (`{t(cmd.label)}`); keywords —
-  // строка для поиска, она намеренно двуязычная. /* i18n-ok */
+  // label and hint are translated in SearchOverlay (`{t(cmd.label)}`); keywords is a
+  // search string and is deliberately bilingual. /* i18n-ok */
   const paletteCommands = [
     { label: "Новая задача", hint: "Создать задачу", keywords: "новая задача create task", run: () => { activeView = "tasks"; taskStore.requestCreate(); } },
     { label: "Новая заметка", hint: "Создать заметку", keywords: "новая заметка create note", run: () => { activeView = "notes"; } },
@@ -145,12 +144,12 @@
     pingActivity();
     if (keybindRecording) return;
     if (!e.ctrlKey) return;
-    // v0.9.35: дубликаты глобальных комбинаций отсюда убраны. Раньше здесь
-    // лежали захардкоженные Ctrl+Shift+N/M/B — вторая копия значений, которые
-    // теперь переназначаются в Настройках (и Ctrl+Shift+J из v0.9.33 сюда
-    // так и не доехал — ровно та ошибка, которую копия и порождает).
-    // Глобальные хоткеи регистрирует ОС (см. register_global_hotkeys в
-    // lib.rs); внутри окна они срабатывают через тот же системный механизм.
+    // The duplicate global combinations were removed from here. This used to hold
+    // hardcoded Ctrl+Shift+N/M/B — a second copy of values that are now rebindable in
+    // Settings (and Ctrl+Shift+J never made it here at all, exactly the kind of
+    // mistake a copy invites). Global hotkeys are registered by the OS (see
+    // register_global_hotkeys in lib.rs); inside the window they fire through that
+    // same system mechanism.
     if (comboMatches(comboFor(keybinds, "palette"), e)) {
       e.preventDefault();
       showSearch = true;
@@ -183,8 +182,9 @@
   />
 {/if}
 
-<!-- Вне {#if}: без декораций окно нечем закрыть и не за что тащить, а
-     онбординг — такой же полноэкранный вид, как и остальные. -->
+<!-- Outside the {#if}: with no decorations there is nothing to close the window
+     with and nothing to drag it by, and the onboarding is as much a fullscreen
+     view as any other. -->
 <WindowControls />
 
 {#if showOnboarding && loadedSettings}

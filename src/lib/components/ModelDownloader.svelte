@@ -85,10 +85,10 @@
           </div>
           <div class="option-meta">{t("~{gb} ГБ · от {ram} ГБ ОЗУ", { gb: gb(opt.size_bytes), ram: opt.ram_gb })}</div>
           <!--
-            Описание приходит из Rust (commands/model.rs) фиксированной
-            строкой, а не из БД, — поэтому переводится при отрисовке
-            (v0.9.47), как справка и названия хоткеев. Полнота проверяется
-            тестом «описания моделей (model.rs) есть в словаре EN».
+            The description arrives from Rust (commands/model.rs) as a fixed
+            string rather than from the DB, so it is translated at render time,
+            like the help and the hotkey names. Coverage is verified by the
+            "model descriptions (model.rs) are in the EN dictionary" test.
           -->
           <div class="option-desc">{t(opt.description)}</div>
         </div>

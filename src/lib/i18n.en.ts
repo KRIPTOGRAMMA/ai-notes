@@ -1,14 +1,14 @@
-// Английский словарь (v0.9.32): русский оригинал → перевод.
+// The English dictionary: Russian original -> translation.
 //
-// Ключ — русский текст ровно как в разметке. Отсутствие ключа не ошибка:
-// t() вернёт сам ключ, то есть русскую строку. Это позволяет наполнять
-// словарь постепенно, не ломая интерфейс.
+// The key is the Russian text exactly as it appears in the markup. A missing key
+// is not an error: t() returns the key itself, i.e. the Russian string. That lets
+// the dictionary be filled in gradually without breaking the interface.
 //
-// Порядок — по экранам, чтобы при добавлении строки было видно, куда её
-// класть, и чтобы диффы оставались локальными.
+// The order follows the screens, so it is clear where a new string belongs and
+// diffs stay local.
 
 export const EN: Record<string, string> = {
-  // --- Навигация и общее ---
+  // --- Navigation and shared ---
   "Задачи": "Tasks",
   "Заметки": "Notes",
   "Дашборд": "Dashboard",
@@ -18,7 +18,7 @@ export const EN: Record<string, string> = {
   "Граф заметок": "Notes graph",
   "Граф": "Graph",
 
-  // --- Командная палитра ---
+  // --- Command palette ---
   "Новая задача": "New task",
   "Создать задачу": "Create a task",
   "Создать заметку": "Create a note",
@@ -52,10 +52,10 @@ export const EN: Record<string, string> = {
   "Думаю…": "Thinking…",
   "Все": "All",
   "Готово!": "Done!",
-  // Посевной статус задачи (миграция 0029), не восклицание выше
+  // A seeded task status (migration 0029), not the exclamation above
   "Готово": "Done",
 
-  // --- Настройки: вкладки ---
+  // --- Settings: tabs ---
   "Общее": "General",
   "ИИ": "AI",
   "Категории": "Categories",
@@ -64,7 +64,7 @@ export const EN: Record<string, string> = {
   "Хоткеи": "Hotkeys",
   "Справка": "Help",
 
-  // --- Настройки: внешний вид ---
+  // --- Settings: appearance ---
   "Внешний вид": "Appearance",
   "Тема": "Theme",
   "Системная": "System",
@@ -75,13 +75,13 @@ export const EN: Record<string, string> = {
   "Сбросить цвета": "Reset colors",
   "Язык": "Language",
 
-  // --- Настройки: ИИ ---
+  // --- Settings: AI ---
   "ИИ-провайдер": "AI provider",
   "Без ИИ (функции отключены)": "No AI (features disabled)",
   "Локальная модель (llamafile)": "Local model (llamafile)",
   "Локальная модель хранится в": "The local model is stored in",
 
-  // --- Настройки: режим работы и мониторинг ---
+  // --- Settings: work mode and monitoring ---
   "Режим работы": "Work mode",
   "Мониторинг": "Monitoring",
   "Применяется после перезапуска приложения.": "Takes effect after restarting the app.",
@@ -89,14 +89,14 @@ export const EN: Record<string, string> = {
   "Забыть собранные домены": "Forget collected domains",
   "Очищено записей: {n}": "Rows cleared: {n}",
 
-  // --- Настройки: данные ---
+  // --- Settings: data ---
   "Авто-бэкап": "Auto backup",
   "Папка для бэкапов": "Backup folder",
   "Хранить копий": "Keep copies",
   "Сделать сейчас": "Run now",
   "Авто-очистка истории (мес., 0 — выкл)": "Auto-clean history (months, 0 = off)",
 
-  // --- Дашборд ---
+  // --- Dashboard ---
   "Активное время": "Active time",
   "Активность по дням (мин)": "Activity by day (min)",
   "Активность по часам (8 недель)": "Activity by hour (8 weeks)",
@@ -108,7 +108,7 @@ export const EN: Record<string, string> = {
   "Время всего": "Total time",
   "за неделю": "this week",
 
-  // --- Задачи ---
+  // --- Tasks ---
   "Активные": "Active",
   "История": "History",
   "Корзина": "Trash",
@@ -123,7 +123,7 @@ export const EN: Record<string, string> = {
   "Есть дедлайн": "Has deadline",
   "Все теги": "All tags",
   "Выполнить": "Complete",
-  // Зависимости задач (v0.9.56)
+  // Task dependencies
   "Заблокирована: {tasks}": "Blocked by: {tasks}",
   "Блокируется задачами": "Blocked by",
   "Добавить блокер...": "Add blocker...",
@@ -137,7 +137,7 @@ export const EN: Record<string, string> = {
   "Критический": "Critical",
   "Завершена": "Completed",
 
-  // --- Заметки ---
+  // --- Notes ---
   "+ Новая заметка": "+ New note",
   "Выберите заметку или создайте новую": "Select a note or create a new one",
   "Версии заметки": "Note versions",
@@ -147,7 +147,7 @@ export const EN: Record<string, string> = {
   "Проект": "Project",
   "Бэклог": "Backlog",
 
-  // --- Быстрый ввод ---
+  // --- Quick capture ---
   "Задача": "Task",
   "Название задачи...": "Task title...",
   "Заголовок заметки...": "Note title...",
@@ -155,7 +155,7 @@ export const EN: Record<string, string> = {
   "Текст из буфера обмена — можно поправить перед сохранением":
     "Text from the clipboard — you can edit it before saving",
 
-  // --- Задачи: шапка, фильтры, массовые действия (v0.9.36) ---
+  // --- Tasks: header, filters, bulk actions ---
   "{active} актив. · {history} в истории": "{active} active · {history} in history",
   "Фильтр по проекту": "Filter by project",
   "ИИ посоветует, чем заняться сейчас — по блокам, дедлайнам и приоритетам":
@@ -167,7 +167,7 @@ export const EN: Record<string, string> = {
   "Авто-категория": "Auto category",
   "ИИ предлагает подзадачи": "AI suggests subtasks",
   "Принять все": "Accept all",
-  // v0.9.44: панель извлечённых задач — список с правкой вместо чипов
+  // The extracted-tasks panel: an editable list instead of chips
   "Выбрать все": "Select all",
   "Снять все": "Clear all",
   "Создать эту задачу": "Create this task",
@@ -202,7 +202,7 @@ export const EN: Record<string, string> = {
   "🗑 Удалённые задачи. Восстановить можно в любой момент, пока не нажато «Удалить навсегда».":
     "🗑 Deleted tasks. You can restore them any time until “Delete permanently” is pressed.",
 
-  // --- Задачи: проекты ---
+  // --- Tasks: projects ---
   "Удалить проект (задачи останутся без проекта)": "Delete project (tasks will keep no project)",
   "Цель:": "Goal:",
   "задач ·": "tasks ·",
@@ -214,10 +214,10 @@ export const EN: Record<string, string> = {
   "Название нового проекта": "New project name",
   "— без проекта —": "— no project —",
 
-  // --- Задачи: умные списки ---
+  // --- Tasks: smart lists ---
   "+ Список": "+ List",
-  // Названия встроенных умных списков задаются кодом (BUILTIN_SMART_LISTS),
-  // поэтому переводятся в месте отрисовки, а не в самой константе.
+  // The built-in smart lists' names are defined in code (BUILTIN_SMART_LISTS), so
+  // they are translated where they are rendered rather than in the constant.
   "Просроченные": "Overdue",
   "На этой неделе": "This week",
   "Создать умный список": "Create a smart list",
@@ -234,7 +234,7 @@ export const EN: Record<string, string> = {
   "Условия комбинируются через «И» — задача должна подойти под все заданные.":
     "Conditions combine with “AND” — a task must match all of them.",
 
-  // --- Заметки: список, редактор, ИИ ---
+  // --- Notes: list, editor, AI ---
   "Поиск...": "Search...",
   "Поиск…": "Search…",
   "Нет заметок": "No notes",
@@ -265,7 +265,7 @@ export const EN: Record<string, string> = {
   "+ тег": "+ tag",
   "Сохранение…": "Saving…",
 
-  // --- Заметки: панель форматирования ---
+  // --- Notes: formatting toolbar ---
   "Жирный (Ctrl+B)": "Bold (Ctrl+B)",
   "Курсив (Ctrl+I)": "Italic (Ctrl+I)",
   "Вики-ссылка (Ctrl+Shift+K)": "Wiki link (Ctrl+Shift+K)",
@@ -277,7 +277,7 @@ export const EN: Record<string, string> = {
   "Ссылка": "Link",
   "Заменить выделение": "Replace selection",
 
-  // --- Календарь (v0.9.37) ---
+  // --- Calendar ---
   "Все активные задачи уже в расписании": "All active tasks are already scheduled",
   "ИИ разложит важные задачи из бэклога по свободному времени сегодня":
     "AI will fit important backlog tasks into today’s free time",
@@ -290,7 +290,7 @@ export const EN: Record<string, string> = {
   "Рутины": "Routines",
   "сегодня": "today",
 
-  // --- Дашборд (v0.9.37) ---
+  // --- Dashboard ---
   "ИИ-инсайт": "AI insight",
   "ИИ отключён — включите провайдера в Настройках, чтобы получать инсайты.":
     "AI is off — enable a provider in Settings to get insights.",
@@ -324,7 +324,7 @@ export const EN: Record<string, string> = {
   "часов": "hours",
   "недель": "weeks",
 
-  // --- Модалка задачи (v0.9.37) ---
+  // --- Task modal ---
   "Редактировать задачу": "Edit task",
   "Первое срабатывание": "First occurrence",
   "Название *": "Name *",
@@ -351,7 +351,7 @@ export const EN: Record<string, string> = {
   "Теги (через запятую)": "Tags (comma-separated)",
   "работа, важное, срочное": "work, important, urgent",
 
-  // --- Быстрый ввод (v0.9.37) ---
+  // --- Quick capture ---
   "Заголовок...": "Title...",
   "Описание...": "Description...",
   "Текст заметки... (Ctrl+Enter — сохранить)": "Note text... (Ctrl+Enter to save)",
@@ -363,30 +363,30 @@ export const EN: Record<string, string> = {
   "закрыть": "close",
   "сохранить ·": "save ·",
 
-  // --- Редактор заметок (v0.9.38) ---
+  // --- Note editor ---
   "Открыть заметку": "Open note",
   "Редактировать": "Edit",
 
-  // --- Рутины (v0.9.38) ---
+  // --- Routines ---
   "+ Добавить рутину": "+ Add routine",
   "Название рутины": "Routine name",
   "Начало": "Start",
   "Длительность (мин)": "Duration (min)",
 
-  // --- Экран «Сегодня» (v0.9.38) ---
+  // --- The "Today" screen ---
   "{done} из {total} выполнено": "{done} of {total} done",
   "Блоки на сегодня": "Today’s blocks",
   "На сегодня блоков не запланировано.": "No blocks scheduled for today.",
   "Дедлайны сегодня и просрочка": "Due today and overdue",
   "Ничего срочного.": "Nothing urgent.",
 
-  // --- Помодоро и трекинг (v0.9.38) ---
+  // --- Pomodoro and tracking ---
   "Начать помидор": "Start pomodoro",
   "Пропустить фазу": "Skip phase",
   "Остановить трекинг": "Stop tracking",
   "Остановить": "Stop",
 
-  // --- Поиск, уведомления, модель (v0.9.38) ---
+  // --- Search, notifications, model ---
   "Поиск задач и заметок...": "Search tasks and notes...",
   "Уведомлений пока не было": "No notifications yet",
   "Очистить": "Clear",
@@ -394,7 +394,7 @@ export const EN: Record<string, string> = {
   "Свой URL (GGUF)": "Custom URL (GGUF)",
   "рекомендуется": "recommended",
 
-  // --- Граф заметок и карточка истории (v0.9.38) ---
+  // --- Notes graph and the history card ---
   "Перетаскивайте узлы, двойной клик — открыть заметку. Приглушённые узлы без связей.":
     "Drag the nodes; double-click opens a note. Dimmed nodes have no links.",
   "Пока нет заметок — граф появится, когда будут заметки со связями [[как эта]].":
@@ -402,7 +402,7 @@ export const EN: Record<string, string> = {
   "Создана": "Created",
   "Теги": "Tags",
 
-  // --- Онбординг (v0.9.38) ---
+  // --- Onboarding ---
   "Задачи, заметки и мониторинг активности — всё локально, приватно и с опциональным ИИ.":
     "Tasks, notes and activity monitoring — all local, private, with optional AI.",
   "Пара минут настройки — и можно работать.": "A couple of minutes of setup and you’re ready.",
@@ -437,7 +437,7 @@ export const EN: Record<string, string> = {
   ": там собрано, что умеют заметки, задачи, быстрый ввод, ИИ и мониторинг.":
     ": it covers what notes, tasks, quick capture, AI and monitoring can do.",
 
-  // --- Онбординг ---
+  // --- Onboarding ---
   "Добро пожаловать в AI Notes": "Welcome to AI Notes",
   "Автозагрузка и хоткеи": "Autostart and hotkeys",
   "Начать настройку": "Start setup",
@@ -446,15 +446,15 @@ export const EN: Record<string, string> = {
   "Начать": "Start",
   "Без ИИ": "No AI",
 
-  // v0.9.46: пропуски, найденные пользователем и новым тестом «нет
-  // кириллицы вне t()» — Настройки, Sidebar, граф, подсказки.
+  // Gaps found by the user and by the new "no Cyrillic outside t()" test:
+  // Settings, the sidebar, the graph, tooltips.
   "0 или пусто — без лимита. При превышении — уведомление раз в день (пока лимит остаётся превышенным). Применяется после «Сохранить».": "0 or empty means no limit. When exceeded — one notification per day (while the limit stays exceeded). Applied after “Save”.",
   "claude-haiku-4-5 (быстрый, дешёвый)": "claude-haiku-4-5 (fast, cheap)",
   "{done}/{total} задач": "{done}/{total} tasks",
   "{done}/{total} мин": "{done}/{total} min",
   "Focus — без уведомлений": "Focus — no notifications",
   "~{gb} ГБ · от {ram} ГБ ОЗУ": "~{gb} GB · {ram} GB RAM min",
-  // Описания моделей — из src-tauri/src/commands/model.rs
+  // Model descriptions, from src-tauri/src/commands/model.rs
   "Самая быстрая и лёгкая — годится для слабых машин и старых ноутбуков, но качество ответов базовое.": "The fastest and lightest — fine for weak machines and older laptops, but answer quality is basic.",
   "Баланс скорости и качества — заметно лучше 0.5B в рассуждениях, всё ещё быстрая на CPU.": "A balance of speed and quality — noticeably better than 0.5B at reasoning, still fast on CPU.",
   "Лучшее качество из трёх — точнее держит инструкции и контекст, но медленнее и требует больше памяти.": "The best quality of the three — follows instructions and context more accurately, but is slower and needs more memory.",
@@ -656,8 +656,8 @@ export const EN: Record<string, string> = {
   "Экспорт заметок (.md)": "Export notes (.md)",
   "Экспортировано заметок: {n}": "Notes exported: {n}",
 
-  // v0.9.46: справка в Настройках (src/lib/help.ts) — переводится при
-  // отрисовке, сам файл остаётся чистыми данными.
+  // The help in Settings (src/lib/help.ts) is translated at render time; the file
+  // itself stays pure data.
   "Композер": "Composer",
   "Строка ввода над списком: первая строка — название, Shift+Enter добавляет подзадачу, Ctrl+Enter создаёт задачу.": "The input line above the list: the first line is the title, Shift+Enter adds a subtask, Ctrl+Enter creates the task.",
   "Разбор языка в названии": "Parsing the title",
@@ -739,8 +739,8 @@ export const EN: Record<string, string> = {
   "Один хоткей открывает поиск по задачам и заметкам вместе с командами приложения: стрелки и Enter выполняют.": "A single hotkey opens search across tasks and notes together with app commands: arrows and Enter run them.",
   "Фокус-режим": "Focus mode",
   "Командная палитра / поиск": "Command palette / search",
-  // Глобальные действия приходят с бэкенда (commands/hotkeys.rs) строками
-  // по-русски; фронт переводит их при отрисовке.
+  // The global actions arrive from the backend (commands/hotkeys.rs) as Russian
+  // strings; the frontend translates them at render time.
   "Быстрая задача": "Quick task",
   "Быстрая заметка": "Quick note",
   "Заметка из буфера": "Note from clipboard",

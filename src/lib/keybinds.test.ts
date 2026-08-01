@@ -78,7 +78,7 @@ describe("formatCombo", () => {
 
 describe("findConflicts", () => {
   it("два действия с одинаковой (дефолтной) комбинацией — конфликт", () => {
-    const binds = { view_notes: "Ctrl+KeyK" }; // переназначили на комбинацию палитры
+    const binds = { view_notes: "Ctrl+KeyK" }; // rebound onto the palette's combination
     expect(findConflicts(binds, "view_notes", "Ctrl+KeyK")).toEqual(["palette"]);
   });
 

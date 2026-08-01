@@ -7,8 +7,9 @@ use crate::commands::settings::WorkMode;
 pub fn start_scheduler(app: tauri::AppHandle, pool: SqlitePool, work_mode: Arc<Mutex<WorkMode>>) {
     tokio::spawn(async move {
         loop {
-            // При Focus или активной паузе дедлайны всё равно проверяем и помечаем,
-            // но не шлём: иначе после снятия глушилки прилетит пачка устаревших уведомлений.
+            // Under Focus or an active pause we still check and mark deadlines but
+            // do not send: otherwise a batch of stale notifications would arrive the
+            // moment the mute is lifted.
             let mode = work_mode.lock().unwrap().clone();
             let muted = crate::notifier::mute::muted_now(&pool, &mode).await;
             check_deadlines(&app, &pool, muted).await;
@@ -32,8 +33,9 @@ async fn check_deadlines(app: &tauri::AppHandle, pool: &SqlitePool, muted: bool)
     let lang = crate::i18n::current_lang(pool).await;
     let msg_hours = crate::i18n::tr_args("Дедлайн через {n} ч", lang, &[("n", warn_hours.to_string())]);
     let msg_mins = crate::i18n::tr_args("Дедлайн через {n} мин", lang, &[("n", warn_mins.to_string())]);
-    // Раннее предупреждение — то, что дальше от «сейчас». Не полагаемся на то,
-    // что «часы» всегда больше «минут»: пользователь мог задать 1ч и 90мин.
+    // The early warning is whichever is further from now. We do not assume the
+    // "hours" setting always exceeds the "minutes" one: the user may have set 1h
+    // and 90min.
     let (early_at, early_msg, late_at, late_msg) = if at_hours >= at_mins {
         (at_hours, &msg_hours, at_mins, &msg_mins)
     } else {
@@ -86,13 +88,14 @@ async fn check_deadlines(app: &tauri::AppHandle, pool: &SqlitePool, muted: bool)
 pub struct BlockDue {
     pub id: String,
     pub title: String,
-    pub end_local: String, // "HH:MM" конца блока в локальном времени — для текста пуша
+    pub end_local: String, // the block's end as local "HH:MM", for the push text
     pub end_utc: DateTime<Utc>,
 }
 
-// Блоки, начавшиеся в окне (now - grace, now], о которых ещё не уведомляли.
-// Grace-окно: после долгого сна/перезапуска не спамим давно начавшимися блоками —
-// они просто помечаются при следующей проверке.
+// Blocks that started within the (now - grace, now] window and have not been
+// notified about yet. The grace window keeps us from spamming about long-started
+// blocks after a long sleep or a restart — those are simply marked on the next
+// check.
 pub async fn blocks_due(pool: &SqlitePool, now: chrono::DateTime<Utc>, grace_mins: i64) -> Vec<BlockDue> {
     let rows = match sqlx::query(
         "SELECT id, title, scheduled_at, COALESCE(scheduled_mins, 60) as mins
@@ -131,8 +134,8 @@ pub async fn mark_block_notified(pool: &SqlitePool, id: &str) {
         .bind(id).execute(pool).await;
 }
 
-// Просроченные (старше grace-окна) блоки без уведомления тоже помечаем,
-// чтобы они не оставались вечными кандидатами.
+// Overdue blocks (older than the grace window) that were never notified about
+// are marked too, so they do not remain candidates forever.
 async fn sweep_stale_blocks(pool: &SqlitePool, now: chrono::DateTime<Utc>, grace_mins: i64) {
     let cutoff = (now - chrono::Duration::minutes(grace_mins)).to_rfc3339();
     let _ = sqlx::query(
@@ -169,9 +172,10 @@ pub struct ReminderDue {
     pub title: String,
 }
 
-// Напоминания заметок (v0.9.18), подошедшие к сроку и ещё не уведомлённые.
-// Как и у блоков — окно (нет верхней "старой" границы: пропущенное напоминание
-// после долгого сна всё равно стоит показать один раз, не молчать вечно).
+// Note reminders that have come due and have not been notified about yet. As
+// with blocks this uses a window, but with no upper "too old" bound: a reminder
+// missed during a long sleep is still worth showing once rather than staying
+// silent forever.
 pub async fn note_reminders_due(pool: &SqlitePool, now: chrono::DateTime<Utc>) -> Vec<ReminderDue> {
     let rows = match sqlx::query(
         "SELECT id, title FROM notes WHERE notified_reminder = 0 AND reminder_at IS NOT NULL AND reminder_at <= ?"
@@ -211,12 +215,12 @@ pub struct GoalDue {
     pub id: String,
     pub name: String,
     pub body: String,
-    pub period_key: String, // чем пометить notified_goal после пуша
+    pub period_key: String, // what to stamp notified_goal with after the push
 }
 
-// Проекты, у которых цель текущего периода выполнена, а пуш за этот период
-// ещё не отправлялся. Если заданы обе части цели (задачи и минуты) —
-// выполнены должны быть обе.
+// Projects whose goal for the current period has been reached and which have not
+// been pushed about in that period. If both halves of the goal are set (tasks and
+// minutes), both must be reached.
 pub async fn goals_due(pool: &SqlitePool, now: chrono::DateTime<Utc>) -> Vec<GoalDue> {
     use crate::commands::projects::{get_projects_at, period_key};
     let projects = match get_projects_at(pool, now).await {
@@ -265,7 +269,7 @@ async fn check_morning_digest(app: &tauri::AppHandle, pool: &SqlitePool, muted: 
         .map(|d| d.with_timezone(&Utc))
         .unwrap_or(now);
 
-    // Блоки сегодня: начало локального дня в UTC
+    // Today's blocks: the start of the local day, in UTC
     let today_start_utc = Local
         .from_local_datetime(&local_today.and_hms_opt(0, 0, 0).unwrap())
         .single()
@@ -280,7 +284,7 @@ async fn check_morning_digest(app: &tauri::AppHandle, pool: &SqlitePool, muted: 
     .bind(today_start_utc.to_rfc3339())
     .fetch_all(pool).await.unwrap_or_default();
 
-    // Дедлайны сегодня + просрочки
+    // Today's deadlines plus overdue items
     let due_row = sqlx::query(
         "SELECT COUNT(*) AS due,
                 SUM(CASE WHEN deadline < ? THEN 1 ELSE 0 END) AS overdue
@@ -334,7 +338,7 @@ async fn check_goals(app: &tauri::AppHandle, pool: &SqlitePool, muted: bool) {
         if !muted {
             send_notification(app, pool, "goal", &goal.name, &goal.body).await;
         }
-        // Помечаем и в mute, чтобы после снятия глушилки не прилетала пачка
+        // Marked under mute too, so no batch arrives once the mute is lifted
         mark_goal_notified(pool, &goal.id, &goal.period_key).await;
     }
     record_goal_snapshots(pool, now).await;
@@ -356,7 +360,7 @@ async fn record_goal_snapshots(pool: &SqlitePool, now: chrono::DateTime<Utc>) {
         .bind(&p.id).bind(&key)
         .fetch_optional(pool).await;
         let Ok(Some(last_row)) = last else {
-            // нет записи — создаём первую
+            // no row yet — create the first one
             let _ = sqlx::query(
                 "INSERT INTO project_goal_history (id, project_id, period_key, goal_tasks, goal_mins, done_tasks, done_mins, recorded_at)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
@@ -393,8 +397,9 @@ pub struct LimitDue {
     pub limit: i64,
 }
 
-// Категории, превысившие дневной лимит и ещё не уведомлённые сегодня (локальный день).
-// notified_json — текущее содержимое settings.app_limits_notified: {category: "YYYY-MM-DD"}.
+// Categories that have exceeded their daily limit and have not been notified
+// about today (local day). notified_json is the current contents of
+// settings.app_limits_notified: {category: "YYYY-MM-DD"}.
 pub fn limits_due(
     limits: &[crate::commands::monitor::AppLimit],
     usage: &[crate::commands::monitor::CategoryMinutes],
@@ -438,7 +443,7 @@ async fn check_app_limits(app: &tauri::AppHandle, pool: &SqlitePool, muted: bool
                 &[("cat", d.category.clone()), ("mins", d.minutes.to_string()), ("limit", d.limit.to_string())]);
             send_notification(app, pool, "app_limit", &d.category, &body).await;
         }
-        // Помечаем и в mute — иначе после снятия глушилки прилетит пачка.
+        // Marked under mute too, or a batch would arrive once the mute is lifted.
         notified.insert(d.category.clone(), today.clone());
     }
     if let Ok(json) = serde_json::to_string(&notified) {
@@ -446,7 +451,7 @@ async fn check_app_limits(app: &tauri::AppHandle, pool: &SqlitePool, muted: bool
     }
 }
 
-// Утренняя сводка: should_run? (время настало, сегодня ещё не слали, время задано)
+// The morning digest: should it run? (the time has come, nothing was sent today, a time is configured)
 async fn morning_digest_due(pool: &SqlitePool, now: chrono::DateTime<Utc>) -> bool {
     let local_now = now.with_timezone(&Local);
     let time_setting = crate::commands::settings::get_setting(pool, "morning_digest_time").await;
@@ -458,7 +463,7 @@ async fn morning_digest_due(pool: &SqlitePool, now: chrono::DateTime<Utc>) -> bo
         (Ok(h), Ok(m)) if h < 24 && m < 60 => (h, m),
         _ => return false,
     };
-    // Наступило ли время сегодня?
+    // Has the time arrived today?
     let today = local_now.date_naive();
     let target = Local
         .from_local_datetime(&today.and_hms_opt(h, m, 0).unwrap())
@@ -466,25 +471,26 @@ async fn morning_digest_due(pool: &SqlitePool, now: chrono::DateTime<Utc>) -> bo
         .map(|d| d.with_timezone(&Utc));
     let Some(target_utc) = target else { return false; };
     if now < target_utc { return false; }
-    // Уже отправляли сегодня?
+    // Was it already sent today?
     let last = crate::commands::settings::get_setting(pool, "morning_digest_last").await;
     let today_str = today.format("%Y-%m-%d").to_string();
     if last.as_deref() == Some(&today_str) { return false; }
     true
 }
 
-// kind — стабильный тег источника пуша (deadline/block/digest/goal/app_limit/
-// pomodoro/overdue/missed_days/nudge/activity_return/note_reminder), пишется в
-// notification_log для Центра уведомлений (v0.9.16) — плагин уведомлений сам
-// историю не хранит. Большинство вызовов не ведут никуда конкретно при клике
-// в ленте — для них entity_type/entity_id остаются NULL (см. send_notification_for).
+// kind is a stable tag for the push's source (deadline/block/digest/goal/
+// app_limit/pomodoro/overdue/missed_days/nudge/activity_return/note_reminder),
+// written into notification_log for the Notification Centre — the notification
+// plugin keeps no history of its own. Most calls lead nowhere in particular when
+// clicked in the feed, so their entity_type/entity_id stay NULL (see
+// send_notification_for).
 pub async fn send_notification(app: &tauri::AppHandle, pool: &SqlitePool, kind: &str, title: &str, body: &str) {
     send_notification_for(app, pool, kind, title, body, None, None).await;
 }
 
-// Тот же пуш, но со ссылкой на сущность (v0.9.18: напоминание заметки → клик
-// в Центре уведомлений открывает эту заметку). entity_type — "note"/"task" и
-// т.п., entity_id — id записи.
+// The same push but with a reference to an entity (a note reminder, where
+// clicking it in the Notification Centre opens that note). entity_type is
+// "note"/"task" and so on; entity_id is the record's id.
 pub async fn send_notification_for(
     app: &tauri::AppHandle,
     pool: &SqlitePool,
@@ -532,8 +538,8 @@ mod tests {
         crate::commands::settings::set_setting(pool, "morning_digest_last", date).await.unwrap();
     }
 
-    // Фиксируем now на локальное время так, чтобы целевой час был проверяем.
-    // Возвращаем now, при котором `time_str` уже наступил (или нет).
+    // Pin now to a local time such that the target hour is testable. Returns a now
+    // at which `time_str` has already arrived (or has not).
     fn fixed_now(hour: u32, min: u32) -> chrono::DateTime<Utc> {
         let today = Local::now().date_naive();
         let local_dt = Local
@@ -575,13 +581,13 @@ mod tests {
 
         eprintln!("now={now}, today_str={today_str}");
         assert!(morning_digest_due(&pool, now).await);
-        // После отправки дата сохраняется
+        // After sending, the date is stored
         set_last(&pool, &today_str).await;
         let saved = get_setting(&pool, "morning_digest_last").await;
         eprintln!("saved last={saved:?}");
         assert!(!morning_digest_due(&pool, now).await);
 
-        // На следующий день — снова должна (симулируем сбросом last на вчера)
+        // The next day it must run again (simulated by resetting last to yesterday)
         let yesterday = (now.with_timezone(&Local).date_naive() - chrono::Duration::days(1))
             .format("%Y-%m-%d").to_string();
         set_last(&pool, &yesterday).await;
@@ -627,8 +633,8 @@ mod tests {
         assert_eq!(due[0].title, "начался");
     }
 
-    // v0.9.12: end_utc — момент, на который фокус-режим продлит quiet_until
-    // при старте блока (check_blocks). Должен совпадать с scheduled_at + mins.
+    // end_utc is the moment Focus mode extends quiet_until to when a block starts
+    // (check_blocks). It must equal scheduled_at + mins.
     #[tokio::test]
     async fn blocks_due_computes_end_utc_from_scheduled_mins() {
         let pool = test_pool().await;
@@ -651,7 +657,7 @@ mod tests {
         mark_block_notified(&pool, &fresh).await;
         sweep_stale_blocks(&pool, now, 10).await;
 
-        // после пометки и свипа кандидатов не осталось
+        // after marking and the sweep, no candidates remain
         assert!(blocks_due(&pool, now, 10).await.is_empty());
         let unnotified: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM tasks WHERE notified_block = 0")
@@ -672,9 +678,9 @@ mod tests {
         id
     }
 
-    // v0.9.18: напоминания заметок — тот же due/mark паттерн, что у блоков,
-    // но без верхней "слишком старое" границы (пропущенное после сна всё
-    // равно стоит показать один раз, не молчать вечно).
+    // Note reminders use the same due/mark pattern as blocks but without an upper
+    // "too old" bound: one missed during a sleep is still worth showing once
+    // rather than staying silent forever.
     #[tokio::test]
     async fn note_reminders_due_respects_time_and_flag() {
         let pool = test_pool().await;
@@ -716,10 +722,10 @@ mod tests {
             goal_tasks: Some(1), ..Default::default()
         }).await.unwrap();
 
-        // цель ещё не выполнена — кандидатов нет
+        // the goal is not reached yet, so there are no candidates
         assert!(goals_due(&pool, now).await.is_empty());
 
-        // выполненная в этом периоде задача закрывает цель
+        // a task completed within this period closes the goal
         sqlx::query(
             "INSERT INTO tasks (id, title, status, priority, category, recurrence, tags, hidden,
              created_at, updated_at, completed_at, project_id)
@@ -735,17 +741,17 @@ mod tests {
         assert_eq!(due[0].name, "Спорт");
         assert!(due[0].body.contains("Цель недели"));
 
-        // после пометки — в этом периоде больше не кандидат
+        // after marking it is no longer a candidate in this period
         mark_goal_notified(&pool, &due[0].id, &due[0].period_key).await;
         assert!(goals_due(&pool, now).await.is_empty());
 
-        // изменение цели перезаряжает пуш (notified_goal сброшен)
+        // changing the goal re-arms the push (notified_goal is reset)
         update_project_impl(&pool, p.id.clone(), UpdateProject {
             goal_tasks: Some(1), ..Default::default()
         }).await.unwrap();
         assert_eq!(goals_due(&pool, now).await.len(), 1);
 
-        // архивный проект не уведомляется
+        // an archived project is not notified about
         update_project_impl(&pool, p.id, UpdateProject {
             archived: Some(true), ..Default::default()
         }).await.unwrap();
@@ -823,14 +829,14 @@ mod tests {
             .bind(now.to_rfc3339())
             .execute(&pool).await.unwrap();
 
-        // Нет provider-правил → randomapp попадёт в "Other" (categorize_app по умолчанию)
+        // With no provider rules, randomapp lands in "Other" (categorize_app's default)
         let usage = crate::commands::monitor::get_app_category_time_impl(&pool, 1).await.unwrap();
         assert!(usage.iter().any(|c| c.category == "Other" && c.minutes >= 1));
 
         let notified_before = get_setting(&pool, "app_limits_notified").await.unwrap_or_default();
         assert!(notified_before.is_empty());
 
-        // Симулируем полный цикл без реального AppHandle: напрямую проверяем limits_due + маркировку
+        // Simulate the full cycle without a real AppHandle: check limits_due and the marking directly
         let limits = crate::commands::monitor::parse_app_limits(
             &get_setting(&pool, "app_limits").await.unwrap()
         );

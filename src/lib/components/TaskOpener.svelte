@@ -1,31 +1,31 @@
 <script lang="ts">
-  // Открытие задачи по id прямо на текущем экране (v0.9.53).
+  // Opening a task by id right on the current screen.
   //
-  // Раньше клик по задаче в Календаре, на Дашборде и в «Сегодня» уводил на
-  // экран Задач: `activeView = "tasks"` + `taskStore.requestFocus(id)`.
-  // Пользователь терял контекст — смотрел неделю, кликнул задачу и оказывался
-  // в другом разделе, откуда надо возвращаться вручную.
+  // Clicking a task in the Calendar, on the Dashboard or in "Today" used to lead
+  // away to the Tasks screen: `activeView = "tasks"` plus `taskStore.requestFocus(id)`.
+  // The user lost their context — looking at the week, clicking a task and ending up
+  // in another section they then had to navigate back from.
   //
-  // Логика открытия не дублируется по экранам, а живёт здесь: она не сводится
-  // к «показать модалку». Завершённая задача (hidden) — это история, её надо
-  // открывать read-only, иначе клик по выполненной задаче из попапа дня
-  // предлагал бы править дедлайн и повтор у того, что давно сделано. Три
-  // копии этого правила неизбежно разъехались бы.
+  // The opening logic is not duplicated across screens but lives here, because it is
+  // more than "show a modal". A completed task (hidden) is history and must open
+  // read-only, or clicking a completed task in the day popup would offer to edit the
+  // deadline and recurrence of something long done. Three copies of that rule would
+  // inevitably drift apart.
   import TaskModal from "./TaskModal.svelte";
   import TaskHistoryDetail from "./TaskHistoryDetail.svelte";
   import { taskStore } from "../stores/tasks.svelte";
   import type { Task, CreateTaskPayload, UpdateTaskPayload } from "../types";
 
   type Props = {
-    // Какую задачу открыть; null — ничего не открыто.
+    // Which task to open; null means nothing is open.
     taskId: string | null;
     onClose: () => void;
   };
 
   let { taskId, onClose }: Props = $props();
 
-  // Экраны, открывающие задачу, не всегда грузили список (Календарь берёт
-  // задачи своим запросом) — без этого модалка не нашла бы задачу по id.
+  // Screens that open a task did not always load the list (the Calendar fetches tasks
+  // with its own query) — without this the modal would not find the task by id.
   if (taskStore.tasks.length === 0) taskStore.load();
 
   const task = $derived<Task | null>(

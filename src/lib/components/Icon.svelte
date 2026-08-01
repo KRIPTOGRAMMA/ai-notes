@@ -1,8 +1,8 @@
 <script lang="ts">
-  // Инлайн-SVG иконки вместо emoji (v0.8.1): emoji-глифы (🍅 ▶ ⏸ 📅 …)
-  // рендерятся на Linux непредсказуемо — зависят от установленных
-  // emoji-шрифтов. Тот же паттерн, что sidebar-навигация в App.svelte:
-  // stroke="currentColor", без внешних шрифтов/CDN.
+  // Inline SVG icons instead of emoji: emoji glyphs (🍅 ▶ ⏸ 📅 …) render
+  // unpredictably on Linux — they depend on which emoji fonts are installed.
+  // The same pattern as the sidebar navigation in App.svelte:
+  // stroke="currentColor", with no external fonts or CDNs.
   const PATHS: Record<string, string> = {
     play:     "M7 4.5v15l13-7.5Z",
     stop:     "M6.5 6.5h11v11h-11Z",
@@ -31,8 +31,8 @@
     checklist:"M9 6h11 M9 12h11 M9 18h11 M4 6l1.5 1.5L7.5 5 M4 12l1.5 1.5L7.5 11 M4 18l1.5 1.5L7.5 16",
     wikilink: "M7 8H6a4 4 0 0 0 0 8h1 M17 8h1a4 4 0 0 1 0 8h-1 M9 12h6",
     code:     "M9 6 3 12l6 6 M15 6l6 6-6 6",
-    // v0.9.27: цитата — вертикальная планка + строки текста; нумерованный
-    // список — «1.» / «2.» штрихами слева и линии справа.
+    // A quote is a vertical bar plus lines of text; an ordered list is
+    // "1." / "2." as strokes on the left with lines on the right.
     quote:    "M4 5v14 M9 8h11 M9 12h11 M9 16h7",
     orderlist:"M4 6h1v4 M4 10h2 M4 14h2v2H4v2h2 M10 7h10 M10 12h10 M10 17h10",
     table:    "M3 4h18v16H3Z M3 10h18 M3 16h18 M9 4v16 M15 4v16",
@@ -40,9 +40,9 @@
     sun:      "M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10Z M12 1v2 M12 21v2 M4.22 4.22l1.42 1.42 M18.36 18.36l1.42 1.42 M1 12h2 M21 12h2 M4.22 19.78l1.42-1.42 M18.36 5.64l1.42-1.42",
     bell:     "M6 8a6 6 0 0 1 12 0c0 4 1.5 6 2 7H4c.5-1 2-3 2-7Z M10 20a2 2 0 0 0 4 0",
     columns:  "M3 4h18v16H3Z M9 4v16 M15 4v16",
-    // v0.9.40: кнопки окна вместо системного заголовка. Рисуются тем же
-    // stroke="currentColor", что и остальные, — тонкие штрихи в стиле GNOME,
-    // а не толстые глифы.
+    // Window buttons in place of the system title bar. Drawn with the same
+    // stroke="currentColor" as the rest — thin GNOME-style strokes rather than
+    // heavy glyphs.
     winmin:   "M5 12h14",
     winmax:   "M5 5h14v14H5Z",
     winclose: "M6 6l12 12 M18 6 6 18",

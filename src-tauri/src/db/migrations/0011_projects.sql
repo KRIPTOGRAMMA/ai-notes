@@ -1,6 +1,6 @@
--- v0.5 фаза 2: проекты. Задачи и заметки могут принадлежать проекту.
--- FK в SQLite не enforced (как и везде в проекте) — целостность чистим руками
--- при удалении проекта.
+-- Projects. Tasks and notes may belong to a project. FKs are not enforced in
+-- SQLite (as everywhere in this project), so integrity is cleaned up by hand when
+-- a project is deleted.
 CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,

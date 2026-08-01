@@ -1,7 +1,7 @@
--- Цели проектов (v0.5 фаза 2, отложенная часть): N задач и/или N минут
--- тайм-блоков за период (неделя/месяц). notified_goal хранит ключ периода
--- (локальная дата его начала), за который уже отправлен пуш о выполнении —
--- в новом периоде цель «перезаряжается».
+-- Project goals: N tasks and/or N minutes of time blocks per period (week or
+-- month). notified_goal holds the key of the period (the local date it started)
+-- for which the completion push has already been sent — in a new period the goal
+-- re-arms itself.
 ALTER TABLE projects ADD COLUMN goal_tasks INTEGER;
 ALTER TABLE projects ADD COLUMN goal_mins INTEGER;
 ALTER TABLE projects ADD COLUMN goal_period TEXT NOT NULL DEFAULT 'week';

@@ -1,24 +1,24 @@
-// Проверка ссылки перед открытием во внешнем браузере (v0.9.27).
+// Checking a link before opening it in the external browser.
 //
-// Markdown в заметке — это произвольный текст: он мог быть вставлен из
-// буфера, прийти от ИИ или из импортированного .md. Отдавать такую строку
-// в openUrl() без проверки схемы нельзя — `javascript:` и `data:` это
-// исполняемый код, `file:` — доступ к локальной ФС.
+// The markdown in a note is arbitrary text: it may have been pasted from the
+// clipboard, come from the AI, or arrived in an imported .md. Handing such a string
+// to openUrl() without checking the scheme is not acceptable — `javascript:` and
+// `data:` are executable code, and `file:` grants access to the local filesystem.
 //
-// Отдельный чистый модуль, потому что vitest покрывает только чистые ts
-// (см. тот же приём в guard.ts и clipboardNote.ts).
+// A separate pure module, because vitest covers pure ts only (the same approach as
+// guard.ts and clipboardNote.ts).
 
-// Белый список, а не чёрный: неизвестная схема безопаснее считается
-// небезопасной, иначе каждая новая экзотическая схема — дыра.
+// An allowlist rather than a blocklist: an unknown scheme is more safely treated as
+// unsafe, or every new exotic scheme becomes a hole.
 const SAFE_SCHEMES = ["http:", "https:", "mailto:"];
 
 export function isSafeUrl(raw: string): boolean {
   const trimmed = raw.trim();
   if (!trimmed) return false;
 
-  // Ссылка без схемы (example.com, /path, #anchor) — не абсолютный URL,
-  // открывать её во внешнем браузере нечем. Считаем небезопасной, но по
-  // другой причине: не «опасно», а «некуда вести».
+  // A link with no scheme (example.com, /path, #anchor) is not an absolute URL and
+  // there is nothing to open it in the external browser with. We treat it as unsafe,
+  // but for a different reason: not "dangerous" but "nowhere to lead".
   let url: URL;
   try {
     url = new URL(trimmed);
@@ -26,6 +26,6 @@ export function isSafeUrl(raw: string): boolean {
     return false;
   }
 
-  // toLowerCase: `JavaScript:` — та же схема, что `javascript:`.
+  // toLowerCase: `JavaScript:` is the same scheme as `javascript:`.
   return SAFE_SCHEMES.includes(url.protocol.toLowerCase());
 }

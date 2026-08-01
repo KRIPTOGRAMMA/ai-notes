@@ -4,13 +4,13 @@ use tokio::time::{sleep, Duration};
 use crate::commands::settings::{WorkMode, get_setting, set_setting};
 use crate::notifier::scheduler::send_notification;
 
-const CHECK_EVERY_SECS: u64 = 600; // раз в 10 минут
+const CHECK_EVERY_SECS: u64 = 600; // once every 10 minutes
 const OVERDUE_THRESHOLD: i64 = 3;
 const MISSED_DAYS_THRESHOLD: u32 = 3;
 
-// Контекстные триггеры: «накопились просроченные задачи». Уведомление не чаще
-// раза в день; кулдаун хранится в settings (last_overdue_notify = YYYY-MM-DD),
-// чтобы переживать перезапуски и не спамить заново.
+// Contextual triggers: "overdue tasks have piled up". Notified at most once a
+// day; the cooldown lives in settings (last_overdue_notify = YYYY-MM-DD) so it
+// survives restarts and does not start spamming again.
 pub fn start_triggers(app: tauri::AppHandle, pool: SqlitePool, work_mode: Arc<Mutex<WorkMode>>) {
     tokio::spawn(async move {
         loop {
@@ -41,8 +41,8 @@ pub fn start_triggers(app: tauri::AppHandle, pool: SqlitePool, work_mode: Arc<Mu
                 let _ = set_setting(&pool, "last_overdue_notify", &today).await;
             }
 
-            // Серия «пропущенных» дней: подряд идущие прошлые дни, на которые были
-            // задачи с дедлайном и они до сих пор не закрыты. Свой дневной кулдаун.
+            // A run of "missed" days: consecutive past days that had tasks due and
+            // still have them open. It has its own daily cooldown.
             if get_setting(&pool, "last_missed_notify").await.as_deref() != Some(today.as_str()) {
                 let missed = missed_days(&pool).await;
                 let streak =
@@ -62,7 +62,7 @@ pub fn start_triggers(app: tauri::AppHandle, pool: SqlitePool, work_mode: Arc<Mu
     });
 }
 
-// Прошлые дни, на которые приходились дедлайны до сих пор открытых задач.
+// Past days on which still-open tasks had their deadlines.
 pub async fn missed_days(pool: &SqlitePool) -> std::collections::HashSet<chrono::NaiveDate> {
     let rows = sqlx::query(
         "SELECT DISTINCT date(deadline) as d FROM tasks
@@ -78,8 +78,8 @@ pub async fn missed_days(pool: &SqlitePool) -> std::collections::HashSet<chrono:
         .collect()
 }
 
-// Длина серии пропущенных дней, заканчивающейся вчера. День без дедлайнов
-// (или где всё закрыто) обрывает серию. Чистая функция.
+// The length of the run of missed days ending yesterday. A day with no deadlines
+// (or where everything is closed) breaks the run. A pure function.
 pub fn consecutive_missed_days(
     today: chrono::NaiveDate,
     missed: &std::collections::HashSet<chrono::NaiveDate>,
@@ -93,7 +93,7 @@ pub fn consecutive_missed_days(
     streak
 }
 
-// Сколько задач просрочено на момент `now` (RFC3339). Скрытые и закрытые не считаются.
+// How many tasks are overdue as of `now` (RFC3339). Hidden and closed ones do not count.
 pub async fn overdue_count(pool: &SqlitePool, now: &str) -> i64 {
     sqlx::query(
         "SELECT COUNT(*) as c FROM tasks
@@ -129,12 +129,12 @@ mod tests {
     async fn counts_only_open_visible_overdue() {
         let pool = test_pool().await;
         let now = "2026-07-10T12:00:00+00:00";
-        task(&pool, "a", "Todo", Some("2026-07-09T00:00:00+00:00"), false).await;       // просрочена
-        task(&pool, "b", "InProgress", Some("2026-07-08T00:00:00+00:00"), false).await; // просрочена
-        task(&pool, "c", "Done", Some("2026-07-01T00:00:00+00:00"), false).await;       // закрыта
-        task(&pool, "d", "Todo", Some("2026-07-09T00:00:00+00:00"), true).await;        // скрыта
-        task(&pool, "e", "Todo", Some("2026-07-11T00:00:00+00:00"), false).await;       // ещё не срок
-        task(&pool, "f", "Todo", None, false).await;                                    // без дедлайна
+        task(&pool, "a", "Todo", Some("2026-07-09T00:00:00+00:00"), false).await;       // overdue
+        task(&pool, "b", "InProgress", Some("2026-07-08T00:00:00+00:00"), false).await; // overdue
+        task(&pool, "c", "Done", Some("2026-07-01T00:00:00+00:00"), false).await;       // closed
+        task(&pool, "d", "Todo", Some("2026-07-09T00:00:00+00:00"), true).await;        // hidden
+        task(&pool, "e", "Todo", Some("2026-07-11T00:00:00+00:00"), false).await;       // not due yet
+        task(&pool, "f", "Todo", None, false).await;                                    // no deadline
 
         assert_eq!(overdue_count(&pool, now).await, 2);
     }
@@ -158,7 +158,7 @@ mod tests {
 
     #[test]
     fn clean_day_breaks_streak() {
-        // 8-е чистое: серия — только вчера
+        // the 8th is clean: the run is yesterday only
         let missed: std::collections::HashSet<_> = [d("2026-07-09"), d("2026-07-07")].into();
         assert_eq!(consecutive_missed_days(d("2026-07-10"), &missed), 1);
     }
@@ -177,10 +177,10 @@ mod tests {
             .to_rfc3339();
         let tomorrow = (chrono::Utc::now() + chrono::Duration::days(1))
             .to_rfc3339();
-        task(&pool, "a", "Todo", Some(&yesterday), false).await;  // пропуск
-        task(&pool, "b", "Done", Some(&yesterday), false).await;  // закрыта — не пропуск
-        task(&pool, "c", "Todo", Some(&tomorrow), false).await;   // будущее — не пропуск
-        task(&pool, "d", "Todo", Some(&yesterday), true).await;   // скрыта
+        task(&pool, "a", "Todo", Some(&yesterday), false).await;  // a miss
+        task(&pool, "b", "Done", Some(&yesterday), false).await;  // closed, so not a miss
+        task(&pool, "c", "Todo", Some(&tomorrow), false).await;   // in the future, so not a miss
+        task(&pool, "d", "Todo", Some(&yesterday), true).await;   // hidden
 
         let missed = missed_days(&pool).await;
         assert_eq!(missed.len(), 1);

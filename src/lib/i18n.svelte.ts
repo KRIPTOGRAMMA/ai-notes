@@ -1,5 +1,5 @@
-// Реактивная обёртка локализации (v0.9.32). Здесь только состояние —
-// вся логика перевода в чистом i18n.ts, который покрыт тестами.
+// The reactive localization wrapper. State only — all the translation logic lives
+// in the pure i18n.ts, which is covered by tests.
 import { translate, detectLang, type Lang } from "./i18n";
 
 let current = $state<Lang>("ru");
@@ -9,8 +9,8 @@ export const i18n = {
 
   set(lang: Lang) { current = lang; },
 
-  // Язык из настроек; пустая строка (настройка не задана) — определяем по
-  // системной локали. Вызывается один раз при старте приложения.
+  // The language from the settings; an empty string (the setting is unset) means we
+  // detect it from the system locale. Called once at application startup.
   init(saved: string) {
     current = saved === "ru" || saved === "en"
       ? saved
@@ -18,8 +18,8 @@ export const i18n = {
   },
 };
 
-// Короткое имя для разметки: {t("Задачи")}. Читает i18n.lang, поэтому
-// компоненты перерисовываются при смене языка сами.
+// A short name for the markup: {t("Задачи")}. It reads i18n.lang, so components
+// re-render on a language change by themselves.
 export function t(key: string, vars?: Record<string, string | number>): string {
   return translate(key, i18n.lang, vars);
 }

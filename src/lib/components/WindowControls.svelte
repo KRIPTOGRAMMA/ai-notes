@@ -1,25 +1,25 @@
 <script lang="ts">
-  // Свои кнопки окна вместо системного заголовка (v0.9.40).
+  // Our own window buttons in place of the system title bar.
   //
-  // Главное окно объявлено с decorations: false, поэтому WebKitGTK больше не
-  // рисует белую плашку с названием — вместе с ней исчезают и системные
-  // кнопки, и возможность таскать окно мышью. И то, и другое возвращается
-  // здесь.
+  // The main window is declared with decorations: false, so WebKitGTK no longer draws
+  // the white bar with the title — and with it go the system buttons and the ability
+  // to drag the window with the mouse. Both are restored here.
+
   //
-  // Зона перетаскивания — не data-tauri-drag-region, а явный вызов
-  // startDragging по mousedown: атрибут срабатывает на любой клик внутри
-  // размеченного элемента, включая клики по вложенным кнопкам, и тогда
-  // нажатие «свернуть» превращалось бы в микро-перетаскивание вместо
-  // клика.
+  // The drag region is not data-tauri-drag-region but an explicit startDragging call
+  // on mousedown: the attribute fires on any click inside the marked element,
+  // including clicks on nested buttons, and then pressing "minimize" would turn into
+  // a micro-drag instead of a click.
+
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import Icon from "./Icon.svelte";
   import { t } from "../i18n.svelte";
 
   let maximized = $state(false);
 
-  // Кнопка «развернуть» должна показывать текущее состояние: разворачивать
-  // можно и двойным кликом по шапке, и через WM — иконка обязана следовать
-  // за окном, а не за своими же кликами.
+  // The "maximize" button must show the current state: maximizing is also possible by
+  // double-clicking the header and through the WM, so the icon has to follow the
+  // window rather than its own clicks.
   $effect(() => {
     const win = getCurrentWindow();
     let unlisten: (() => void) | undefined;
@@ -34,12 +34,12 @@
   });
 
   async function startDrag(e: MouseEvent) {
-    // Только основная кнопка: правый клик на шапке принадлежит WM.
+    // The primary button only: a right click on the header belongs to the WM.
     if (e.button !== 0) return;
     try {
       await getCurrentWindow().startDragging();
     } catch {
-      // Перетаскивание — не та операция, ради которой стоит рушить UI.
+      // Dragging is not an operation worth breaking the UI over.
     }
   }
 
@@ -47,7 +47,7 @@
     try {
       await getCurrentWindow().toggleMaximize();
     } catch {
-      /* см. выше */
+      /* see above */
     }
   }
 
@@ -55,18 +55,19 @@
     try {
       await getCurrentWindow().minimize();
     } catch {
-      /* см. выше */
+      /* see above */
     }
   }
 
-  // Закрытие прячет окно, а не завершает процесс: приложение живёт в трее,
-  // фоновые циклы (трекинг, помодоро, уведомления) должны продолжать
-  // работать. Выход — только из меню трея, как и было с системной кнопкой.
+  // Closing hides the window rather than ending the process: the app lives in the
+  // tray and the background loops (tracking, pomodoro, notifications) must keep
+  // running. Quitting is only available from the tray menu, as it was with the
+  // system button.
   async function close() {
     try {
       await getCurrentWindow().hide();
     } catch {
-      /* см. выше */
+      /* see above */
     }
   }
 </script>
@@ -92,9 +93,9 @@
 </div>
 
 <style>
-  /* Плавает над контентом: своей высоты не занимает, чтобы вьюхи не
-     пришлось сдвигать вниз на высоту шапки. Тянется на всю ширину — вся
-     верхняя кромка окна работает как зона перетаскивания. */
+  /* Floats above the content and takes no height of its own, so the views do not
+     have to be pushed down by a header's height. It spans the full width, so the
+     whole top edge of the window acts as a drag region. */
   .titlebar {
     position: fixed;
     top: 0;
@@ -106,8 +107,9 @@
     align-items: center;
     padding-right: 6px;
     z-index: 60;
-    /* Клики проходят насквозь везде, кроме самих кнопок и зоны справа:
-       иначе шапка перехватывала бы верхнюю строку контента. */
+    /* Clicks pass through everywhere except the buttons themselves and the region
+       on the right: otherwise the header would intercept the top line of the
+       content. */
     pointer-events: none;
   }
 

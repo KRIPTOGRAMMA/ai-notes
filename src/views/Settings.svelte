@@ -23,8 +23,8 @@
     { value: "anthropic", label: "Anthropic" },
   ]);
 
-  // Каждый пресет задаёт пару акцентов (основной + дополнительный, градиент
-  // на .btn-primary) одной кнопкой; «Свой» — ручной выбор ниже остаётся как есть.
+  // Each preset sets a pair of accents (primary plus secondary, the .btn-primary
+  // gradient) with one button; "Custom" leaves the manual pickers below untouched.
   const THEME_PRESETS: { name: string; accent: string; accentSecondary: string }[] = $derived([
     { name: "Indigo", accent: "#6366f1", accentSecondary: "#6366f1" },
     { name: t("Океан"), accent: "#0891b2", accentSecondary: "#6366f1" },
@@ -34,7 +34,7 @@
     { name: "Slate", accent: "#64748b", accentSecondary: "#64748b" },
   ]);
 
-  // Применяем тему сразу при любом изменении — живое превью без нажатия «Сохранить».
+  // The theme is applied on every change — a live preview without pressing "Save".
   function previewTheme() {
     applyTheme(settings.theme_mode, settings);
   }
@@ -101,20 +101,19 @@
   let trackingMode: "extended" | "basic" | null = $state(null);
   let windowTracking: string | null = $state(null);
   let modelPath: string | null = $state(null);
-  // Число очищенных записей о доменах — показывается после нажатия, чтобы
-  // действие не выглядело как «ничего не произошло» (v0.9.31).
+  // The number of cleared domain records, shown after the click so the action does
+  // not look like "nothing happened".
   let domainCleared: number | null = $state(null);
 
   async function clearDomains() {
     domainCleared = await api.clearDomainHistory().catch(() => null);
   }
 
-  // --- Вкладки (v0.8.10): секции сгруппированы, чтобы не листать одну
-  // длинную колонку. SECTION_TAB[i] — id вкладки для секции с индексом i
-  // (индексы секций те же, что использует sectionEls/sectionMatches ниже).
-  // Подписи через $derived, а не обычным const: язык меняется без перезагрузки
-  // (v0.9.32), а const вычислился бы один раз при загрузке модуля и оставил
-  // вкладки на прежнем языке (v0.9.46).
+  // --- Tabs: the sections are grouped so there is no single long column to scroll.
+  // SECTION_TAB[i] is the tab id for the section at index i (the section indices are
+  // the same ones sectionEls/sectionMatches use below). The labels go through a
+  // $derived rather than a plain const: the language changes without a reload, and a
+  // const would be computed once at module load and leave the tabs in the old one.
   const TAB_IDS = ["general", "ai", "tasks", "notifications", "data", "hotkeys", "help"] as const;
   type TabId = (typeof TAB_IDS)[number];
   const TABS = $derived<{ id: TabId; label: string }[]>([
@@ -126,25 +125,24 @@
     { id: "hotkeys", label: t("Хоткеи") },
     { id: "help", label: t("Справка") },
   ]);
-  // Внешний вид(0), Режим работы(2) → Общее; ИИ-провайдер(1) → ИИ;
-  // Мониторинг(3), Категории задач(4) → Задачи; Уведомления(5) → Уведомления;
-  // Авто-бэкап(6), Данные(7) → Данные; Хоткеи(8) → Хоткеи; Статусы(9) →
-  // Задачи (добавлена последней по индексу, чтобы не перенумеровывать
-  // существующие секции, но логически сгруппирована с Категориями).
-  // Справка(10) → Справка (v0.9.29 — добавлена последней по индексу,
-  // чтобы не перенумеровывать существующие секции).
+  // Appearance(0) and Work mode(2) -> General; AI provider(1) -> AI;
+  // Monitoring(3) and Task categories(4) -> Tasks; Notifications(5) ->
+  // Notifications; Auto-backup(6) and Data(7) -> Data; Hotkeys(8) -> Hotkeys;
+  // Statuses(9) -> Tasks (appended last by index so the existing sections did not
+  // have to be renumbered, but logically grouped with Categories); Help(10) -> Help
+  // (also appended last by index for the same reason).
   const SECTION_TAB: TabId[] = ["general", "ai", "general", "tasks", "tasks", "notifications", "data", "data", "hotkeys", "tasks", "help"];
   let activeTab = $state<TabId>("general");
 
-  // --- Поиск по настройкам (v0.8.5): простой substring-match по всему
-  // тексту секции, без индексации/fuzzy. Пустой запрос — всё видно везде;
-  // непустой — автоматически переключает на первую вкладку с совпадением
-  // (v0.8.10), внутри вкладки несовпавшие секции по-прежнему скрыты.
+  // --- Settings search: a plain substring match over the whole text of a section,
+  // with no indexing or fuzziness. An empty query shows everything everywhere; a
+  // non-empty one automatically switches to the first tab with a match, and inside
+  // that tab non-matching sections stay hidden.
   let searchQuery = $state("");
   let sectionEls: HTMLElement[] = $state([]);
   let sectionMatches = $state<boolean[]>([]);
-  // При активном поиске темы справки раскрыты: иначе совпадение лежит в
-  // свёрнутом <details> и пользователь видит тему без видимого текста.
+  // While a search is active the help topics are expanded: otherwise the match sits
+  // inside a collapsed <details> and the user sees a topic with no visible text.
   let helpSearchOpen = $derived(searchQuery.trim() !== "");
 
   function recomputeSearch() {
@@ -158,8 +156,8 @@
     }
   }
 
-  // Правила «класс окна → категория»: редактируются строками,
-  // сериализуются в settings.app_category_rules при сохранении.
+  // "Window class -> category" rules: edited as rows and serialized into
+  // settings.app_category_rules on save.
   let appRules: AppCategoryRule[] = $state([]);
   const RULE_CATEGORIES: { value: AppCategoryRule["category"]; label: string }[] = $derived([
     { value: "Work", label: t("Работа") },
@@ -178,8 +176,8 @@
     }
   }
 
-  // Лимиты времени на категории приложений: одна запись на категорию,
-  // 0/пусто = без лимита. Сериализуются в settings.app_limits при сохранении.
+  // Time limits per app category: one entry per category, where 0 or empty means no
+  // limit. Serialized into settings.app_limits on save.
   let appLimits: Record<string, number> = $state({});
 
   function parseLimits(json: string): AppLimit[] {
@@ -194,9 +192,9 @@
   onMount(async () => {
     try {
       settings = await api.getSettings();
-      // Пустая настройка = язык не выбирался явно. В селекте показываем
-      // фактически действующий язык (его определил i18n.init по локали),
-      // иначе поле выглядело бы пустым при работающем переводе.
+      // An empty setting means the language was never chosen explicitly. The select
+      // shows the language actually in effect (determined by i18n.init from the
+      // locale), otherwise the field would look empty while the translation works.
       if (!settings.language) settings.language = i18n.lang;
       appRules = parseRules(settings.app_category_rules);
       appLimits = Object.fromEntries(
@@ -207,27 +205,28 @@
     } catch (e) {
       error = String(e);
     }
-    // Список глобальных действий — с бэкенда: он их и регистрирует.
+    // The list of global actions comes from the backend, which is what registers them.
     globalActions = await api.listGlobalActions().catch(() => []);
     trackingMode = await api.getTrackingMode().catch(() => null);
     windowTracking = await api.getWindowTracking().catch(() => null);
-    // Реальный путь от бэкенда, а не собранная на фронте строка: каталог
-    // зависит от ОС (app_data_dir) и от identifier'а приложения (v0.9.28).
+    // The real path from the backend rather than a string assembled on the
+    // frontend: the directory depends on the OS (app_data_dir) and on the
+    // application's identifier.
     modelPath = await api.modelPath().catch(() => null);
     categoryStore.load();
     statusStore.load();
   });
 
-  // --- Хоткеи (v0.8.9): оверрайды хранятся в settings.keybinds (JSON),
-  // дефолты — KEYBIND_ACTIONS.defaultCombo. Запись нового бинда — по клику
-  // на «Записать», следующее нажатие клавиш (не модификатор) фиксируется.
+  // --- Hotkeys: the overrides live in settings.keybinds (JSON) and the defaults in
+  // KEYBIND_ACTIONS.defaultCombo. A new binding is recorded by clicking "Record",
+  // and the next key press that is not a modifier is captured.
   let keybinds: Keybinds = $state({});
   let recordingActionId: string | null = $state(null);
   let keybindConflict: { actionId: string; withLabel: string } | null = $state(null);
 
-  // v0.9.35: пока идёт запись, App.svelte не выполняет хоткеи — иначе запись
-  // комбинации, уже занятой локальным действием (Ctrl+K), выполняла бы это
-  // действие и уводила фокус из поля записи.
+  // While recording, App.svelte does not execute hotkeys: otherwise recording a
+  // combination already taken by a local action (Ctrl+K) would run that action and
+  // pull focus out of the recording field.
   function setRecordingFlag(on: boolean) {
     window.dispatchEvent(new CustomEvent("keybind-recording", { detail: on }));
   }
@@ -243,7 +242,7 @@
     e.preventDefault();
     if (e.key === "Escape") { recordingActionId = null; setRecordingFlag(false); return; }
     const combo = comboFromEvent(e);
-    if (!combo) return; // нажат только модификатор — ждём основную клавишу
+    if (!combo) return; // only a modifier was pressed — we wait for the main key
 
     const conflicts = findConflicts(keybinds, recordingActionId, combo);
     if (conflicts.length > 0) {
@@ -262,23 +261,24 @@
     keybinds = rest;
   }
 
-  // --- Глобальные хоткеи (v0.9.35) ---
+  // --- Global hotkeys ---
   //
-  // Формат комбинации тот же, что у webview-хоткеев ("Ctrl+Shift+KeyN"):
-  // специально проверено, что парсер global-hotkey понимает и такой вид, и
-  // "Ctrl+Shift+N" — конвертер между форматами не нужен, а запись комбинации
-  // в UI одна и та же для обеих групп.
+  // The combination format matches the webview hotkeys ("Ctrl+Shift+KeyN"): it was
+  // specifically verified that the global-hotkey parser understands both that form
+  // and "Ctrl+Shift+N", so no converter between formats is needed and recording a
+  // combination in the UI is identical for both groups.
   //
-  // Отличий от локальных три: список действий приходит с бэкенда (он же их
-  // регистрирует), комбинацию проверяет бэкенд, а после сохранения нужна
-  // перерегистрация — иначе новая комбинация заработает только после
-  // перезапуска приложения.
+  // There are three differences from the local ones: the action list comes from the
+  // backend (which also registers them), the backend validates the combination, and
+  // after saving a re-registration is required — otherwise a new combination would
+  // only start working after an application restart.
   let globalActions: GlobalAction[] = $state([]);
   let globalBinds: Keybinds = $state({});
   let recordingGlobalId: string | null = $state(null);
   let globalError: { actionId: string; text: string } | null = $state(null);
-  // Комбинации, которые ОС отказалась отдать (заняты другим приложением или
-  // композитором). Показываются отдельно: это не ошибка ввода, а факт среды.
+  // Combinations the OS refused to hand over (taken by another application or by
+  // the compositor). Shown separately: this is not an input error but a fact about
+  // the environment.
   let globalFailed: string[] = $state([]);
 
   function globalComboFor(actionId: string): string {
@@ -297,32 +297,32 @@
     e.preventDefault();
     if (e.key === "Escape") { recordingGlobalId = null; setRecordingFlag(false); return; }
     const combo = comboFromEvent(e);
-    if (!combo) return; // только модификатор — ждём основную клавишу
+    if (!combo) return; // only a modifier — we wait for the main key
 
     const actionId = recordingGlobalId;
 
-    // Конфликт внутри группы: две глобальные команды на одной комбинации ОС
-    // не различит.
+    // A conflict within the group: the OS cannot tell two global commands on one
+    // combination apart.
     const dupe = globalActions.find(a => a.id !== actionId && globalComboFor(a.id) === combo);
     if (dupe) {
       globalError = { actionId, text: t("Уже занято: {label}", { label: dupe.label }) };
       return;
     }
-    // Конфликт с локальным хоткеем: глобальный перехватывает клавиши раньше,
-    // поэтому локальный просто перестал бы работать — молча и необъяснимо.
+    // A conflict with a local hotkey: the global one intercepts keys first, so the
+    // local one would simply stop working — silently and inexplicably.
     const localDupe = KEYBIND_ACTIONS.find(a => comboFor(keybinds, a.id) === combo);
     if (localDupe) {
       globalError = { actionId, text: t("Занято хоткеем в приложении: {label}", { label: localDupe.label }) };
       return;
     }
-    // Последнее слово — за настоящим парсером комбинаций, а не за нашими
-    // правилами: регистрировать будет именно он.
+    // The final say belongs to the real combination parser rather than to our own
+    // rules: it is the one that will do the registering.
     try {
       await api.validateGlobalCombo(combo);
     } catch (err) {
-      // Пока ждали ответ, пользователь мог выйти из записи (Escape) или
-      // начать записывать другое действие — тогда ответ уже неактуален и
-      // показывать по нему ошибку нельзя: она вернула бы поле в режим записи.
+      // While the answer was awaited the user may have left recording (Escape) or
+      // started recording another action, in which case the reply is stale and its
+      // error must not be shown: doing so would put the field back into recording mode.
       if (recordingGlobalId !== actionId) return;
       globalError = { actionId, text: typeof err === "string" ? err : t("Комбинация не подходит") };
       return;
@@ -340,7 +340,7 @@
     globalBinds = rest;
   }
 
-  // --- Категории задач (CRUD сохраняется сразу, без кнопки «Сохранить») ---
+  // --- Task categories (CRUD is saved immediately, with no "Save" button) ---
   let newCatName = $state("");
   let newCatColor = $state("#2a78d6");
 
@@ -351,9 +351,10 @@
     newCatName = "";
   }
 
-  // --- Статусы задач (v0.9.20, канбан) — тот же паттерн, что категории:
-  // CRUD сохраняется сразу, без кнопки «Сохранить». Todo/InProgress/Done/
-  // Archived зарезервированы (is_reserved) — не переименовываются/не удаляются.
+  // --- Task statuses (for the kanban board), following the same pattern as
+  // categories: CRUD is saved immediately, with no "Save" button.
+  // Todo/InProgress/Done/Archived are reserved (is_reserved) and can be neither
+  // renamed nor deleted.
   let newStatusName = $state("");
   let newStatusColor = $state("#2a78d6");
 
@@ -377,12 +378,12 @@
       settings.keybinds = JSON.stringify(keybinds);
       settings.global_keybinds = JSON.stringify(globalBinds);
       await api.saveSettings(settings);
-      // Перерегистрация в ОС: без неё новая комбинация заработала бы только
-      // после перезапуска, а старая продолжала бы срабатывать.
+      // Re-registration with the OS: without it a new combination would only start
+      // working after a restart while the old one kept firing.
       globalFailed = await api.applyGlobalHotkeys().catch(() => []);
       applyTheme(settings.theme_mode, settings);
-      // App.svelte держит свою копию хоткеев для keydown-обработчика —
-      // без этого события переназначение применялось бы только после reload.
+      // App.svelte keeps its own copy of the hotkeys for the keydown handler —
+      // without this event a rebinding would only take effect after a reload.
       window.dispatchEvent(new CustomEvent("keybinds-saved", { detail: settings.keybinds }));
       saved = true;
       setTimeout(() => saved = false, 2000);
@@ -437,9 +438,9 @@
     }
   }
 
-  // Тест-кнопка: сбросить онбординг и перезагрузить webview — App.svelte
-  // перечитает настройки и покажет онбординг сразу. Берём свежие настройки
-  // из БД, чтобы не сохранить заодно несохранённые правки формы.
+  // A test button: reset the onboarding and reload the webview so App.svelte
+  // re-reads the settings and shows the onboarding straight away. We take fresh
+  // settings from the DB so unsaved form edits are not written along with it.
   async function resetOnboarding() {
     error = null;
     try {
@@ -509,9 +510,10 @@
     oninput={recomputeSearch}
   />
 
-  <!-- v0.9.54: seg + seg--tabs дают вид, .settings-tabs остаётся ради своих
-       отступов и переноса на вторую строку. Имя .settings-tab не трогаем —
-       по нему выбирают ~25 e2e-тестов, а правка чисто косметическая. -->
+  <!-- seg + seg--tabs provide the look; .settings-tabs remains for its own
+       spacing and its wrap onto a second line. The .settings-tab name is left
+       alone: about 25 e2e tests select by it, and this change is purely
+       cosmetic. -->
   <div class="settings-tabs seg seg--tabs" role="tablist">
     {#each TABS as tab (tab.id)}
       <button
@@ -532,9 +534,9 @@
   <section class="card panel" class:hidden-by-search={sectionMatches[0] === false} class:hidden-by-tab={SECTION_TAB[0] !== activeTab} bind:this={sectionEls[0]}>
     <h3 class="section-title">{t("Внешний вид")}</h3>
 
-    <!-- Язык (v0.9.32): применяется сразу, без «Сохранить» — как и тема.
-         Для языка это важнее, чем для темы: увидеть результат до сохранения
-         единственный способ понять, что выбрал правильно. -->
+    <!-- Language: applied immediately, without "Save", just like the theme. For
+         the language that matters more than for the theme: seeing the result
+         before saving is the only way to tell you picked the right one. -->
     <label class="field">
       {t("Язык")}
       <select bind:value={settings.language} onchange={() => i18n.set(settings.language as Lang)}>
@@ -598,8 +600,8 @@
         <input type="checkbox" bind:checked={settings.ai_fallback} />{t("Автопереключение: при ошибке или недоступности пробовать других доступных провайдеров")}</label>
     {/if}
 
-    <!-- Один блок настроек, поля зависят от выбранного провайдера — не два
-         параллельных дублирующих блока, как было при radio-списке. -->
+    <!-- One settings block whose fields depend on the chosen provider, not two
+         parallel duplicating blocks as there were with the radio list. -->
     {#if settings.ai_provider === "openai" || settings.ai_provider === "anthropic"}
       {@const isOpenai = settings.ai_provider === "openai"}
       <div class="stack" style="margin-top:12px;">
@@ -690,11 +692,11 @@
       </p>
     {/if}
 
-    <!-- Домены (v0.9.31): показывается там же, где работает трекинг окон —
-         без провайдера заголовок читать неоткуда, и галочка была бы мёртвой.
-         Формулировка намеренно прямая: пользователь должен понимать, что
-         именно начнёт происходить, а не увидеть безобидное «улучшить
-         статистику». -->
+    <!-- Domains: shown in the same place window tracking works — without a
+         provider there is nowhere to read a title from and the checkbox would be
+         dead. The wording is deliberately blunt: the user must understand what
+         will actually start happening rather than see an innocuous "improve the
+         statistics". -->
     {#if windowTracking}
       <label class="option" style="margin-top:12px;align-items:flex-start;">
         <input type="checkbox" bind:checked={settings.track_domains} />
@@ -757,11 +759,12 @@
           onchange={(e) => categoryStore.update(c.id, { color: e.currentTarget.value })}
         />
         <!--
-          Показываем переведённое имя, но посевные категории тогда нельзя
-          редактировать (v0.9.47): поле привязано к тому же значению, что
-          уходит в БД, и перевод перезаписал бы русский оригинал навсегда.
-          Тот же приём, что у статусов ниже с is_reserved. Флага у категорий
-          нет, признак посевной — латинский id (uuid у пользовательских).
+          We show the translated name, but that makes the seeded categories
+          uneditable: the field is bound to the same value that goes into the DB,
+          and the translation would overwrite the Russian original for good. The
+          same approach the statuses below take with is_reserved. Categories have
+          no such flag; a seeded one is recognized by its Latin id (user-defined
+          ones get a uuid).
         -->
         <input
           value={categoryStore.name(c.id)}
@@ -879,9 +882,9 @@
   <section class="card panel" class:hidden-by-search={sectionMatches[8] === false} class:hidden-by-tab={SECTION_TAB[8] !== activeTab} bind:this={sectionEls[8]}>
     <h3 class="section-title">{t("Хоткеи")}</h3>
 
-    <!-- v0.9.35: глобальные — отдельной группой над локальными. Порядок не
-         косметика: они перехватывают клавиши раньше всего остального, поэтому
-         конфликт с ними объясняет, почему «перестал работать» локальный. -->
+    <!-- The global ones form a separate group above the local ones. The order is
+         not cosmetic: they intercept keys before anything else, so a conflict
+         with them explains why a local hotkey "stopped working". -->
     <h4 class="keybind-group">{t("Глобальные — работают, даже когда окно закрыто")}</h4>
     <div class="keybind-list">
       {#each globalActions as action (action.id)}
@@ -914,9 +917,9 @@
       {/each}
     </div>
     {#if globalFailed.length > 0}
-      <!-- Не ошибка ввода, а факт среды: комбинацию уже держит кто-то другой.
-           Молчать нельзя — хоткей просто не сработает, и это выглядит как
-           поломка приложения. -->
+      <!-- Not an input error but a fact about the environment: someone else already
+           holds the combination. Staying silent is not an option — the hotkey
+           simply will not fire, and that looks like a broken application. -->
       <p class="hint" style="color:var(--danger, #d33);">
         {t("Система не отдала эти комбинации (заняты другим приложением):")}
         {globalFailed.map(formatCombo).join(", ")}. {t("Выберите другие.")}
@@ -1000,17 +1003,17 @@
  <p class="hint">{t("Изменения сохраняются сразу. Todo/В работе/Готово/Архив — встроенные (с ними связаны трекинг времени и завершение задач), их можно только перекрасить. Свои статусы удобны как промежуточные колонки канбан-доски; при удалении такого статуса задачи переходят в «Todo».")}</p>
   </section>
 
-  <!-- Справка (v0.9.29): содержимое — данными в lib/help.ts, здесь только
-       рендер. <details> вместо своего аккордеона: свёрнутый текст остаётся в
-       DOM, поэтому существующий поиск по настройкам (читает el.textContent)
-       находит его без доработок — совпавшие темы просто раскрываются. -->
+  <!-- Help: the content lives as data in lib/help.ts, this file only renders it.
+       <details> instead of a custom accordion: collapsed text stays in the DOM,
+       so the existing settings search (which reads el.textContent) finds it with
+       no extra work — matching topics simply expand. -->
   <section class="card panel" class:hidden-by-search={sectionMatches[10] === false} class:hidden-by-tab={SECTION_TAB[10] !== activeTab} bind:this={sectionEls[10]}>
     <h3 class="section-title">{t("Справка")}</h3>
  <p class="hint" style="margin-top:0;">{t("Что умеет приложение. Раскройте тему, чтобы прочитать; поиск по настройкам ищет и здесь.")}</p>
     {#each HELP_TOPICS as topic (topic.id)}
       <details class="help-topic" open={helpSearchOpen}>
-        <!-- Переводится при отрисовке, а не в help.ts: справка — чистые
-             данные без рун, и держать её словарём удобнее одним местом. -->
+        <!-- Translated at render time rather than in help.ts: the help is pure data
+             with no runes, and keeping it in one dictionary is simpler. -->
         <summary>{t(topic.title)}</summary>
         <dl class="help-list">
           {#each topic.items as item (item.term)}
@@ -1042,10 +1045,10 @@
     display: none;
   }
 
-  /* v0.9.54: вид задаёт общий .seg, здесь остаётся только раскладка.
-     Вкладок семь, в узком окне они не влезают в строку, поэтому перенос
-     обязателен — а вместе с ним и align-self: flex-start, иначе сегменты
-     первого ряда растянутся по высоте второго. */
+  /* The look comes from the shared .seg; only the layout remains here. There
+     are seven tabs and in a narrow window they do not fit on one line, so
+     wrapping is mandatory — and with it align-self: flex-start, or the first
+     row's segments would stretch to the height of the second. */
   .settings-tabs {
     margin-bottom: 14px;
     flex-wrap: wrap;
@@ -1053,8 +1056,8 @@
     max-width: 100%;
   }
 
-  /* Перенесённый ряд упирался бы в рамку вплотную: у .seg она одна на всех,
-     а разделители рисуют только вертикальные стыки. */
+  /* A wrapped row would butt right up against the border: .seg has a single
+     border for them all, and the dividers only draw the vertical seams. */
   .settings-tabs .settings-tab {
     border-top: 1px solid transparent;
   }
@@ -1143,7 +1146,7 @@
     margin: 8px 0 0 0;
   }
 
-  /* Справка (v0.9.29) */
+  /* Help */
   .help-topic {
     border-top: 1px solid var(--border);
     padding: 8px 0;
@@ -1156,8 +1159,8 @@
     list-style: none;
   }
 
-  /* Своя стрелка вместо дефолтного маркера — он рисуется по-разному
-     в разных движках (тот же принцип, что с иконками в Icon.svelte). */
+  /* Our own arrow instead of the default marker, which different engines draw
+     differently (the same principle as the icons in Icon.svelte). */
   .help-topic summary::marker,
   .help-topic summary::-webkit-details-marker { display: none; }
 
@@ -1212,9 +1215,9 @@
     gap: 4px;
   }
 
-  /* v0.9.35: заголовок группы внутри секции — глобальные и локальные хоткеи
-     живут на одной вкладке, но это разные механизмы, и их нельзя читать
-     одним сплошным списком. */
+  /* A group heading inside a section: global and local hotkeys live on one tab,
+     but they are different mechanisms and must not read as one continuous
+     list. */
   .keybind-group {
     margin: 12px 0 6px;
     font-size: 12px;

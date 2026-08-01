@@ -18,10 +18,10 @@ pub async fn create_task_impl(pool: &SqlitePool, task: CreateTask) -> Result<Tas
   }
 
   let mut new_task = task.into_task();
-  // Неизвестная категория/статус тихо становятся фолбэком (прежняя семантика enum)
+  // An unknown category/status silently falls back (the former enum semantics)
   new_task.category = crate::commands::categories::valid_or_fallback(pool, &new_task.category).await;
   new_task.status = crate::commands::statuses::valid_or_fallback(pool, &new_task.status).await;
-  // Новая задача — в конец списка
+  // A new task goes to the end of the list
   new_task.sort_order = sqlx::query_scalar::<_, i64>("SELECT COALESCE(MAX(sort_order), 0) + 1 FROM tasks")
     .fetch_one(pool)
     .await
@@ -79,10 +79,10 @@ pub async fn delete_task(
   delete_task_impl(pool.inner(), id).await
 }
 
-// Мягкое удаление (v0.8.12, «Корзина»): задача остаётся в таблице (со
-// своими подзадачами и привязками заметок нетронутыми), просто перестаёт
-// показываться в активных/истории — фильтруется в get_tasks_impl.
-// Настоящее удаление — через purge_deleted_task.
+// Soft delete ("Trash"): the task stays in the table with its subtasks and
+// note links untouched, it just stops showing up in the active list/history —
+// it is filtered out in get_tasks_impl. Real deletion goes through
+// purge_deleted_task.
 pub async fn delete_task_impl(pool: &SqlitePool, id: String) -> Result<(), String> {
   sqlx::query("UPDATE tasks SET deleted_at = ? WHERE id = ?")
     .bind(Utc::now().to_rfc3339())
@@ -125,9 +125,9 @@ pub async fn restore_task_impl(pool: &SqlitePool, id: String) -> Result<(), Stri
   Ok(())
 }
 
-// Не чаще раза в 24ч — та же логика "пора ли", что auto_backup_due
-// (commands/backup.rs), тот же ключ настройки last_* хранит момент прошлого
-// прогона. Выключено, если history_cleanup_months = 0.
+// At most once every 24h — the same "is it due yet" logic as auto_backup_due
+// (commands/backup.rs), where a matching last_* setting key holds the previous
+// run. Disabled when history_cleanup_months = 0.
 pub async fn history_cleanup_due(pool: &SqlitePool) -> bool {
     let months = crate::commands::settings::get_u64_setting(pool, "history_cleanup_months", 0).await;
     if months == 0 {
@@ -143,11 +143,11 @@ pub async fn history_cleanup_due(pool: &SqlitePool) -> bool {
     }
 }
 
-// Авто-очистка истории (v0.9.19): выполненные задачи старше cutoff уходят в
-// Корзину тем же мягким механизмом, что и ручное удаление — completed_at не
-// трогается, поэтому стрики/тепловая карта на дашборде (читают tasks.completed_at
-// напрямую, без отдельного лога) не искажаются задним числом. Возвращает
-// количество перенесённых задач (для журнала/тестов).
+// Automatic history cleanup: completed tasks older than the cutoff move to
+// Trash through the same soft mechanism as manual deletion. completed_at is
+// left alone, so dashboard streaks and the heatmap (which read
+// tasks.completed_at directly, with no separate log) are not distorted after
+// the fact. Returns how many tasks were moved (for the journal and tests).
 pub async fn cleanup_old_history_impl(pool: &SqlitePool, cutoff: DateTime<Utc>) -> Result<u64, String> {
     let result = sqlx::query(
         "UPDATE tasks SET deleted_at = ?
@@ -167,8 +167,8 @@ pub async fn purge_deleted_task(pool: State<'_, SqlitePool>, id: String) -> Resu
   purge_deleted_task_impl(pool.inner(), id).await
 }
 
-// Настоящее удаление строки из корзины — та же зачистка подзадач/привязок
-// заметок, что раньше делал delete_task_impl (жёсткое удаление).
+// Real removal of a row from the Trash — the same cleanup of subtasks and note
+// links that delete_task_impl used to do back when deletion was hard.
 pub async fn purge_deleted_task_impl(pool: &SqlitePool, id: String) -> Result<(), String> {
   sqlx::query("DELETE FROM subtasks WHERE task_id = ?")
     .bind(&id)
@@ -237,12 +237,12 @@ pub async fn update_task_impl(pool: &SqlitePool, id: String, patch: UpdateTask) 
         };
     }
 
-    // Как deadline: пустая строка отвязывает от проекта
+    // Like deadline: an empty string detaches the task from its project
     if let Some(pid) = patch.project_id {
         task.project_id = if pid.is_empty() { None } else { Some(pid) };
     }
 
-    // Тайм-блок: пустая строка снимает блок целиком (и длительность)
+    // Time block: an empty string clears the block entirely (duration too)
     let old_scheduled = task.scheduled_at;
     if let Some(sa) = patch.scheduled_at {
         if sa.is_empty() {
@@ -259,11 +259,12 @@ pub async fn update_task_impl(pool: &SqlitePool, id: String, patch: UpdateTask) 
     }
 
     task.updated_at = Utc::now();
-    // Если дедлайн реально изменился, старые флаги notified_* больше не
-    // отражают актуальный дедлайн — иначе планировщик никогда не пришлёт
-    // уведомление по новой дате (раньше это был баг: флаги не сбрасывались).
+    // If the deadline actually changed, the old notified_* flags no longer
+    // describe the current deadline — without this reset the scheduler would
+    // never notify about the new date (this used to be a bug: the flags were
+    // left as they were).
     let deadline_changed = task.deadline != old_deadline;
-    // Перенос блока: сбросить notified_block, чтобы пуш пришёл по новому времени
+    // Moving a block: reset notified_block so the push arrives at the new time
     let block_changed = task.scheduled_at != old_scheduled;
 
     sqlx::query(
@@ -309,9 +310,9 @@ pub async fn complete_task(
 }
 
 pub async fn complete_task_impl(pool: &SqlitePool, id: String) -> Result<Task, String> {
-  // Заблокированную задачу выполнить нельзя (v0.9.56). Проверка здесь, а не
-  // только в UI: выполнить можно ещё из трея, быстрого слота и командной
-  // палитры, и каждый такой путь иначе обходил бы запрет.
+  // A blocked task cannot be completed. The check lives here rather than in the
+  // UI alone: a task can also be completed from the tray, the quick slot and the
+  // command palette, and every one of those paths would otherwise bypass it.
   let blockers = crate::commands::dependencies::blockers_of(pool, &id).await?;
   if !blockers.is_empty() {
     let names = blockers.iter().map(|b| b.title.clone()).collect::<Vec<_>>().join(", ");
@@ -327,16 +328,17 @@ pub async fn complete_task_impl(pool: &SqlitePool, id: String) -> Result<Task, S
 
   let mut task = row.into_task();
   let now = Utc::now();
-  // recurring задачи едут на новый дедлайн -> старые notified_* флаги
-  // относятся к ПРОШЛОМУ дедлайну. Если их не сбросить, scheduler никогда
-  // больше не уведомит об этой задаче (баг: флаги раньше не сбрасывались).
+  // A recurring task moves to a new deadline, so the old notified_* flags refer
+  // to the PREVIOUS one. Without resetting them the scheduler would never notify
+  // about this task again (this used to be a bug: the flags were never reset).
   let mut reset_notifications = false;
 
-  // Каскад на подзадачи. Для разовой задачи «выполнено» означает, что весь
-  // её чеклист закрыт — иначе в истории лежит Done-задача с невыполненными
-  // пунктами. Для повторяющейся всё наоборот: она не закрывается, а едет на
-  // следующий дедлайн, и чеклист — это план СЛЕДУЮЩЕГО прогона, поэтому его
-  // надо сбросить, а не проставить (иначе повтор приходит уже «выполненным»).
+  // Cascade onto subtasks. For a one-off task "completed" means its whole
+  // checklist is closed — otherwise the history holds a Done task with unchecked
+  // items. For a recurring one it is the opposite: the task does not close but
+  // moves to its next deadline, and the checklist is the plan for the NEXT run,
+  // so it must be cleared rather than ticked (or the repeat arrives already
+  // "completed").
   let subtasks_done: bool;
 
   match task.recurrence.next_occurrence(now) {
@@ -347,22 +349,18 @@ pub async fn complete_task_impl(pool: &SqlitePool, id: String) -> Result<Task, S
       subtasks_done = true;
     }
     Some(next_deadline) => {
-      // Сдвиг scheduled_at на ту же дельту, что и дедлайн — для Weekdays это
-      // не фиксированная Duration (интервал зависит от текущего дня недели),
-      // поэтому считаем её явно как next_deadline - now, а не через to_duration.
+      // Shift scheduled_at by the same delta as the deadline. For Weekdays that
+      // is not a fixed Duration (the interval depends on the current weekday), so
+      // we compute it explicitly as next_deadline - now instead of to_duration.
       let delta = next_deadline - now;
       task.deadline = Some(next_deadline);
       if let Some(scheduled) = &task.scheduled_at {
         task.scheduled_at = Some(*scheduled + delta);
       }
-      // Прогон закончен — задача возвращается в Todo. Без этого повторяющаяся
-      // задача, оставленная в InProgress (или в пользовательском статусе),
-      // после «выполнить» остаётся в том же статусе на том же месте списка:
-      // визуально клик по ✓ не делает ничего, задачу невозможно закрыть.
-      // Прогон закончен — задача возвращается в Todo. Без этого повторяющаяся
-      // задача, оставленная в InProgress (или в пользовательском статусе),
-      // после «выполнить» остаётся в том же статусе на том же месте списка:
-      // визуально клик по ✓ не делает ничего, задачу невозможно закрыть.
+      // The run is over, so the task returns to Todo. Without this a recurring
+      // task left in InProgress (or in a custom status) keeps that status and its
+      // place in the list after "complete": clicking ✓ visibly does nothing and
+      // the task cannot be closed.
       task.status = "Todo".to_string();
       reset_notifications = true;
       subtasks_done = false;
@@ -377,8 +375,8 @@ pub async fn complete_task_impl(pool: &SqlitePool, id: String) -> Result<Task, S
     .execute(pool)
     .await
     .map_err(|e| e.to_string())?;
-  // into_task() подзадачи не грузит — читаем их после апдейта, чтобы
-  // возвращаемая задача отражала новое состояние чеклиста, а не пустой список.
+  // into_task() does not load subtasks, so we read them after the update: the
+  // returned task must reflect the new checklist state, not an empty list.
   task.subtasks = crate::commands::subtasks::get_subtasks_impl(pool, &id).await?;
 
   sqlx::query(
@@ -404,9 +402,9 @@ pub async fn complete_task_impl(pool: &SqlitePool, id: String) -> Result<Task, S
   .await
   .map_err(|e| e.to_string())?;
 
-  // Уведомление уходит только если задача действительно закрылась. У
-  // повторяющейся completed_at остаётся пустым — она уехала на следующий
-  // дедлайн и продолжает блокировать, разблокировки не было.
+  // The notification is only sent if the task actually closed. A recurring task
+  // keeps completed_at empty — it moved to its next deadline and still blocks,
+  // so nothing was unblocked.
   if task.completed_at.is_some() {
     crate::commands::dependencies::notify_unblocked(pool, &id).await?;
   }
@@ -419,10 +417,10 @@ pub async fn reorder_tasks(pool: State<'_, SqlitePool>, ids: Vec<String>) -> Res
     reorder_tasks_impl(pool.inner(), ids).await
 }
 
-// Ручной порядок: фронт присылает id видимого списка в новом порядке.
-// Мы переиспользуем те же значения sort_order, что уже были у этих задач,
-// раздав их по новому порядку, — задачи вне списка не сдвигаются, а
-// коллизий с чужими значениями не возникает.
+// Manual ordering: the frontend sends the ids of the visible list in their new
+// order. We reuse the very sort_order values those tasks already had and hand
+// them out in the new order, so tasks outside the list do not shift and no
+// collisions with other values arise.
 pub async fn reorder_tasks_impl(pool: &SqlitePool, ids: Vec<String>) -> Result<(), String> {
     if ids.len() < 2 {
         return Ok(());
@@ -438,8 +436,8 @@ pub async fn reorder_tasks_impl(pool: &SqlitePool, ids: Vec<String>) -> Result<(
     let mut orders: Vec<i64> = rows.iter().map(|(_, o)| *o).collect();
     orders.sort_unstable();
 
-    // Неизвестные id (гонка с удалением) выбрасываем ДО zip — иначе значения
-    // раздались бы со сдвигом не тем задачам.
+    // Unknown ids (a race with deletion) are dropped BEFORE the zip, otherwise
+    // the values would be handed out shifted, to the wrong tasks.
     let live_ids = ids.iter().filter(|id| existing.contains(id.as_str()));
     for (id, ord) in live_ids.zip(orders) {
         sqlx::query("UPDATE tasks SET sort_order = ? WHERE id = ?")
@@ -466,10 +464,10 @@ pub async fn search_tasks_impl(pool: &SqlitePool, query: String) -> Result<Vec<T
     return Ok(vec![]);
   }
 
-  // Сырой ввод пользователя нельзя пускать в MATCH напрямую: символы вроде
-  // " - : ( ) AND/OR/NOT — это синтаксис FTS5, а не текст. Дефис в названии
-  // ("купить хлеб-2") уже падал с "no such column: 2". Оборачиваем как
-  // quoted-phrase-prefix: безопасно для любого ввода.
+  // Raw user input must not reach MATCH directly: characters such as
+  // " - : ( ) and AND/OR/NOT are FTS5 syntax, not text. A hyphen in a title
+  // ("buy bread-2") already failed with "no such column: 2". We wrap the input
+  // as a quoted phrase prefix, which is safe for anything the user types.
   let escaped = trimmed.replace('"', "\"\"");
   let fts_query = format!("\"{}\"*", escaped);
 
@@ -611,24 +609,24 @@ mod tests {
         let c = create_task_impl(&pool, new_task("в")).await.unwrap();
         let d = create_task_impl(&pool, new_task("г")).await.unwrap();
 
-        // Новые задачи идут в конец: а, б, в, г
+        // New tasks go to the end: а, б, в, г
         let titles = |tasks: &[Task]| tasks.iter().map(|t| t.title.clone()).collect::<Vec<_>>();
         assert_eq!(titles(&get_tasks_impl(&pool).await.unwrap()), ["а", "б", "в", "г"]);
 
-        // Переставляем первые три: в, а, б — «г» не трогаем
+        // Reorder the first three: в, а, б — "г" is left alone
         reorder_tasks_impl(&pool, vec![c.id.clone(), a.id.clone(), b.id.clone()]).await.unwrap();
         assert_eq!(titles(&get_tasks_impl(&pool).await.unwrap()), ["в", "а", "б", "г"]);
 
-        // Значения sort_order — та же тройка, что была (перестановка, не перенумерация)
+        // The sort_order values are the same three as before (a permutation, not a renumbering)
         let orders: Vec<i64> = get_tasks_impl(&pool).await.unwrap().iter().map(|t| t.sort_order).collect();
         assert_eq!(orders, [1, 2, 3, 4]);
 
-        // Исчезнувший id не ломает раздачу значений остальным
+        // A vanished id does not break handing values out to the rest
         delete_task_impl(&pool, a.id.clone()).await.unwrap();
         reorder_tasks_impl(&pool, vec![b.id.clone(), a.id.clone(), c.id.clone()]).await.unwrap();
         assert_eq!(titles(&get_tasks_impl(&pool).await.unwrap()), ["б", "в", "г"]);
 
-        // Один id — no-op без ошибки
+        // A single id is a no-op, not an error
         reorder_tasks_impl(&pool, vec![d.id.clone()]).await.unwrap();
     }
 
@@ -650,25 +648,25 @@ mod tests {
         let t = create_task_impl(&pool, new_task("с чеклистом")).await.unwrap();
         let a = add_subtask_impl(&pool, &t.id, "первый").await.unwrap();
         add_subtask_impl(&pool, &t.id, "второй").await.unwrap();
-        // Один уже отмечен вручную — каскад не должен его снять
+        // One is already ticked by hand — the cascade must not untick it
         toggle_subtask_impl(&pool, &a.id).await.unwrap();
 
-        // Чужая задача рядом: каскад не должен задеть её подзадачи
+        // An unrelated task nearby: the cascade must not touch its subtasks
         let other = create_task_impl(&pool, new_task("соседняя")).await.unwrap();
         add_subtask_impl(&pool, &other.id, "чужая").await.unwrap();
 
         let done = complete_task_impl(&pool, t.id.clone()).await.unwrap();
 
         assert!(get_subtasks_impl(&pool, &t.id).await.unwrap().iter().all(|s| s.done));
-        // Возвращаемая задача отражает новое состояние, а не пустой список
+        // The returned task reflects the new state, not an empty list
         assert_eq!(done.subtasks.len(), 2);
         assert!(done.subtasks.iter().all(|s| s.done));
         assert!(!get_subtasks_impl(&pool, &other.id).await.unwrap()[0].done);
     }
 
-    // Реальный баг из боевой БД (v0.9.24): повторяющаяся задача в статусе
-    // InProgress после «выполнить» оставалась InProgress — клик по ✓ визуально
-    // не делал ничего, задачу невозможно было закрыть.
+    // A real bug from the production DB: a recurring task in the InProgress
+    // status stayed InProgress after "complete" — clicking ✓ visibly did nothing
+    // and the task could not be closed.
     #[tokio::test]
     async fn complete_recurring_returns_to_todo_from_any_status() {
         let pool = test_pool().await;
@@ -682,7 +680,7 @@ mod tests {
 
         assert_eq!(done.status, "Todo");
         assert!(!done.hidden);
-        // и в БД, а не только в возвращённом объекте
+        // in the DB too, not only in the returned object
         let status: String = sqlx::query_scalar("SELECT status FROM tasks WHERE id = ?")
             .bind(&t.id).fetch_one(&pool).await.unwrap();
         assert_eq!(status, "Todo");
@@ -701,8 +699,8 @@ mod tests {
 
         let done = complete_task_impl(&pool, t.id.clone()).await.unwrap();
 
-        // Задача уехала на следующий прогон — чеклист должен быть чистым,
-        // иначе повтор приходит уже «выполненным».
+        // The task moved to its next run, so the checklist must be clean or the
+        // repeat arrives already "completed".
         assert_eq!(done.status, "Todo");
         assert!(get_subtasks_impl(&pool, &t.id).await.unwrap().iter().all(|s| !s.done));
         assert!(done.subtasks.iter().all(|s| !s.done));
@@ -715,14 +713,14 @@ mod tests {
         ct.recurrence = Some(Recurrence::Custom(2, RecurrenceUnit::Days));
         let t = create_task_impl(&pool, ct).await.unwrap();
 
-        // Имитируем: планировщик уже уведомил о старом дедлайне
+        // Simulate the scheduler having already notified about the old deadline
         sqlx::query("UPDATE tasks SET notified_24h = 1, notified_1h = 1 WHERE id = ?")
             .bind(&t.id).execute(&pool).await.unwrap();
 
         let before = Utc::now();
         let done = complete_task_impl(&pool, t.id.clone()).await.unwrap();
 
-        // Не закрыта, а переехала на +2 дня
+        // Not closed but moved by +2 days
         assert_eq!(done.status, "Todo");
         assert!(!done.hidden);
         assert!(done.completed_at.is_none());
@@ -730,7 +728,7 @@ mod tests {
         assert!(dl >= before + chrono::Duration::days(2));
         assert!(dl <= Utc::now() + chrono::Duration::days(2));
 
-        // Флаги уведомлений сброшены — иначе о новом дедлайне никто не узнает
+        // The notification flags are reset, or nobody learns about the new deadline
         let row = sqlx::query_as::<_, (bool, bool)>(
             "SELECT notified_24h, notified_1h FROM tasks WHERE id = ?")
             .bind(&t.id).fetch_one(&pool).await.unwrap();
@@ -751,14 +749,14 @@ mod tests {
 
         let done = complete_task_impl(&pool, t.id.clone()).await.unwrap();
 
-        // scheduled_at должен сдвинуться на +1 день от исходного, не от now
+        // scheduled_at must shift by +1 day from its original value, not from now
         let expected = scheduled + chrono::Duration::days(1);
         let got = done.scheduled_at.unwrap();
         assert!((got - expected).num_seconds().abs() < 2,
             "expected {expected}, got {got}");
-        assert_eq!(done.scheduled_mins, Some(30)); // не тронут
+        assert_eq!(done.scheduled_mins, Some(30)); // untouched
 
-        // notified_block сброшен (recurring — reset_notifications=true)
+        // notified_block is reset (recurring means reset_notifications=true)
         let (block_flag,): (bool,) = sqlx::query_as(
             "SELECT notified_block FROM tasks WHERE id = ?")
             .bind(&t.id).fetch_one(&pool).await.unwrap();
@@ -770,8 +768,8 @@ mod tests {
         use chrono::Datelike;
         let pool = test_pool().await;
         let mut ct = new_task("по будням");
-        // Маска — только сегодняшний день недели: гарантирует, что naive
-        // "now + что-то фиксированное" сломался бы, показывая сегодняшнюю же дату.
+        // The mask covers today's weekday only, which guarantees that a naive
+        // "now + something fixed" would break by returning today's date again.
         let today_bit = 1u8 << Utc::now().weekday().num_days_from_monday();
         ct.recurrence = Some(Recurrence::Weekdays(today_bit));
         let t = create_task_impl(&pool, ct).await.unwrap();
@@ -779,10 +777,10 @@ mod tests {
         let before = Utc::now();
         let done = complete_task_impl(&pool, t.id.clone()).await.unwrap();
 
-        assert_eq!(done.status, "Todo"); // не закрыта — сдвинута
+        assert_eq!(done.status, "Todo"); // not closed but moved
         assert!(!done.hidden);
         let dl = done.deadline.unwrap();
-        // Следующее совпадение той же маски — ровно через 7 дней, не "сегодня же"
+        // The next match of the same mask is exactly 7 days out, not "today again"
         assert!((dl - (before + chrono::Duration::days(7))).num_seconds().abs() < 5,
             "expected ~+7 days, got delta {:?}", dl - before);
     }
@@ -818,11 +816,11 @@ mod tests {
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].title, "купить хлеб-2");
 
-        // Дефис — синтаксис FTS5; раньше падало с "no such column"
+        // A hyphen is FTS5 syntax; this used to fail with "no such column"
         let found = search_tasks_impl(&pool, "хлеб-2".into()).await.unwrap();
         assert_eq!(found.len(), 1);
 
-        // Пустой запрос — пустой результат, не ошибка
+        // An empty query yields an empty result, not an error
         assert!(search_tasks_impl(&pool, "  ".into()).await.unwrap().is_empty());
     }
 
@@ -832,9 +830,9 @@ mod tests {
         let t = create_task_impl(&pool, new_task("на удаление")).await.unwrap();
         delete_task_impl(&pool, t.id.clone()).await.unwrap();
 
-        // Не в активных...
+        // Not among the active ones...
         assert!(get_tasks_impl(&pool).await.unwrap().is_empty());
-        // ...но строка жива и видна в корзине.
+        // ...but the row is alive and visible in the Trash.
         let trash = get_deleted_tasks_impl(&pool).await.unwrap();
         assert_eq!(trash.len(), 1);
         assert_eq!(trash[0].id, t.id);
@@ -905,12 +903,12 @@ mod tests {
             deadline: None, scheduled_at: sa, scheduled_mins: mins,
         };
 
-        // назначить блок
+        // assign a block
         let up = update_task_impl(&pool, t.id.clone(), patch(Some(start.to_rfc3339()), Some(45))).await.unwrap();
         assert_eq!(up.scheduled_mins, Some(45));
         assert!(up.scheduled_at.is_some());
 
-        // перенос сбрасывает notified_block
+        // moving it resets notified_block
         sqlx::query("UPDATE tasks SET notified_block = 1 WHERE id = ?")
             .bind(&t.id).execute(&pool).await.unwrap();
         update_task_impl(&pool, t.id.clone(), patch(Some((start + chrono::Duration::hours(1)).to_rfc3339()), None)).await.unwrap();
@@ -918,11 +916,11 @@ mod tests {
             .bind(&t.id).fetch_one(&pool).await.unwrap();
         assert!(!notified);
 
-        // длительность зажимается снизу
+        // the duration is clamped from below
         let up = update_task_impl(&pool, t.id.clone(), patch(None, Some(5))).await.unwrap();
         assert_eq!(up.scheduled_mins, Some(15));
 
-        // пустая строка снимает блок целиком
+        // an empty string clears the block entirely
         let up = update_task_impl(&pool, t.id.clone(), patch(Some(String::new()), None)).await.unwrap();
         assert_eq!(up.scheduled_at, None);
         assert_eq!(up.scheduled_mins, None);
@@ -930,8 +928,9 @@ mod tests {
 
     #[tokio::test]
     async fn soft_delete_keeps_note_link_intact() {
-        // v0.8.12: мягкое удаление НЕ трогает привязки заметок/подзадач —
-        // это отличие от purge_deleted_task (см. purge_actually_removes_row_and_unlinks_notes).
+        // Soft deletion does NOT touch note links or subtasks — that is what
+        // separates it from purge_deleted_task (see
+        // purge_actually_removes_row_and_unlinks_notes).
         use crate::commands::notes::{create_note_impl, get_notes_impl, CreateNote};
         let pool = test_pool().await;
         let t = create_task_impl(&pool, new_task("с заметкой")).await.unwrap();
@@ -957,8 +956,8 @@ mod tests {
             .execute(pool).await.unwrap();
     }
 
-    // v0.9.19: авто-очистка истории — старые выполненные уходят в Корзину
-    // мягким удалением (deleted_at), completed_at не трогается.
+    // Automatic history cleanup: old completed tasks move to the Trash by soft
+    // deletion (deleted_at); completed_at is left alone.
     #[tokio::test]
     async fn cleanup_moves_only_old_completed_hidden_tasks_to_trash() {
         let pool = test_pool().await;
@@ -979,7 +978,7 @@ mod tests {
         let trashed = get_deleted_tasks_impl(&pool).await.unwrap();
         assert_eq!(trashed.len(), 1);
         assert_eq!(trashed[0].id, old.id);
-        // completed_at не тронут — дашборд-статистика не искажается
+        // completed_at is untouched, so dashboard statistics stay accurate
         assert!(trashed[0].completed_at.is_some());
 
         let visible_ids: Vec<String> = get_tasks_impl(&pool).await.unwrap().into_iter().map(|t| t.id).collect();
@@ -997,7 +996,7 @@ mod tests {
 
         let cutoff = now - chrono::Duration::days(90);
         assert_eq!(cleanup_old_history_impl(&pool, cutoff).await.unwrap(), 1);
-        // Повторный прогон — уже в Корзине, второй раз не считается
+        // A second run: already in the Trash, so it is not counted again
         assert_eq!(cleanup_old_history_impl(&pool, cutoff).await.unwrap(), 0);
     }
 
@@ -1006,7 +1005,7 @@ mod tests {
         use crate::commands::settings::set_setting;
         let pool = test_pool().await;
 
-        // Выключено по умолчанию (history_cleanup_months = 0)
+        // Disabled by default (history_cleanup_months = 0)
         assert!(!history_cleanup_due(&pool).await);
 
         set_setting(&pool, "history_cleanup_months", "6").await.unwrap();

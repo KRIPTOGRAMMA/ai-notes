@@ -10,24 +10,23 @@ pub enum Priority {
   Critical,
 }
 
-// Статус задачи — с v0.9.20 это id строки в таблице statuses (тот же
-// приём, что category получила в v0.6.3), а не enum. Todo/InProgress/
-// Done/Archived остаются зарезервированными id (см. RESERVED_STATUSES в
-// commands::statuses) — с ними завязана бизнес-логика (Done →
-// hidden+completed_at, InProgress → тайм-трекинг), но название/цвет можно
-// кастомизировать, а пользователь может добавлять свои промежуточные
-// статусы для канбан-доски. Валидация — на записи
-// (commands::statuses::valid_or_fallback), чтение — как есть.
+// A task's status is the id of a row in the statuses table (the same trick
+// category uses), not an enum. Todo/InProgress/Done/Archived remain reserved ids
+// (see RESERVED_STATUSES in commands::statuses) because business logic is tied to
+// them (Done -> hidden+completed_at, InProgress -> time tracking), but their name
+// and colour can be customized and the user can add intermediate statuses of
+// their own for the kanban board. Validation happens on write
+// (commands::statuses::valid_or_fallback); reads take the value as is.
 pub type TaskStatus = String;
 
-// Категория задачи — с v0.6.3 это id строки в таблице categories
-// (пользовательские категории), а не enum. Валидация — на записи
-// (commands::categories::valid_or_fallback), чтение — как есть.
+// A task's category is the id of a row in the categories table (user-defined
+// categories), not an enum. Validation happens on write
+// (commands::categories::valid_or_fallback); reads take the value as is.
 
-// Внимание: Task НЕ читается из БД напрямую через FromRow — там разные
-// представления enum'ов/Vec, и query_as::<_, Task> никогда не вызывается.
-// Чтение всегда идёт через TaskRow -> into_task(). Не добавляйте сюда
-// derive(sqlx::FromRow) обратно, это вводит в заблуждение.
+// Note: Task is NOT read from the DB directly via FromRow — the representations
+// of its enums and Vecs differ, and query_as::<_, Task> is never called. Reading
+// always goes through TaskRow -> into_task(). Do not add derive(sqlx::FromRow)
+// back here, it is misleading.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Task {
   pub id: String,
@@ -43,33 +42,32 @@ pub struct Task {
   pub completed_at: Option<DateTime<Utc>>,
   pub recurrence: Recurrence,
   pub hidden: bool,
-  // Мягкое удаление (v0.8.12): задача не показывается в активных/истории,
-  // но остаётся в таблице до restore или purge из «Корзины».
+  // Soft deletion: the task is hidden from the active list and history but stays
+  // in the table until it is restored or purged from the Trash.
   #[serde(default)]
   pub deleted_at: Option<DateTime<Utc>>,
   #[serde(default)]
   pub project_id: Option<String>,
-  // Тайм-блок: запланированное время работы (не дедлайн)
+  // Time block: the planned working time (not a deadline)
   #[serde(default)]
   pub scheduled_at: Option<DateTime<Utc>>,
   #[serde(default)]
   pub scheduled_mins: Option<i64>,
-  // Ручной порядок в списке (drag); назначается на создании и в reorder_tasks
+  // Manual ordering in the list (drag); assigned on creation and in reorder_tasks
   #[serde(default)]
   pub sort_order: i64,
   #[serde(default)]
   pub subtasks: Vec<Subtask>,
-  // Зависимости (v0.9.56): задачи, которые должны быть закрыты перед этой.
-  // Здесь только НЕзакрытые блокеры — то есть причина, по которой задача
-  // заблокирована прямо сейчас. Пустой список = задача свободна.
-  // Блокер в Корзине не блокирует, но связь сохраняется и вернётся вместе
-  // с ним при восстановлении (см. commands/dependencies.rs).
+  // Dependencies: the tasks that must be closed before this one. Only OPEN
+  // blockers appear here, i.e. the reason the task is blocked right now. An empty
+  // list means the task is free. A blocker in the Trash does not block, but the
+  // link is kept and returns with it on restore (see commands/dependencies.rs).
   #[serde(default)]
   pub blocked_by: Vec<Blocker>,
 }
 
-/// Незакрытый блокер в списке `Task::blocked_by`. Название нужно, чтобы
-/// показать «Заблокирована задачей X» без второго запроса из фронтенда.
+/// An open blocker in the `Task::blocked_by` list. The title is needed so
+/// "Blocked by X" can be shown without a second request from the frontend.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, sqlx::FromRow)]
 pub struct Blocker {
   pub id: String,
@@ -131,9 +129,9 @@ pub struct UpdateTask {
     pub deadline: Option<String>,
     pub tags: Option<Vec<String>>,
     pub recurrence: Option<Recurrence>,
-    // Как deadline: пустая строка = отвязать от проекта, отсутствие = не менять
+    // Like deadline: an empty string detaches from the project, absence leaves it alone
     pub project_id: Option<String>,
-    // Тайм-блок: пустая строка scheduled_at снимает блок (и длительность)
+    // Time block: an empty scheduled_at clears the block (and its duration)
     pub scheduled_at: Option<String>,
     pub scheduled_mins: Option<i64>,
 }
@@ -152,21 +150,21 @@ pub enum Recurrence {
     Daily,
     Weekly,
     Custom(u32, RecurrenceUnit),
-    // Битовая маска дней недели: бит 0 = Пн ... бит 6 = Вс (тот же паттерн,
-    // что days_mask у routines). Не подходит для to_duration — следующая
-    // дата не фиксированный интервал, см. next_occurrence.
+    // A weekday bitmask: bit 0 = Monday ... bit 6 = Sunday (the same pattern as
+    // days_mask on routines). Unsuitable for to_duration — the next
+    // date is not a fixed interval, see next_occurrence.
     Weekdays(u8),
 }
 
 impl Recurrence {
-    // Парсим из строки БД
+    // Parse from the DB string
     pub fn from_db(s: &str) -> Self {
         match s {
             "Hourly" => Recurrence::Hourly,
             "Daily"  => Recurrence::Daily,
             "Weekly" => Recurrence::Weekly,
             _ if s.starts_with("Custom") => {
-                // Формат: "Custom(4,Hours)"
+                // Format: "Custom(4,Hours)"
                 let inner = s
                     .trim_start_matches("Custom(")
                     .trim_end_matches(')');
@@ -185,7 +183,7 @@ impl Recurrence {
                 }
             }
             _ if s.starts_with("Weekdays") => {
-                // Формат: "Weekdays(37)"
+                // Format: "Weekdays(37)"
                 let inner = s.trim_start_matches("Weekdays(").trim_end_matches(')');
                 match inner.trim().parse::<u8>() {
                     Ok(mask) if mask != 0 => Recurrence::Weekdays(mask),
@@ -196,7 +194,7 @@ impl Recurrence {
         }
     }
 
-    // Сохраняем в строку для БД
+    // Serialize to a string for the DB
     pub fn to_db(&self) -> String {
         match self {
             Recurrence::None           => "None".into(),
@@ -208,7 +206,7 @@ impl Recurrence {
         }
     }
 
-    // Возвращает Duration для пересчёта дедлайна
+    // Returns a Duration for recomputing the deadline
     pub fn to_duration(&self) -> Option<chrono::Duration> {
         match self {
             Recurrence::None              => None,
@@ -224,19 +222,19 @@ impl Recurrence {
                     RecurrenceUnit::Weeks   => chrono::Duration::weeks(n),
                 })
             }
-            Recurrence::Weekdays(_)       => None, // не фиксированный интервал, см. next_occurrence
+            Recurrence::Weekdays(_)       => None, // not a fixed interval, see next_occurrence
         }
     }
 
-    // Следующая дата выполнения для recurring-задачи, единая точка для всех
-    // вариантов (включая Weekdays, для которого to_duration неприменим).
-    // None — не recurring (то же условие, что и у to_duration == None).
+    // The next due date for a recurring task, a single place covering every
+    // variant (including Weekdays, for which to_duration does not apply).
+    // None means not recurring (the same condition as to_duration == None).
     pub fn next_occurrence(&self, from: chrono::DateTime<chrono::Utc>) -> Option<chrono::DateTime<chrono::Utc>> {
         if let Recurrence::Weekdays(mask) = self {
             if *mask == 0 { return None; }
-            // Ищем ближайший будущий день недели из маски: от +1 дня (никогда
-            // не "сегодня же" — иначе завершение задачи в её же день недели
-            // не двигало бы дедлайн вперёд) до +7 дней (маска непуста -> найдётся).
+            // Find the nearest future weekday in the mask, from +1 day (never
+            // "today again", or completing a task on its own weekday would not move
+            // the deadline forward) to +7 days (the mask is non-empty, so one exists).
             for delta in 1..=7 {
                 let candidate = from + chrono::Duration::days(delta);
                 let weekday_bit = 1u8 << candidate.weekday().num_days_from_monday();
@@ -244,7 +242,7 @@ impl Recurrence {
                     return Some(candidate);
                 }
             }
-            return None; // недостижимо при mask != 0, но без паники на всякий случай
+            return None; // unreachable while mask != 0, but we avoid panicking just in case
         }
         self.to_duration().map(|d| from + d)
     }
@@ -270,7 +268,7 @@ impl CreateTask {
             project_id: self.project_id.filter(|p| !p.is_empty()),
             scheduled_at: None,
             scheduled_mins: None,
-            sort_order: 0, // create_task_impl назначает max+1 перед вставкой
+            sort_order: 0, // create_task_impl assigns max+1 before insertion
             subtasks: Vec::new(),
             blocked_by: Vec::new(),
         }
@@ -356,8 +354,8 @@ mod tests {
             Recurrence::Custom(90, RecurrenceUnit::Minutes),
             Recurrence::Custom(2, RecurrenceUnit::Weeks),
             Recurrence::Custom(10, RecurrenceUnit::Days),
-            Recurrence::Weekdays(0b0000101), // Пн, Ср
-            Recurrence::Weekdays(0b1111111), // все дни
+            Recurrence::Weekdays(0b0000101), // Monday, Wednesday
+            Recurrence::Weekdays(0b1111111), // every day
         ];
         for rec in cases {
             assert_eq!(Recurrence::from_db(&rec.to_db()), rec);
@@ -369,7 +367,7 @@ mod tests {
         assert_eq!(Recurrence::from_db("abrakadabra"), Recurrence::None);
         assert_eq!(Recurrence::from_db(""), Recurrence::None);
         assert_eq!(Recurrence::from_db("Custom(broken"), Recurrence::None);
-        assert_eq!(Recurrence::from_db("Weekdays(0)"), Recurrence::None); // пустая маска — не recurring
+        assert_eq!(Recurrence::from_db("Weekdays(0)"), Recurrence::None); // an empty mask is not recurring
         assert_eq!(Recurrence::from_db("Weekdays(broken"), Recurrence::None);
     }
 
@@ -381,11 +379,11 @@ mod tests {
             Recurrence::Custom(90, RecurrenceUnit::Minutes).to_duration(),
             Some(chrono::Duration::minutes(90))
         );
-        // Weekdays — не фиксированный интервал, to_duration не подходит (см. next_occurrence)
+        // Weekdays is not a fixed interval, so to_duration does not apply (see next_occurrence)
         assert_eq!(Recurrence::Weekdays(0b1111111).to_duration(), None);
     }
 
-    // --- next_occurrence: v0.8.13, повторы по дням недели ---
+    // --- next_occurrence: repeats by weekday ---
 
     fn utc_ymd(y: i32, m: u32, d: u32) -> DateTime<Utc> {
         use chrono::TimeZone;
@@ -399,8 +397,8 @@ mod tests {
 
     #[test]
     fn weekdays_next_occurrence_never_same_day_even_if_today_matches() {
-        // 2026-07-20 — понедельник (бит 0). Маска включает Пн — но следующий
-        // раз должен быть через 7 дней, а не "сегодня же".
+        // 2026-07-20 is a Monday (bit 0). The mask includes Monday, but the next
+        // occurrence must be 7 days out, not "today again".
         let monday = utc_ymd(2026, 7, 20);
         let mask_monday = 0b0000001;
         assert_eq!(
@@ -411,7 +409,7 @@ mod tests {
 
     #[test]
     fn weekdays_single_day_mask_finds_nearest_within_week() {
-        // Маска только на пятницу (бит 4); сегодня — понедельник -> через 4 дня.
+        // The mask covers Friday only (bit 4); today is Monday -> 4 days out.
         let monday = utc_ymd(2026, 7, 20);
         let mask_friday = 1u8 << 4;
         assert_eq!(
@@ -422,7 +420,7 @@ mod tests {
 
     #[test]
     fn weekdays_mask_spanning_weekend_picks_nearest_bit() {
-        // Маска Сб+Вс (биты 5,6); сегодня — пятница -> завтра (суббота).
+        // The mask covers Sat+Sun (bits 5, 6); today is Friday -> tomorrow (Saturday).
         let friday = utc_ymd(2026, 7, 24);
         let mask_weekend = (1u8 << 5) | (1u8 << 6);
         assert_eq!(
@@ -468,15 +466,15 @@ mod tests {
         })
         .into_task();
 
-        // Статус (как и категория с v0.6.3) с v0.9.20 читается как есть —
-        // валидация происходит на записи (valid_or_fallback), не на чтении.
+        // The status, like the category, is read as is — validation happens on
+        // write (valid_or_fallback), not on read.
         assert_eq!(task.status, "???");
         assert_eq!(task.priority, Priority::Medium);
-        // Категория с v0.6.3 читается как есть (валидация — на записи, по таблице)
+        // The category is read as is (validation happens on write, against the table)
         assert_eq!(task.category, "???");
         assert!(task.tags.is_empty());
         assert_eq!(task.deadline, None);
-        // Битая дата не роняет парсинг — подставляется "сейчас"
+        // A malformed date does not break parsing — "now" is substituted
         assert!(task.created_at <= Utc::now());
     }
 }

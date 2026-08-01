@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use crate::error::AppResult;
 
-// Системный фолбэк: не удаляется, принимает задачи удалённых категорий
-// и невалидные значения category при записи задач.
+// The system fallback: it cannot be deleted and it receives tasks from deleted
+// categories as well as invalid category values when tasks are written.
 pub const FALLBACK_CATEGORY: &str = "Other";
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, sqlx::FromRow)]
@@ -96,7 +96,7 @@ pub async fn delete_category_impl(pool: &SqlitePool, id: String) -> AppResult<()
     if id == FALLBACK_CATEGORY {
         return Err("Категорию «Другое» нельзя удалить — это фолбэк".to_string().into());
     }
-    // Задачи удаляемой категории переезжают в фолбэк
+    // Tasks in the category being deleted move to the fallback
     sqlx::query("UPDATE tasks SET category = ? WHERE category = ?")
         .bind(FALLBACK_CATEGORY)
         .bind(&id)
@@ -109,8 +109,8 @@ pub async fn delete_category_impl(pool: &SqlitePool, id: String) -> AppResult<()
     Ok(())
 }
 
-// Валидация категории на записи задачи: неизвестный id тихо становится
-// фолбэком (прежняя семантика enum: неизвестное → Other).
+// Category validation when writing a task: an unknown id silently becomes the
+// fallback (the former enum semantics: anything unknown became Other).
 pub async fn valid_or_fallback(pool: &SqlitePool, category: &str) -> String {
     let exists: Option<i64> = sqlx::query_scalar("SELECT 1 FROM categories WHERE id = ?")
         .bind(category)
@@ -125,8 +125,8 @@ pub async fn valid_or_fallback(pool: &SqlitePool, category: &str) -> String {
     }
 }
 
-// Сопоставление ответа модели с категорией: по имени или id, без учёта
-// регистра и обрамляющей пунктуации. Чистая функция для ai_classify.
+// Matches the model's answer to a category by name or id, ignoring case and
+// surrounding punctuation. A pure function used by ai_classify.
 pub fn match_category(categories: &[Category], answer: &str) -> Option<String> {
     let norm = answer
         .trim()
@@ -166,7 +166,7 @@ mod tests {
         let pool = test_pool().await;
 
         let cat = create_category_impl(&pool, "Спорт".into(), "#ff0000".into()).await.unwrap();
-        assert_eq!(cat.position, 5); // после посевных 0..4
+        assert_eq!(cat.position, 5); // after the seeded 0..4
 
         update_category_impl(&pool, cat.id.clone(), UpdateCategory {
             name: Some("Тренировки".into()),

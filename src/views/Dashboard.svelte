@@ -8,7 +8,7 @@
   import TaskOpener from "../lib/components/TaskOpener.svelte";
   import { t, i18n } from "../lib/i18n.svelte";
 
-  // Задача открывается прямо на дашборде, без ухода на экран Задач (v0.9.53)
+  // A task opens right on the dashboard, without leaving for the Tasks screen
   let openTaskId = $state<string | null>(null);
 
   interface ActivityDay {
@@ -59,7 +59,7 @@
   let error: string | null = $state(null);
   let pomodoroStats: PomodoroStats | null = $state(null);
 
-  // Приложения: топ по активным минутам + время по категориям (правила из Настроек)
+  // Applications: the top by active minutes plus time per category (rules from Settings)
   let appUsage: { app: string; minutes: number }[] = $state([]);
   let appCategories: { category: string; minutes: number }[] = $state([]);
   let appPeriod: 1 | 7 = $state(1);
@@ -70,8 +70,8 @@
     try {
       appUsage = await api.getAppUsage(days);
       appCategories = await api.getAppCategoryTime(days);
-      // v0.9.31: пусто, пока track_domains выключен — это нормальное
-      // состояние, блок сайтов просто не показывается.
+      // Empty while track_domains is off — a normal state, the sites block is
+      // simply not shown.
       domainUsage = await api.getDomainUsage(days);
     } catch {
       appUsage = [];
@@ -89,10 +89,10 @@
   let summaryPending: "day" | "week" | null = $state(null);
   let summaryKind: "day" | "week" | null = $state(null);
 
-  // Метки для КАТЕГОРИЙ ПРИЛОЖЕНИЙ (glob-правила трекинга — фиксированный набор).
-  // Категории задач с v0.6.3 пользовательские и берутся из categoryStore.
-  // Это ФИКСИРОВАННЫЙ набор в коде, а не строки из БД (в отличие от категорий
-  // задач, миграция 0015) — поэтому переводится, ключ = id категории.
+  // Labels for APPLICATION categories (the glob tracking rules, a fixed set). Task
+  // categories are user-defined and come from categoryStore. This is a FIXED set in
+  // the code rather than rows from the DB (unlike task categories, migration 0015),
+  // which is why it is translated, keyed by the category id.
   const CATEGORY_LABELS: Record<string, string> = $derived({
     Work: t("Работа"),
     Study: t("Учёба"),
@@ -102,8 +102,8 @@
   });
 
   const donutData = $derived.by(() => {
-    // Порядок и цвета — из таблицы категорий; легаси-значения (категория
-    // удалена, задачи в истории остались) — в хвост серым.
+    // The order and colours come from the categories table; legacy values (the
+    // category was deleted but tasks remain in history) go grey at the end.
     const known = categoryStore.categories.map(c => ({
       category: c.id,
       label: categoryStore.name(c.id),
@@ -120,9 +120,9 @@
 
   const R = 45;
   const CIRC = 2 * Math.PI * R;
-  const SEG_GAP = 2; // px просвета между сегментами
+  const SEG_GAP = 2; // px of gap between segments
 
-  // Сегменты пончика: длина дуги минус зазор, смещение — накопленное.
+  // The donut's segments: arc length minus the gap, with a cumulative offset.
   const donutSegments = $derived.by(() => {
     const gap = donutData.length > 1 ? SEG_GAP : 0;
     let start = 0;
@@ -144,7 +144,7 @@
     return total > 0 ? Math.round((active / total) * 100) : null;
   }
 
-  // --- Год в квадратиках (v0.6.5): выполненные задачи по локальным дням ---
+  // --- The year in squares: completed tasks by local day ---
   const YEAR_DAYS = 365;
 
   function localKey(d: Date): string {
@@ -161,14 +161,14 @@
       const key = localKey(d);
       days.push({ date: key, count: byDate.get(key) ?? 0 });
     }
-    // Пустые ячейки в начале, чтобы колонки-недели начинались с понедельника
+    // Empty cells at the start so the week columns begin on Monday
     const first = new Date(today.getFullYear(), today.getMonth(), today.getDate() - (YEAR_DAYS - 1));
     const lead = (first.getDay() + 6) % 7;
     return { lead, days };
   });
 
   const calMax = $derived(Math.max(1, ...taskCompletions.map(c => c.completed)));
-  const CAL_MIX = [0, 25, 45, 70, 95]; // проценты акцента по уровням
+  const CAL_MIX = [0, 25, 45, 70, 95]; // accent percentages per level
 
   function calLevel(count: number): number {
     if (count <= 0) return 0;
@@ -176,16 +176,16 @@
     return r > 0.75 ? 4 : r > 0.5 ? 3 : r > 0.25 ? 2 : 1;
   }
 
-  // Локаль за выбранным языком, а не зашитая "ru-RU" (v0.9.47): в подсказке
-  // календаря дата оставалась русской — «20 июл. — empty». Тот же приём, что
-  // в Notes.svelte:345.
+  // The locale follows the chosen language rather than a hardcoded "ru-RU": in the
+  // calendar tooltip the date used to stay Russian. The same approach as in
+  // Notes.svelte.
   function fmtDay(date: string): string {
     return new Date(date + "T00:00:00")
       .toLocaleDateString(i18n.lang === "en" ? "en-US" : "ru-RU", { day: "numeric", month: "short" });
   }
 
-  // Тултип (hover, быстрый превью) и попап (клик, с переходом к задаче) —
-  // список выполненных задач дня подгружается лениво и кэшируется по дате.
+  // The tooltip (hover, a quick preview) and the popup (click, with navigation to a
+  // task): the day's list of completed tasks is loaded lazily and cached by date.
   let calTip: { date: string; count: number; completions: DayCompletion[]; x: number; y: number } | null = $state(null);
   let calPopup: { date: string; count: number; completions: DayCompletion[] } | null = $state(null);
   const dayCompletionsCache = new Map<string, DayCompletion[]>();
@@ -222,13 +222,13 @@
     if (e.key === "Escape" && calPopup) calPopup = null;
   }
 
-  // --- Heatmap «час × день недели» (v0.6.5) ---
+  // --- The "hour x weekday" heatmap ---
   let hourly: { weekday: number; hour: number; minutes: number }[] = $state([]);
   const HOURS = Array.from({ length: 24 }, (_, i) => i);
   const WEEKDAY_LABELS = $derived([t("Пн"), t("Вт"), t("Ср"), t("Чт"), t("Пт"), t("Сб"), t("Вс")]);
   const heatMax = $derived(Math.max(1, ...hourly.map(c => c.minutes)));
 
-  // row 0 = Пн; в данных weekday по strftime('%w'): 0 = Вс
+  // row 0 = Monday; in the data weekday follows strftime('%w'), where 0 = Sunday
   function heatMinutes(row: number, hour: number): number {
     const w = (row + 1) % 7;
     return hourly.find(c => c.weekday === w && c.hour === hour)?.minutes ?? 0;
@@ -251,10 +251,10 @@
         ratio = await api.getActiveIdleRatio();
         settings = await api.getSettings();
         await loadAppUsage(1);
-        await projectStore.load(); // свежий прогресс целей за период
+        await projectStore.load(); // fresh goal progress for the period
         await loadProjectTime();
-        await categoryStore.load(); // имена/цвета категорий задач для пончика
-        hourly = await api.getHourlyActivity(56); // heatmap: последние 8 недель
+        await categoryStore.load(); // task category names and colours for the donut
+        hourly = await api.getHourlyActivity(56); // heatmap: the last 8 weeks
         pomodoroStats = await api.getPomodoroStats();
 
       } catch (e) {
@@ -304,7 +304,7 @@
     return Math.max(...days.map(d => d.minutes), 1);
   }
 
-  // Цели проектов: активные проекты с заданной целью (задачи и/или минуты)
+  // Project goals: active projects with a goal set (tasks and/or minutes)
   const goalProjects = $derived(
     projectStore.active.filter(p => p.goal_tasks != null || p.goal_mins != null)
   );
@@ -335,7 +335,7 @@
   {/if}
 
   <div class="grid">
-    <!-- Донат по категориям -->
+    <!-- The donut by category -->
     <section class="card panel">
       <h3 class="section-title">{t("Выполнено по категориям")}</h3>
 
@@ -375,7 +375,7 @@
       {/if}
     </section>
 
-    <!-- Актив/простой -->
+    <!-- Active versus idle -->
     <section class="card panel">
       <h3 class="section-title">{t("Активное время")}</h3>
 
@@ -405,7 +405,7 @@
       {/if}
     </section>
 
-    <!-- ИИ-инсайт -->
+    <!-- The AI insight -->
     <section class="card panel">
       <h3 class="section-title">{t("ИИ-инсайт")}</h3>
 
@@ -429,7 +429,7 @@
       {/if}
     </section>
 
-    <!-- Помодоро: статистика и стрики -->
+    <!-- Pomodoro: statistics and streaks -->
     {#if pomodoroStats}
       <section class="card panel">
         <h3 class="section-title">{t("Помодоро")}</h3>
@@ -456,7 +456,7 @@
       </section>
     {/if}
 
-    <!-- Резюме дня/недели -->
+    <!-- The day/week digest -->
     <section class="card panel">
       <h3 class="section-title">{t("Резюме")}</h3>
 
@@ -488,7 +488,7 @@
       {/if}
     </section>
 
-    <!-- Цели проектов (только если у кого-то задана цель) -->
+    <!-- Project goals (only if any project has one set) -->
     {#if goalProjects.length > 0}
       <section class="card panel">
         <h3 class="section-title">{t("Цели проектов")}</h3>
@@ -546,12 +546,12 @@
       </section>
     {/if}
 
-    <!-- Сайты (v0.9.31): отдельная карточка, а не блок внутри «Приложений».
-         Иначе разбивка по сайтам зависела бы от того, записалось ли что-то
-         по приложениям — два независимых источника данных не должны
-         скрывать друг друга. Карточки нет вовсе, пока трекинг доменов
-         выключен: пустой заголовок «Сайты» читался бы как поломка, а не
-         как выключенная функция. -->
+    <!-- Sites: a separate card rather than a block inside "Applications".
+         Otherwise the per-site breakdown would depend on whether anything was
+         recorded per application — two independent data sources must not hide
+         one another. The card is absent entirely while domain tracking is off:
+         an empty "Sites" heading would read as a breakage rather than as a
+         disabled feature. -->
     {#if domainUsage.length > 0}
       {@const maxDomain = Math.max(...domainUsage.map(d => d.minutes), 1)}
       <section class="card panel wide">
@@ -570,7 +570,7 @@
       </section>
     {/if}
 
-    <!-- Приложения (только если провайдер окон что-то записал) -->
+    <!-- Applications (only if the window provider recorded anything) -->
     {#if appUsage.length > 0}
       {@const maxApp = Math.max(...appUsage.map(a => a.minutes), 1)}
       <section class="card panel wide">
@@ -612,7 +612,7 @@
       </section>
     {/if}
 
-    <!-- Активность по дням -->
+    <!-- Activity by day -->
     <section class="card panel wide">
       <h3 class="section-title">{t("Активность по дням (мин)")}</h3>
 
@@ -634,7 +634,7 @@
       {/if}
     </section>
 
-    <!-- Год в квадратиках: выполненные задачи -->
+    <!-- The year in squares: completed tasks -->
     <section class="card panel wide">
       <h3 class="section-title">{t("Выполненные задачи за год")}</h3>
 
@@ -673,7 +673,7 @@
       {/if}
     </section>
 
-    <!-- Heatmap: в какие часы реально работается -->
+    <!-- Heatmap: the hours when work actually happens -->
     <section class="card panel wide">
       <h3 class="section-title">{t("Активность по часам (8 недель)")}</h3>
 
@@ -754,7 +754,7 @@
     .grid { grid-template-columns: 1fr; }
   }
 
-  /* Год в квадратиках: колонки-недели, строки Пн..Вс */
+  /* The year in squares: columns are weeks, rows run Monday to Sunday */
   .cal-wrap {
     position: relative;
     overflow-x: auto;
@@ -803,7 +803,7 @@
     text-overflow: ellipsis;
   }
 
-  /* Heatmap час × день недели */
+  /* The hour-by-weekday heatmap */
   .heat {
     display: grid;
     grid-template-columns: 24px repeat(24, 1fr);
@@ -957,9 +957,9 @@
     align-items: flex-start;
   }
 
-  /* v0.9.54: .active-toggle убран — период приложений теперь общий .seg.
-     .btn-group остаётся: под ним кнопки резюме ИИ, а это не переключатель —
-     они запускают действие, а не выбирают состояние. */
+  /* .active-toggle is gone: the apps period now uses the shared .seg.
+     .btn-group stays, because below it sit the AI summary buttons, and those
+     are not a switch — they trigger an action rather than select a state. */
   .btn-group {
     display: flex;
     gap: 6px;

@@ -1,41 +1,42 @@
-// Разбор текста из буфера обмена в заметку (v0.9.26).
+// Parsing clipboard text into a note.
 //
-// Вынесено из QuickCapture.svelte отдельным модулем, потому что vitest в
-// проекте покрывает только чистые ts (vitest.config.ts) — см. тот же приём
-// в guard.ts. Здесь именно логика, а не разметка: как именно текст делится
-// на заголовок и тело, и что считать пустым буфером.
+// Extracted from QuickCapture.svelte into its own module because vitest in this
+// project covers pure ts only (vitest.config.ts) — the same approach as guard.ts.
+// What lives here is logic rather than markup: exactly how the text splits into a
+// title and a body, and what counts as an empty clipboard.
 
-// Заголовок заметки не должен быть простынёй: у буфера обмена длина ничем
-// не ограничена, а заголовок показывается в списках и вики-ссылках.
+// A note's title must not be a wall of text: the clipboard has no length limit,
+// while the title appears in lists and wiki links.
 export const TITLE_MAX = 120;
 
 export type ClipboardNote = { title: string; content: string };
 
-// Строка целиком является ссылкой. Проверяем именно «строка = URL», а не
-// «в строке есть URL»: у предложения со ссылкой внутри заголовок из первой
-// строки по-прежнему осмысленный, а у голого URL — нет.
+// Whether the line is entirely a link. We check "the line IS a URL" rather than
+// "the line contains one": for a sentence with a link inside, a title taken from
+// the first line still makes sense, whereas for a bare URL it does not.
 function isBareUrl(line: string): boolean {
   return /^(https?:\/\/|www\.)\S+$/i.test(line.trim());
 }
 
-// Пустой буфер (или картинка/файл — плагин отдаёт пустую строку) — null,
-// а не пустая заметка: вызывающий откроет обычную пустую форму.
+// An empty clipboard (or an image or file, for which the plugin returns an empty
+// string) yields null rather than an empty note: the caller opens an ordinary
+// blank form.
 export function parseClipboardNote(raw: string): ClipboardNote | null {
   if (!raw.trim()) return null;
 
-  // Первая непустая строка — заголовок, остальное — тело. Ведущие пустые
-  // строки пропускаем: скопированный из браузера текст часто начинается с них,
-  // и иначе заметка получила бы пустой заголовок при непустом буфере.
+  // The first non-empty line is the title and the rest is the body. Leading blank
+  // lines are skipped: text copied from a browser often starts with them, and
+  // otherwise the note would get an empty title from a non-empty clipboard.
   const lines = raw.split("\n");
   let i = 0;
   while (i < lines.length && !lines[i].trim()) i++;
 
   const first = lines[i].trim();
 
-  // Голый URL в заголовок не идёт: он нечитаем в списке заметок и в
-  // вики-ссылках `[[...]]`. Такой буфер целиком уходит в тело, заголовок
-  // остаётся пустым — пользователь впишет свой (или сработает фолбэк
-  // «Без названия» при сохранении).
+  // A bare URL does not become a title: it is unreadable in the notes list and in
+  // `[[...]]` wiki links. Such a clipboard goes entirely into the body and the title
+  // stays empty — the user writes their own (or the "Untitled" fallback applies on
+  // save).
   if (isBareUrl(first)) {
     return { title: "", content: lines.slice(i).join("\n").trim() };
   }

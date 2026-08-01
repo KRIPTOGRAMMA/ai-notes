@@ -5,12 +5,12 @@ use tokio::time::{sleep, Duration};
 use crate::commands::settings::{WorkMode, get_u64_setting};
 use crate::notifier::scheduler::send_notification;
 
-const CHECK_EVERY_SECS: u64 = 300; // раз в 5 минут
-const LOOKBACK_HOURS: i64 = 4;     // сколько истории смотрим на «непрерывный хвост»
+const CHECK_EVERY_SECS: u64 = 300; // once every 5 minutes
+const LOOKBACK_HOURS: i64 = 4;     // how much history we scan for the "continuous tail"
 
-// Чистая логика: непрерывный «активный хвост» в секундах. Идём с конца
-// (самые свежие записи) и суммируем Active, пока не встретим Idle — она
-// обрывает серию. rows отсортированы по времени по возрастанию.
+// Pure logic: the continuous "active tail" in seconds. We walk from the end (the
+// most recent rows) summing Active entries until an Idle one breaks the run.
+// rows are sorted by time ascending.
 pub fn trailing_active_secs(rows: &[(String, i64)]) -> i64 {
     let mut total = 0;
     for (state, dur) in rows.iter().rev() {
@@ -23,9 +23,10 @@ pub fn trailing_active_secs(rows: &[(String, i64)]) -> i64 {
     total
 }
 
-// Мягкие напоминания о перерыве: если пользователь непрерывно активен дольше
-// порога — предлагаем размяться. Работает только в Light (в Focus всё заглушено,
-// в Study уже есть помодоро). Порог `nudge_after_mins` из настроек, 0 — выкл.
+// Gentle break reminders: if the user has been continuously active for longer
+// than the threshold, suggest stretching. Only active in Light mode (Focus mutes
+// everything and Study already has pomodoro). The `nudge_after_mins` threshold
+// comes from the settings; 0 means off.
 pub fn start_nudger(app: tauri::AppHandle, pool: SqlitePool, work_mode: Arc<Mutex<WorkMode>>) {
     tokio::spawn(async move {
         let mut last_nudge: Option<Instant> = None;
@@ -42,8 +43,9 @@ pub fn start_nudger(app: tauri::AppHandle, pool: SqlitePool, work_mode: Arc<Mute
                 continue;
             }
 
-            // Кулдаун: не чаще раза в половину порога (но не реже 20 мин),
-            // иначе будем напоминать каждые 5 минут, пока человек работает.
+            // Cooldown: at most once per half the threshold (but no more often
+            // than every 20 minutes), otherwise we would nag every 5 minutes for
+            // as long as the person keeps working.
             let cooldown = Duration::from_secs((after_mins * 60 / 2).max(20 * 60));
             if last_nudge.map(|t| t.elapsed() < cooldown).unwrap_or(false) {
                 continue;
@@ -95,7 +97,7 @@ mod tests {
     #[test]
     fn sums_only_trailing_active() {
         let rows = vec![r("Active", 60), r("Idle", 60), r("Active", 60), r("Active", 60)];
-        // хвост: две Active по 60 → 120; предыдущая Idle обрывает
+        // the tail: two Active entries of 60 each -> 120; the preceding Idle breaks it
         assert_eq!(trailing_active_secs(&rows), 120);
     }
 

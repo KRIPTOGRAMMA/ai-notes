@@ -14,17 +14,17 @@ use tauri::{Emitter, Manager};
 use tauri::menu::{Menu, MenuItem, CheckMenuItem, Submenu};
 use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
 
-// Обычные (не checkbox) пункты меню — some tray-хосты (напр. waybar) неверно
-// рендерят checkbox-пункты (GtkCheckMenuItem), показывая текст статуса
-// вместо названия ("ВЫКЛ" вместо "Light"/"Focus"/"Study"). Обходим: активный
-// режим показываем префиксом "✓ " прямо в тексте пункта.
+// Plain (non-checkbox) menu items: some tray hosts (waybar, for one) render
+// checkbox items (GtkCheckMenuItem) incorrectly, showing the status text instead
+// of the name ("OFF" rather than "Light"/"Focus"/"Study"). The workaround is to
+// mark the active mode with a "✓ " prefix inside the item's own text.
 pub type ModeItems = Arc<Mutex<Vec<MenuItem<tauri::Wry>>>>;
 pub type QuietItems = Arc<Mutex<Vec<CheckMenuItem<tauri::Wry>>>>;
-// v0.9.39: пункты с фиксированным текстом — их надо переподписать, когда
-// после загрузки настроек выяснится выбранный язык. Ключ — id пункта.
+// Items with fixed text: they must be relabelled once the chosen language is
+// known, after the settings have been loaded. The key is the item's id.
 pub type LabeledItems = Arc<Mutex<Vec<(&'static str, MenuItem<tauri::Wry>)>>>;
-// Начальный режим окна быстрого ввода: "task" | "note". Живёт как managed-state,
-// чтобы QuickCapture мог прочитать его при монтировании (гонка emit-до-mount).
+// The quick-capture window's initial mode: "task" | "note". It lives as managed
+// state so QuickCapture can read it on mount (an emit-before-mount race).
 pub type QuickMode = Arc<Mutex<String>>;
 use crate::db::init_db;
 use crate::ai::sidecar::{SharedSidecar, SidecarState};
@@ -34,8 +34,8 @@ fn is_wayland() -> bool {
     std::env::var("WAYLAND_DISPLAY").is_ok()
 }
 
-// Режим трекинга активности: extended — системный idle/resume через
-// ext-idle-notify-v1 (Wayland), basic — только ввод в окне приложения.
+// The activity tracking mode: extended means system idle/resume via
+// ext-idle-notify-v1 (Wayland), basic means only input inside the app window.
 pub struct ExtendedTracking(pub bool);
 
 #[tauri::command]
@@ -43,7 +43,7 @@ fn get_tracking_mode(mode: tauri::State<'_, ExtendedTracking>) -> &'static str {
     if mode.0 { "extended" } else { "basic" }
 }
 
-// Провайдер активного окна (имя), если capability detection нашёл рабочий.
+// The name of the active-window provider, if capability detection found a working one.
 pub struct WindowTracking(pub Option<&'static str>);
 
 #[tauri::command]
@@ -51,10 +51,10 @@ fn get_window_tracking(state: tauri::State<'_, WindowTracking>) -> Option<&'stat
     state.0
 }
 
-// v0.9.35: применить сохранённые глобальные хоткеи без перезапуска.
-// Возвращает список комбинаций, которые не удалось зарегистрировать (заняты
-// системой или не разобрались) — фронт показывает их пользователю: молчаливо
-// не сработавший глобальный хоткей выглядит как поломка приложения.
+// Applies the saved global hotkeys without a restart. Returns the combinations
+// that could not be registered (taken by the system, or unparseable) — the
+// frontend shows them to the user, because a global hotkey that silently fails
+// looks like a broken application.
 #[tauri::command]
 async fn apply_global_hotkeys(
     app: tauri::AppHandle,
@@ -69,26 +69,26 @@ async fn apply_global_hotkeys(
 fn normalize_quick_mode(mode: &str) -> &'static str {
     match mode {
         "note" => "note",
-        // v0.9.26: заметка из буфера обмена. Отдельный режим, а не флаг у
-        // "note": окно должно открыться уже с текстом и не требовать вставки
-        // руками, но всё равно дать отредактировать и подтвердить.
+        // A note from the clipboard. A separate mode rather than a flag on
+        // "note": the window must open with the text already in it, requiring no
+        // manual paste, while still allowing an edit and a confirmation.
         "clipboard" => "clipboard",
-        // v0.9.33: правка закреплённой задачи/заметки. Не «создать», а
-        // «открыть уже существующее», поэтому отдельный режим, а не флаг.
+        // Editing the pinned task or note. Not "create" but "open something that
+        // already exists", hence a separate mode rather than a flag.
         "pinned" => "pinned",
         _ => "task",
     }
 }
 
-// v0.9.35: (пере)регистрация глобальных хоткеев по текущим настройкам.
+// (Re)registers the global hotkeys from the current settings.
 //
-// Вызывается при старте и после сохранения настроек, поэтому первым делом
-// снимает всё ранее зарегистрированное: иначе старая комбинация продолжила бы
-// работать до перезапуска, и пользователь получил бы две живые одновременно.
+// Called at startup and after the settings are saved, so it first unregisters
+// everything previously registered: otherwise an old combination would keep
+// working until a restart and the user would have two live at once.
 //
-// Каждая комбинация регистрируется отдельным вызовом, а не пачкой: занятая
-// системой комбинация роняет только себя, остальные три остаются рабочими.
-// Пачкой (`on_shortcuts`) одна ошибка отменила бы все.
+// Each combination is registered by its own call rather than in a batch: a
+// combination taken by the system then breaks only itself and the other three
+// keep working. In a batch (`on_shortcuts`) a single error would cancel them all.
 fn register_global_hotkeys(app: &tauri::AppHandle, global_keybinds: &str) -> Vec<String> {
     use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
@@ -112,17 +112,17 @@ fn register_global_hotkeys(app: &tauri::AppHandle, global_keybinds: &str) -> Vec
             }
         });
         if res.is_err() {
-            // Чаще всего — комбинация уже занята другим приложением или
-            // композитором. Не ошибка старта: сообщаем и живём дальше.
+            // Most often the combination is already taken by another application
+            // or by the compositor. Not a startup error: we report it and carry on.
             failed.push(combo);
         }
     }
     failed
 }
 
-// Единый путь открытия окна быстрого ввода: фиксируем режим, оповещаем окно
-// (если уже смонтировано) и показываем его. Используется и командой из фронта,
-// и глобальными хоткеями.
+// The single path for opening the quick-capture window: record the mode, notify
+// the window (if it is already mounted) and show it. Used both by the command
+// from the frontend and by the global hotkeys.
 fn show_quick_capture(app: &tauri::AppHandle, mode: &str) {
     let mode = normalize_quick_mode(mode);
     if let Some(state) = app.try_state::<QuickMode>() {
@@ -140,18 +140,18 @@ fn open_quick_capture(app: tauri::AppHandle, mode: String) {
     show_quick_capture(&app, &mode);
 }
 
-// Текст из буфера обмена для режима "clipboard" (v0.9.26). Пустой буфер и
-// буфер с картинкой/файлом — не ошибка, а пустая строка: фронт в этом случае
-// просто открывает обычную пустую заметку, а не показывает ошибку.
+// The clipboard text for "clipboard" mode. An empty clipboard, or one holding an
+// image or a file, is not an error but an empty string: the frontend then simply
+// opens an ordinary empty note instead of showing an error.
 #[tauri::command]
 fn read_clipboard_text(app: tauri::AppHandle) -> String {
     use tauri_plugin_clipboard_manager::ClipboardExt;
     app.clipboard().read_text().unwrap_or_default()
 }
 
-// Режим быстрого ввода из аргументов CLI (--quick-note / --quick-task / -q).
-// Общий парсер для первого запуска и для аргументов, пересланных вторым
-// экземпляром через single-instance (биндами WM на Wayland).
+// The quick-capture mode from the CLI arguments (--quick-note / --quick-task /
+// -q). A shared parser for the first launch and for arguments forwarded by a
+// second instance through single-instance (from WM binds on Wayland).
 fn quick_mode_from_args(args: &[String]) -> Option<&'static str> {
     if args.iter().any(|a| a == "--quick-pinned") {
         Some("pinned")
@@ -185,8 +185,9 @@ fn update_mode_checks(app: &tauri::AppHandle, mode: &commands::settings::WorkMod
     }
 }
 
-// Галочка на активном пункте паузы уведомлений. active_id — id пункта меню
-// ("quiet_off" | "quiet_30" | ... | "quiet_inf"); чужой id снимает все галочки.
+// The checkmark on the active notification-pause item. active_id is a menu item
+// id ("quiet_off" | "quiet_30" | ... | "quiet_inf"); an unrecognized id clears
+// every checkmark.
 fn update_quiet_checks(app: &tauri::AppHandle, active_id: &str) {
     if let Some(items) = app.try_state::<QuietItems>() {
         let items = items.lock().unwrap();
@@ -196,10 +197,10 @@ fn update_quiet_checks(app: &tauri::AppHandle, active_id: &str) {
     }
 }
 
-// Какой пункт меню паузы должен быть отмечен для данного quiet_until.
-// preset — сохранённый id пресета (quiet_preset в settings): по нему таймерная
-// пауза восстанавливает галочку после перезапуска. Легаси-значение без пресета
-// при активной таймерной паузе — "quiet_timed" (ни один пункт не отмечен).
+// Which pause menu item should be checked for a given quiet_until. preset is the
+// stored preset id (quiet_preset in settings), which lets a timed pause restore
+// its checkmark after a restart. A legacy value with no preset while a timed
+// pause is active yields "quiet_timed" (no item is checked).
 fn quiet_check_id(quiet_until: &str, preset: &str, now: chrono::DateTime<chrono::Utc>) -> &'static str {
     if quiet_until == commands::settings::QUIET_FOREVER {
         return "quiet_inf";
@@ -215,8 +216,8 @@ fn quiet_check_id(quiet_until: &str, preset: &str, now: chrono::DateTime<chrono:
     }
 }
 
-// Остаток активной таймерной паузы в минутах (округление вверх);
-// None — пауза не активна или бессрочная.
+// The remaining minutes of an active timed pause (rounded up); None when the
+// pause is inactive or indefinite.
 fn quiet_remaining_mins(quiet_until: &str, now: chrono::DateTime<chrono::Utc>) -> Option<i64> {
     if quiet_until == commands::settings::QUIET_FOREVER {
         return None;
@@ -241,13 +242,13 @@ fn quiet_base_label(id: &str) -> &'static str {
     }
 }
 
-// Подписи пунктов паузы: активный таймерный пресет показывает остаток
-// («1 час — осталось 42 мин»), остальные — базовую подпись.
-// Переподписывает пункты трея с фиксированным текстом под выбранный язык.
-// Подменю («Режим», «Пауза уведомлений», «Помодоро») переподписать нельзя —
-// Submenu не отдаёт set_text в этой версии Tauri, поэтому их названия
-// остаются на языке локали ОС; это записано в PLANS.md как известное
-// ограничение, а не забытый пропуск.
+// Labels for the pause items: the active timed preset shows what remains ("1
+// hour — 42 min left"), the rest show their base label.
+// Relabels the tray items with fixed text to the chosen language. The submenus
+// ("Mode", "Pause notifications", "Pomodoro") cannot be relabelled — Submenu does
+// not expose set_text in this version of Tauri, so their titles stay in the OS
+// locale's language. That is recorded in PLANS.md as a known limitation, not as
+// an oversight.
 fn relabel_tray(app: &tauri::AppHandle, lang: crate::i18n::Lang) {
     if let Some(items) = app.try_state::<LabeledItems>() {
         let items = items.lock().unwrap();
@@ -276,9 +277,9 @@ fn update_quiet_labels(app: &tauri::AppHandle, active_id: &str, remaining_mins: 
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // `ai-notes --status` — короткоживущий CLI для статус-баров (waybar):
-    // печатает JSON и выходит, не поднимая Tauri. Проверяется до всего
-    // остального, чтобы не задеть single-instance работающего приложения.
+    // `ai-notes --status` is a short-lived CLI for status bars (waybar): it prints
+    // JSON and exits without starting Tauri. Checked before anything else so it
+    // does not disturb the single-instance of a running application.
     if std::env::args().any(|a| a == "--status") {
         status::print_status();
         return;
@@ -290,9 +291,9 @@ pub fn run() {
         .unwrap()
         .block_on(async {
             let app = tauri::Builder::default()
-                // Регистрируется первым: второй запуск (напр. `ai-notes --quick-task`
-                // из бинда Hyprland) не стартует новый экземпляр, а пересылает
-                // аргументы сюда — открываем быстрый ввод или главное окно.
+                // Registered first: a second launch (say `ai-notes --quick-task`
+                // from a Hyprland bind) does not start a new instance but forwards
+                // its arguments here — we open quick capture or the main window.
                 .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
                     if let Some(mode) = quick_mode_from_args(&argv) {
                         show_quick_capture(app, mode);
@@ -434,16 +435,16 @@ pub fn run() {
                     ]
                 )
                 .setup(|app| {
-                    // Трей
+                    // Tray
                     let open = MenuItem::with_id(app, "open", "Открыть", true, None::<&str>)?;
-                    // Обычные пункты (не checkbox) — см. комментарий у ModeItems: активный
-                    // режим помечается префиксом "✓ " в тексте, выставляется update_mode_checks
-                    // после загрузки настроек.
+                    // Plain (non-checkbox) items — see the comment on ModeItems: the
+                    // active mode is marked with a "✓ " prefix in the text, applied by
+                    // update_mode_checks once the settings are loaded.
                     let mode_light = MenuItem::with_id(app, "mode_Light", "Light", true, None::<&str>)?;
                     let mode_focus = MenuItem::with_id(app, "mode_Focus", "Focus", true, None::<&str>)?;
                     let mode_study = MenuItem::with_id(app, "mode_Study", "Study", true, None::<&str>)?;
                     let mode_menu = Submenu::with_items(app, "Режим", true, &[&mode_light, &mode_focus, &mode_study])?;
-                    // Пауза уведомлений: галочка выставляется после загрузки настроек
+                    // Notification pause: the checkmark is applied after the settings load
                     let quiet_30 = CheckMenuItem::with_id(app, "quiet_30", quiet_base_label("quiet_30"), true, false, None::<&str>)?;
                     let quiet_60 = CheckMenuItem::with_id(app, "quiet_60", quiet_base_label("quiet_60"), true, false, None::<&str>)?;
                     let quiet_120 = CheckMenuItem::with_id(app, "quiet_120", quiet_base_label("quiet_120"), true, false, None::<&str>)?;
@@ -475,7 +476,7 @@ pub fn run() {
                         Arc::new(Mutex::new(vec![quiet_30, quiet_60, quiet_120, quiet_inf, quiet_off]));
                     app.manage(quiet_items);
 
-                    // Начальный режим окна быстрого ввода (по умолчанию — задача)
+                    // The quick-capture window's initial mode (a task by default)
                     let quick_mode: QuickMode = Arc::new(Mutex::new("task".to_string()));
                     app.manage(quick_mode);
 
@@ -513,15 +514,15 @@ pub fn run() {
                             id if id.starts_with("mode_") => {
                                 let mode = commands::settings::WorkMode::from_str(&id["mode_".len()..]);
                                 *app.state::<Arc<Mutex<commands::settings::WorkMode>>>().lock().unwrap() = mode.clone();
-                                // Обновить галочки в трее
+                                // Refresh the tray checkmarks
                                 update_mode_checks(app, &mode);
                                 let pool = app.state::<sqlx::SqlitePool>().inner().clone();
                                 tauri::async_runtime::spawn(async move {
                                     let _ = commands::settings::persist_work_mode(&pool, &mode).await;
                                 });
                             }
-                            // PomodoroCmdTx управляется позже в run() (после сборки app),
-                            // но к моменту клика по трею приложение уже запущено.
+                            // PomodoroCmdTx is managed later in run() (after the app is
+                            // built), but by the time the tray is clicked the app is running.
                             "pomo_pause" => {
                                 if let Some(tx) = app.try_state::<commands::pomodoro::PomodoroCmdTx>() {
                                     let _ = tx.0.send(notifier::pomodoro::PomodoroCmd::TogglePause);
@@ -535,7 +536,7 @@ pub fn run() {
                             _ => {}
                         })
                         .on_tray_icon_event(|tray, event| {
-                            // Клик по иконке — открыть окно
+                            // A click on the icon opens the window
                             if let TrayIconEvent::Click { button: MouseButton::Left, .. } = event {
                                 let app = tray.app_handle();
                                 if let Some(w) = app.get_webview_window("main") {
@@ -546,7 +547,7 @@ pub fn run() {
                         })
                         .build(app)?;
 
-                    // Скрывать главное окно вместо закрытия (чтобы трей работал)
+                    // Hide the main window instead of closing it (so the tray keeps working)
                     if let Some(main_win) = app.get_webview_window("main") {
                         let win = main_win.clone();
                         main_win.on_window_event(move |event| {
@@ -557,7 +558,7 @@ pub fn run() {
                         });
                     }
 
-                    // Скрывать окно быстрой задачи вместо закрытия (чтобы хоткеи работали)
+                    // Hide the quick-task window instead of closing it (so the hotkeys keep working)
                     if let Some(quick_win) = app.get_webview_window("quick-task") {
                         let win = quick_win.clone();
                         quick_win.on_window_event(move |event| {
@@ -568,7 +569,7 @@ pub fn run() {
                         });
                     }
 
-                    // Парсинг аргументов CLI для поддержки системных хоткеев на Wayland
+                    // Parsing the CLI arguments to support system hotkeys on Wayland
                     let args: Vec<String> = std::env::args().collect();
                     if let Some(mode) = quick_mode_from_args(&args) {
                         if let Some(main_win) = app.get_webview_window("main") {
@@ -577,10 +578,11 @@ pub fn run() {
                         show_quick_capture(&app.app_handle(), mode);
                     }
 
-                    // v0.9.35: регистрация глобальных хоткеев переехала ниже, за инициализацию
-                    // пула БД — комбинации стали переназначаемыми и читаются из
-                    // настроек, а на этой стадии setup пула ещё нет. Дефолты и
-                    // список действий — в commands/hotkeys.rs.
+                    // Global hotkey registration moved below, past the DB pool's
+                    // initialization: the combinations became rebindable and are read
+                    // from the settings, and at this point in setup there is no pool
+                    // yet. The defaults and the action list live in
+                    // commands/hotkeys.rs.
 
                     Ok(())
                 })
@@ -602,13 +604,13 @@ pub fn run() {
             let tracker = Arc::new(monitor::activity::ActivityTracker::new());
             app.manage(tracker.clone());
 
-            // Расширенный трекинг: системный idle/resume от компоситора.
-            // Не поддерживается (X11, старый компоситор) — базовый режим.
+            // Extended tracking: system idle/resume from the compositor. Where it
+            // is unsupported (X11, an older compositor) we use the basic mode.
             let extended = is_wayland() && monitor::wayland_idle::start(tracker.clone());
             app.manage(ExtendedTracking(extended));
             eprintln!("[monitor] режим трекинга: {}", if extended { "расширенный (ext-idle-notify)" } else { "базовый (окно в фокусе)" });
 
-            // Трекинг по приложениям: capability detection, нет провайдера — колонка app пустая.
+            // Per-app tracking via capability detection; with no provider the app column stays empty.
             let window_provider = monitor::window::detect_provider();
             app.manage(WindowTracking(window_provider.as_ref().map(|p| p.name())));
             eprintln!(
@@ -618,13 +620,13 @@ pub fn run() {
             let settings = commands::settings::load_settings_raw(&pool)
                 .await
                 .unwrap_or_default();
-            // Выставить правильные галочки режима и паузы в трее.
-            // Пресет паузы хранится отдельно (quiet_preset) — таймерная пауза
-            // после перезапуска восстанавливает и галочку, и подпись с остатком.
+            // Apply the correct mode and pause checkmarks in the tray. The pause
+            // preset is stored separately (quiet_preset), so after a restart a timed
+            // pause restores both its checkmark and the label showing what remains.
             update_mode_checks(&app.app_handle(), &settings.work_mode);
 
-            // Глобальные хоткеи — здесь, а не в setup: комбинации лежат в
-            // настройках, а пул появляется только сейчас (v0.9.35).
+            // The global hotkeys go here rather than in setup: the combinations live
+            // in the settings and the pool only appears at this point.
             let failed = register_global_hotkeys(&app.app_handle(), &settings.global_keybinds);
             if !failed.is_empty() {
                 eprintln!("[hotkeys] не удалось зарегистрировать: {}", failed.join(", "));
@@ -635,10 +637,10 @@ pub fn run() {
             let now = chrono::Utc::now();
             let quiet_id = quiet_check_id(&settings.quiet_until, &quiet_preset, now);
             update_quiet_checks(&app.app_handle(), quiet_id);
-            // v0.9.39: язык трея. Меню строится в setup, где пула ещё нет,
-            // поэтому там оно собирается по локали ОС; здесь настройки уже
-            // прочитаны — подписи перестраиваются под выбранный язык. Между
-            // этими двумя точками трей ещё не показан пользователю.
+            // The tray's language. The menu is built in setup, where there is no
+            // pool yet, so it is assembled from the OS locale there; by this point the
+            // settings have been read and the labels are rebuilt for the chosen
+            // language. Between those two points the tray is not yet visible to the user.
             let tray_lang = crate::i18n::lang_from_setting(&settings.language);
             relabel_tray(&app.app_handle(), tray_lang);
             update_quiet_labels(
@@ -648,9 +650,9 @@ pub fn run() {
                 tray_lang,
             );
 
-            // Вотчер паузы: когда quiet_until проходит, снимаем галочку с пресета
-            // и отмечаем «Выкл»; пока таймерная пауза активна — раз в минуту
-            // обновляем остаток в подписи пункта.
+            // The pause watcher: when quiet_until passes we clear the preset's
+            // checkmark and tick "Off"; while a timed pause is active we refresh the
+            // remaining time in the item's label once a minute.
             {
                 let app_handle = app.app_handle().clone();
                 let pool_watch = pool.clone();
@@ -675,8 +677,8 @@ pub fn run() {
                     }
                 });
             }
-            // Режим работы — живое разделяемое состояние: save_settings обновляет
-            // его сразу, без перезапуска приложения.
+            // The work mode is live shared state: save_settings updates it
+            // immediately, with no application restart.
             let work_mode = Arc::new(Mutex::new(settings.work_mode.clone()));
             app.manage(work_mode.clone());
             monitor::activity::start_activity_loop(
@@ -695,7 +697,7 @@ pub fn run() {
             let pomodoro_tx = notifier::pomodoro::start_pomodoro(app.app_handle().clone(), work_mode, pool.clone());
             app.manage(commands::pomodoro::PomodoroCmdTx(pomodoro_tx));
 
-            // Авто-бэкап: раз в 60с проверяем, не пора ли сделать копию
+            // Automatic backup: every 60s we check whether a copy is due
             {
                 let app_handle = app.app_handle().clone();
                 let pool_bk = pool.clone();
@@ -713,8 +715,8 @@ pub fn run() {
                 });
             }
 
-            // Авто-очистка истории (v0.9.19): раз в 60с проверяем суточный gate,
-            // сам перенос в Корзину — не чаще раза в 24ч (history_cleanup_due).
+            // Automatic history cleanup: every 60s we check the daily gate; the move
+            // to the Trash itself happens at most once every 24h (history_cleanup_due).
             {
                 let pool_cleanup = pool.clone();
                 tokio::spawn(async move {
@@ -747,18 +749,18 @@ mod tests {
         assert_eq!(quick_mode_from_args(&args(&["ai-notes", "--quick-task"])), Some("task"));
         assert_eq!(quick_mode_from_args(&args(&["ai-notes", "-q"])), Some("task"));
         assert_eq!(quick_mode_from_args(&args(&["ai-notes", "--quick-note"])), Some("note"));
-        // заметка приоритетнее, как и в старом коде запуска
+        // a note wins, as it did in the old startup code
         assert_eq!(quick_mode_from_args(&args(&["ai-notes", "--quick-task", "--quick-note"])), Some("note"));
         assert_eq!(quick_mode_from_args(&args(&["ai-notes"])), None);
-        // v0.9.26: буфер обмена — самый специфичный режим, приоритетнее обоих
+        // the clipboard is the most specific mode and outranks both
         assert_eq!(quick_mode_from_args(&args(&["ai-notes", "--quick-clip"])), Some("clipboard"));
         assert_eq!(
             quick_mode_from_args(&args(&["ai-notes", "--quick-note", "--quick-clip"])),
             Some("clipboard")
         );
-        // v0.9.33: правка закреплённого — единственный режим, который ничего не
-        // создаёт, поэтому стоит выше всех: если явно просили открыть слот,
-        // случайный второй флаг не должен подменить это созданием новой записи.
+        // Editing the pinned item is the only mode that creates nothing, so it
+        // outranks everything: if the slot was explicitly requested, a stray second
+        // flag must not replace that with creating a new record.
         assert_eq!(quick_mode_from_args(&args(&["ai-notes", "--quick-pinned"])), Some("pinned"));
         assert_eq!(
             quick_mode_from_args(&args(&["ai-notes", "--quick-clip", "--quick-pinned"])),
@@ -772,7 +774,7 @@ mod tests {
         assert_eq!(normalize_quick_mode("clipboard"), "clipboard");
         assert_eq!(normalize_quick_mode("pinned"), "pinned");
         assert_eq!(normalize_quick_mode("task"), "task");
-        // неизвестный режим — не паника и не пустая строка, а безопасный фолбэк
+        // an unknown mode yields neither a panic nor an empty string but a safe fallback
         assert_eq!(normalize_quick_mode("мусор"), "task");
         assert_eq!(normalize_quick_mode(""), "task");
     }
@@ -782,7 +784,7 @@ mod tests {
         assert_eq!(quiet_check_id(crate::commands::settings::QUIET_FOREVER, "", now()), "quiet_inf");
         assert_eq!(quiet_check_id("", "", now()), "quiet_off");
         assert_eq!(quiet_check_id("мусор", "quiet_30", now()), "quiet_off");
-        // истёкшая пауза — «Выкл», даже если пресет сохранён
+        // an expired pause means "Off", even if a preset is stored
         assert_eq!(quiet_check_id("2026-07-14T11:00:00+00:00", "quiet_60", now()), "quiet_off");
     }
 
@@ -792,7 +794,7 @@ mod tests {
         assert_eq!(quiet_check_id(until, "quiet_30", now()), "quiet_30");
         assert_eq!(quiet_check_id(until, "quiet_60", now()), "quiet_60");
         assert_eq!(quiet_check_id(until, "quiet_120", now()), "quiet_120");
-        // легаси-значение без пресета (или с мусором) — галочки нет
+        // a legacy value with no preset (or with junk) gets no checkmark
         assert_eq!(quiet_check_id(until, "", now()), "quiet_timed");
         assert_eq!(quiet_check_id(until, "quiet_off", now()), "quiet_timed");
     }
@@ -807,11 +809,11 @@ mod tests {
 
     #[test]
     fn remaining_mins_rounds_up() {
-        // ровно 30 минут — сразу после клика по пресету
+        // exactly 30 minutes: right after clicking the preset
         assert_eq!(quiet_remaining_mins("2026-07-14T12:30:00+00:00", now()), Some(30));
-        // 90 секунд — округляем вверх до 2 минут
+        // 90 seconds rounds up to 2 minutes
         assert_eq!(quiet_remaining_mins("2026-07-14T12:01:30+00:00", now()), Some(2));
-        // последняя минута
+        // the final minute
         assert_eq!(quiet_remaining_mins("2026-07-14T12:00:30+00:00", now()), Some(1));
     }
 }

@@ -1,7 +1,7 @@
 use serde::Serialize;
 
-// Единый тип ошибок приложения. Tauri-команды возвращают Result<T, AppError>;
-// на фронт ошибка уходит как строка (Serialize через Display).
+// The application's single error type. Tauri commands return Result<T, AppError>;
+// the error reaches the frontend as a string (Serialize via Display).
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
     #[error("Ошибка базы данных: {0}")]

@@ -1,4 +1,4 @@
--- Каждая строка activity_log теперь знает свою длительность:
--- интервал тика настраиваемый, поэтому "COUNT(*) * константа" больше не работает.
--- Legacy-строки писались с тиком 60 секунд — оставляем DEFAULT 60.
+-- Every activity_log row now carries its own duration: the tick interval is
+-- configurable, so "COUNT(*) * a constant" no longer works. Legacy rows were
+-- written with a 60-second tick, hence DEFAULT 60.
 ALTER TABLE activity_log ADD COLUMN duration_secs INTEGER NOT NULL DEFAULT 60;

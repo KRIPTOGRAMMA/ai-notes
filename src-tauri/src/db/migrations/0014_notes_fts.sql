@@ -1,5 +1,5 @@
--- FTS-поиск по заметкам — тот же паттерн, что tasks_fts после фикса 0004:
--- external content на notes.rowid, синхронизация триггерами.
+-- FTS search over notes, using the same pattern as tasks_fts after the 0004 fix:
+-- external content keyed on notes.rowid, kept in sync by triggers.
 CREATE VIRTUAL TABLE notes_fts USING fts5(
     title,
     content,
@@ -25,6 +25,6 @@ CREATE TRIGGER notes_ad AFTER DELETE ON notes BEGIN
     VALUES ('delete', old.rowid, old.title, old.content, old.tags);
 END;
 
--- Индексируем уже существующие заметки.
+-- Index the notes that already exist.
 INSERT INTO notes_fts(rowid, title, content, tags)
 SELECT rowid, title, content, tags FROM notes;

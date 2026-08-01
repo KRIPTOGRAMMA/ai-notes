@@ -1,14 +1,16 @@
-// Расширенный трекинг активности на Wayland через ext-idle-notify-v1.
+// Extended activity tracking on Wayland via ext-idle-notify-v1.
 //
-// Приложение не может (и не должно) видеть чужой ввод на Wayland, но компоситор
-// умеет сообщать факт простоя/возврата: «ввода не было N мс» (Idled) и «ввод
-// появился» (Resumed). Этого достаточно для мониторинга: нам нужен только факт
-// активности, не содержимое ввода. Никаких прав (группа input и т.п.) не нужно.
+// An application cannot (and should not) see other windows' input on Wayland,
+// but the compositor can report the fact of going idle and coming back: "no
+// input for N ms" (Idled) and "input appeared" (Resumed). That is enough for
+// monitoring: we only need the fact of activity, not the content of the input.
+// No privileges (the input group and the like) are required.
 //
-// Протокол даёт переходы, а не поток событий, поэтому активность между
-// Resumed и Idled восстанавливает тикер: пока компоситор не объявил простой,
-// раз в TICK_SECS дёргаем tracker.record_input(). Порог протокола (TIMEOUT_MS)
-// заметно меньше порога простоя приложения, так что точность достаточная.
+// The protocol gives transitions rather than a stream of events, so activity
+// between Resumed and Idled is reconstructed by a ticker: until the compositor
+// declares idleness we call tracker.record_input() once every TICK_SECS. The
+// protocol's threshold (TIMEOUT_MS) is far smaller than the application's idle
+// threshold, so the precision is sufficient.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -23,8 +25,9 @@ use wayland_protocols::ext::idle_notify::v1::client::{
 
 use super::activity::ActivityTracker;
 
-// «Не было ввода 30 с» → Idled. Порог простоя приложения (idle_threshold_secs,
-// дефолт 300 с) на порядок больше — переходы протокола для него не ошибка.
+// "No input for 30 s" -> Idled. The application's idle threshold
+// (idle_threshold_secs, 300 s by default) is an order of magnitude larger, so
+// the protocol's transitions are not an error as far as it is concerned.
 const TIMEOUT_MS: u32 = 30_000;
 const TICK_SECS: u64 = 15;
 
@@ -91,8 +94,8 @@ impl Dispatch<ExtIdleNotificationV1, ()> for IdleState {
     }
 }
 
-// Пытается запустить расширенный трекинг. true — компоситор поддерживает
-// протокол и трекинг работает; false — остаёмся на базовом (только окно).
+// Tries to start extended tracking. true means the compositor supports the
+// protocol and tracking works; false means we stay on the basic mode (window only).
 pub fn start(tracker: Arc<ActivityTracker>) -> bool {
     let conn = match Connection::connect_to_env() {
         Ok(c) => c,
@@ -110,7 +113,7 @@ pub fn start(tracker: Arc<ActivityTracker>) -> bool {
     };
     let notifier: ExtIdleNotifierV1 = match globals.bind(&qh, 1..=1, ()) {
         Ok(n) => n,
-        Err(_) => return false, // компоситор без ext-idle-notify-v1
+        Err(_) => return false, // a compositor without ext-idle-notify-v1
     };
     let _notification = notifier.get_idle_notification(TIMEOUT_MS, &seat, &qh, ());
 
@@ -120,13 +123,13 @@ pub fn start(tracker: Arc<ActivityTracker>) -> bool {
         tracker: tracker.clone(),
     };
 
-    // Поток событий Wayland: блокирующий диспатч, живёт всё время работы.
+    // The Wayland event loop: a blocking dispatch that lives for the whole run.
     std::thread::spawn(move || {
         while queue.blocking_dispatch(&mut state).is_ok() {}
     });
 
-    // Тикер: пока компоситор не объявил простой — пользователь активен
-    // (возможно, в другом приложении), поддерживаем last_input свежим.
+    // The ticker: until the compositor declares idleness the user is active
+    // (possibly in another application), so we keep last_input fresh.
     std::thread::spawn(move || loop {
         std::thread::sleep(std::time::Duration::from_secs(TICK_SECS));
         if system_active.load(Ordering::Relaxed) {

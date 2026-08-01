@@ -22,25 +22,25 @@
   let showGoalHistory = $state<Record<string, GoalSnapshot[]>>({});
   let goalHistoryLoading = $state<Record<string, boolean>>({});
 
-  // Список/История/Корзина — один взаимоисключающий переключатель (v0.9.22),
-  // раньше были двумя независимыми тоглами (можно было открыть оба сразу,
-  // визуально почти неотличимые друг от друга блоки под общим списком).
+  // List/History/Trash is a single mutually exclusive switch. These used to be two
+  // independent toggles, so both could be open at once as two nearly
+  // indistinguishable blocks under the shared list.
   let listSubView = $state<"active" | "history" | "trash">("active");
   let showCreateModal = $state(false);
   let editingTask: Task | null = $state(null);
   let historyDetailTask: Task | null = $state(null);
 
-  // Список/Доска (v0.9.20) — переключатель в page-head, было отдельной
-  // страницей Kanban.svelte, слито сюда, чтобы фильтры проекта/умного
-  // списка/мультивыбор были общими для обоих режимов просмотра.
+  // List/Board is a switch in the page head. This used to be a separate
+  // Kanban.svelte page and was merged here so the project filter, smart lists and
+  // multi-select are shared by both view modes.
   let viewMode = $state<"list" | "board">("list");
 
-  // Проекты: фильтр списка ("all" | "none" | id) и модал управления
+  // Projects: the list filter ("all" | "none" | id) and the management modal
   let projectFilter = $state<string>("all");
   let showProjects = $state(false);
   let newProjectName = $state("");
 
-  // Умные списки: модалка создания своего списка
+  // Smart lists: the modal for creating one of your own
   let showSmartListModal = $state(false);
   let newSmartListName = $state("");
   let newSmartListCategory = $state("");
@@ -81,7 +81,7 @@
     statusStore.load();
     smartListStore.load();
     pinnedStore.load();
-    // Капабилити-детект: при выключенном ИИ кнопка «Что сейчас?» просто скрыта
+    // Capability detection: with AI turned off the "What now?" button is simply hidden
     api.getSettings().then(s => {
       aiEnabled = s.ai_provider !== "none";
       autoExpandSubs = s.show_subtasks_expanded;
@@ -89,12 +89,13 @@
   });
 
   let aiEnabled = $state(false);
-  // v0.8.3: задачи с подзадачами развёрнуты по умолчанию (настройка «Внешний вид»)
+  // Tasks with subtasks are expanded by default (the "Appearance" setting)
   let autoExpandSubs = $state(true);
 
-  // Умные списки (v0.9.14): встроенные («Просроченные»/«На этой неделе») зависят
-  // от текущей даты, поэтому целиком на фронте, в БД не хранятся; свои —
-  // из smartListStore, предикат по category/priority/tag/наличию дедлайна.
+  // Smart lists: the built-in ones ("Overdue"/"This week") depend on the current
+  // date, so they live entirely on the frontend and are not stored in the DB;
+  // user-defined ones come from smartListStore, with a predicate over category,
+  // priority, tag and whether a deadline is set.
   type BuiltinSmartList = { id: string; name: string; test: (t: Task) => boolean };
   const BUILTIN_SMART_LISTS: BuiltinSmartList[] = $derived([
     {
@@ -144,10 +145,10 @@
       .filter(t => activeSmartListTest ? activeSmartListTest(t) : true)
   );
 
-  // Доска (v0.9.20): те же фильтры (проект/умный список), что и список, но
-  // на базе taskStore.tasks, не activeTasks — выполненные задачи (hidden=true,
-  // тот же флаг, что уводит их в Историю в режиме списка) должны остаться
-  // видимыми в своей колонке на доске, а не пропадать со всей доски.
+  // The board uses the same project and smart-list filters as the list, but over
+  // taskStore.tasks rather than activeTasks: completed tasks (hidden=true, the same
+  // flag that moves them into History in list mode) must stay visible in their own
+  // column rather than vanishing from the whole board.
   const boardTasks = $derived(
     taskStore.tasks
       .filter(t => t.status !== "Archived")
@@ -159,8 +160,9 @@
       .filter(t => activeSmartListTest ? activeSmartListTest(t) : true)
   );
 
-  // Мультивыбор не переживает смену видимого списка (фильтр/поиск/смена умного
-  // списка) — иначе массовое действие могло бы незаметно задеть скрытые строки.
+  // The multi-selection does not survive a change of the visible list (filter,
+  // search, switching smart lists), otherwise a bulk action could quietly affect
+  // rows that are no longer on screen.
   $effect(() => {
     const visible = new Set(filteredActive.map(t => t.id));
     if ([...selectedIds].some(id => !visible.has(id))) {
@@ -168,7 +170,8 @@
     }
   });
 
-  // Группировка «все проекты»: секция на проект (в порядке списка проектов) + «Без проекта».
+  // Grouping by "all projects": one section per project (in the projects' own
+  // order) plus "No project".
   const grouped = $derived.by(() => {
     if (projectFilter !== "all" || projectStore.projects.length === 0) return null;
     const groups: { id: string; name: string; done: number; total: number; tasks: Task[]; project: Project | null }[] = [];
@@ -185,7 +188,7 @@
     return groups.length > 0 ? groups : null;
   });
 
-  // Цель проекта: текст прогресса «done/target задач · done/target мин» и её статус
+  // A project's goal: the progress text "done/target tasks · done/target min" and its status
   function goalText(p: Project): string | null {
     if (p.goal_tasks == null && p.goal_mins == null) return null;
     const parts: string[] = [];
@@ -222,7 +225,7 @@
     newProjectName = "";
   }
 
-  // Расписание дня: сегодняшние тайм-блоки (назначаются в Календарь → Неделя)
+  // The day's schedule: today's time blocks (assigned in Calendar -> Week)
   const todayBlocks = $derived.by(() => {
     const today = new Date().toDateString();
     return taskStore.activeTasks
@@ -251,25 +254,24 @@
     api.getActiveSession().then(s => { trackingId = s?.task_id ?? null; }).catch(() => {});
   });
 
-  // Завершение по ✓ в строке. Трекинг надо остановить здесь явно: этот путь
-  // идёт мимо moveToStatus (там та же остановка на переходе из InProgress),
-  // и без неё таймер продолжал тикать по уже выполненной задаче.
+  // Completing via the row's ✓. Tracking must be stopped explicitly here: this path
+  // bypasses moveToStatus (which stops it the same way when leaving InProgress),
+  // and without that the timer kept ticking on an already-completed task.
   async function completeRow(task: Task) {
     if (trackingId === task.id) {
       await api.stopTaskTracking();
       trackingId = null;
     }
-    // Незаписанную правку чек-листа дописываем ДО завершения (v0.9.52):
-    // строка ниже выбрасывает кэш панели, и без flush правка ушла бы вместе
-    // с ним. Проверено: правка названия при выполнении «сразу» теряла не
-    // текст, а саму подзадачу — в БД оставался пустой список.
+    // An unsaved checklist edit is flushed BEFORE completing: the line below drops
+    // the panel's cache, and without the flush the edit would go with it. Verified:
+    // renaming while completing "immediately" lost not the text but the subtask
+    // itself — an empty list was left in the DB.
     await flushSubs(task);
     await taskStore.complete(task.id);
-    // Кэш панели обязан уйти: он живёт отдельно от стора, поэтому после
-    // сброса чеклиста (повторяющаяся задача уезжает на следующий прогон)
-    // на экране остаются отметки, которых в БД уже нет. Он же чинит гонку —
-    // отложенная запись, прилетев после сброса, не находит текста и не
-    // возвращает отметки обратно (v0.9.52).
+    // The panel's cache must go: it lives separately from the store, so after the
+    // checklist is reset (a recurring task moving to its next run) the screen would
+    // keep ticks that no longer exist in the DB. It also fixes a race — a deferred
+    // write arriving after the reset finds no text and does not restore the ticks.
     delete subsText[task.id];
     projectStore.load();
   }
@@ -285,17 +287,17 @@
     taskStore.load();
   }
 
-  // --- Доска (v0.9.20): колонка на каждый статус из statusStore, а не
-  // жёстко Todo/InProgress/Done — пользователь может добавлять свои. ---
+  // --- The board: one column per status from statusStore rather than a hardcoded
+  // Todo/InProgress/Done, since the user can add their own. ---
   function boardTasksFor(statusId: string): Task[] {
     return boardTasks
       .filter(t => t.status === statusId)
       .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
   }
 
-  // Drag-and-drop: карточка → колонка (не карточка → карточка, как ручная
-  // сортировка списка выше) — один dropzone на колонку, без ручного порядка
-  // внутри неё (сортируем по updated_at).
+  // Drag and drop: card to column (not card to card, as in the manual list sorting
+  // above) — one dropzone per column, with no manual ordering inside it (sorted by
+  // updated_at).
   let boardDragTaskId: string | null = $state(null);
   let boardDropTargetStatus: string | null = $state(null);
 
@@ -322,9 +324,9 @@
     await moveToStatus(task, statusId);
   }
 
-  // InProgress/Done — особые случаи с side-эффектами (тайм-трекинг,
-  // завершение), см. api.completeTask/startTaskTracking; остальные статусы
-  // (включая пользовательские) — обычный update_task.
+  // InProgress and Done are special cases with side effects (time tracking,
+  // completion) — see api.completeTask/startTaskTracking; every other status,
+  // including user-defined ones, is a plain update_task.
   async function moveToStatus(task: Task, statusId: string) {
     if (task.status === "InProgress" && statusId !== "InProgress" && trackingId === task.id) {
       await api.stopTaskTracking();
@@ -348,9 +350,9 @@
     showCreateModal = true;
   }
 
-  // "+ Колонка" прямо на доске — быстрое добавление своего статуса без
-  // перехода в Настройки (переименование/удаление остаются только там,
-  // см. Settings.svelte «Статусы задач»).
+  // "+ Column" right on the board: a quick way to add a status without going to
+  // Settings (renaming and deletion stay there only, see "Task statuses" in
+  // Settings.svelte).
   let showStatusQuickAdd = $state(false);
   let newBoardStatusName = $state("");
 
@@ -362,11 +364,11 @@
     showStatusQuickAdd = false;
   }
 
-  // Открытие задачи по сигналу извне (глобальный поиск Ctrl+K, попап дня в
-  // Дашборде/Календаре). Завершённая задача (hidden) — это история: открываем
-  // read-only TaskHistoryDetail, а не редактируемую TaskModal, иначе клик по
-  // выполненной задаче из попапа дня открывал бы её как активную для правки
-  // (дедлайн/повтор и т.п. уже не имеют смысла для того, что давно сделано).
+  // Opening a task on an external signal (global search via Ctrl+K, the day popup
+  // in the Dashboard or Calendar). A completed task (hidden) is history, so we open
+  // the read-only TaskHistoryDetail rather than the editable TaskModal: otherwise
+  // clicking a completed task in the day popup would open it as active for editing,
+  // and a deadline or recurrence no longer means anything for something long done.
   $effect(() => {
     const id = taskStore.focusTaskId;
     if (!id) return;
@@ -381,9 +383,9 @@
   async function handleCreate(data: CreateTaskPayload | UpdateTaskPayload) {
     const payload = data as CreateTaskPayload;
     const created = await taskStore.create(payload);
-    // Создание сразу в InProgress (например, через "+ колонка" на доске) —
-    // статус уже проставлен модалкой (initialStatus), но реальный
-    // трекинг-таймер запускается отдельным вызовом, как и везде в приложении.
+    // Creating straight into InProgress (via "+ column" on the board, for one): the
+    // status is already set by the modal (initialStatus), but the actual tracking
+    // timer is started by a separate call, as everywhere else in the app.
     if (created && payload.status === "InProgress") {
       await api.startTaskTracking(created.id);
       trackingId = created.id;
@@ -392,15 +394,15 @@
     return created;
   }
 
-  // --- Инлайн-композер: первая строка — название, Enter — перенос,
-  // Shift+Enter — строка-подзадача (☐), Ctrl+Enter — создать. ---
+  // --- The inline composer: the first line is the title, Enter inserts a line
+  // break, Shift+Enter adds a subtask line (☐), Ctrl+Enter creates the task. ---
   let composerText = $state("");
   let composerEl: HTMLTextAreaElement | undefined = $state();
   let composerBusy = $state(false);
   const composerRows = $derived(Math.min(6, composerText.split("\n").length));
 
-  // Естественный язык в названии (v0.9.17): !приоритет / @категория / #тег /
-  // относительные даты-время разбираются из первой строки живьём, по мере ввода.
+  // Natural language in the title: !priority / @category / #tag and relative
+  // dates and times are parsed live from the first line as it is typed.
   const composerDraft = $derived(parseComposer(composerText));
   const composerMeta = $derived(parseTaskText(composerDraft.title));
   const composerCategoryId = $derived(
@@ -427,7 +429,7 @@
       e.preventDefault();
       submitComposer();
     }
-    // обычный Enter — дефолтный перенос строки
+    // a plain Enter is the default line break
   }
 
   async function submitComposer() {
@@ -436,7 +438,7 @@
     const meta = parseTaskText(draft.title);
     composerBusy = true;
     try {
-      // Активный фильтр проекта — умный дефолт для новой задачи
+      // The active project filter is a sensible default for a new task
       const projectId = projectFilter !== "all" && projectFilter !== "none" ? projectFilter : null;
       const categoryId = meta.categoryQuery ? matchCategoryQuery(categoryStore.categories, meta.categoryQuery) : null;
       const task = await api.createTask({
@@ -444,7 +446,7 @@
         description: draft.description || null,
         status: "Todo",
         priority: meta.priority ?? "Medium",
-        category: categoryId ?? "Other", // фолбэк-категория: всегда существует (Work можно удалить)
+        category: categoryId ?? "Other", // the fallback category always exists (Work can be deleted)
         deadline: meta.deadline ? meta.deadline.toISOString() : null,
         tags: meta.tags,
         recurrence: "None",
@@ -487,13 +489,13 @@
     await api.aiSubtasks(id, title);
   }
 
-  // Добавить одну AI-подзадачу как чек-лист-пункт под родительскую задачу
+  // Add a single AI-suggested subtask as a checklist item under its parent task
   async function acceptSubtask(parentId: string, title: string) {
     await api.addSubtask(parentId, title);
     await taskStore.load();
   }
 
-  // Принять все предложенные подзадачи разом
+  // Accept every suggested subtask at once
   async function acceptAllSubtasks(parentId: string, items: string[]) {
     for (const title of items) {
       await api.addSubtask(parentId, title);
@@ -507,21 +509,21 @@
     await taskStore.load();
   }
 
-  // --- Чек-лист в панели строки (v0.8.3 → переписан на текст в v0.9.45).
-  // Разметка `[x] ` скрыта чекбоксом внутри строки, как в модалке и быстром
-  // слоте — требование «изменить везде так».
+  // --- The checklist in a row's panel. The `[x] ` markup is hidden behind a
+  // checkbox inside the line, as in the modal and the quick slot — the requirement
+  // was to change it the same way everywhere.
   //
-  // Запись здесь мгновенная (панель открывают, чтобы отметить и закрыть), но
-  // на каждую букву в БД писать нельзя, поэтому — пауза набора, как в слоте.
-  // Своя пауза на каждую задачу: развернуть можно несколько строк сразу.
+  // Writing here is immediate (the panel is opened to tick something and close),
+  // but writing to the DB on every keystroke is not an option, hence a typing pause
+  // as in the slot. Each task gets its own pause: several rows can be expanded at once.
   const SUBS_DEBOUNCE_MS = 600;
   let subsText = $state<Record<string, string>>({});
   let subsTimers: Record<string, ReturnType<typeof setTimeout>> = {};
   let subsBusy = $state<Record<string, boolean>>({});
 
-  // Текст панели ведём отдельно от store: пока пользователь печатает, store
-  // перечитывается (например, соседней задачей) и затирал бы правку.
-  // Инициализируем при разворачивании, а не в $derived.
+  // The panel's text is kept separately from the store: while the user types the
+  // store is re-read (by a neighbouring task, for instance) and would clobber the
+  // edit. It is initialized on expansion rather than in a $derived.
   function subsTextFor(task: Task): string {
     return subsText[task.id]
       ?? formatChecklist(task.subtasks.map(s => ({ title: s.title, done: s.done })));
@@ -532,9 +534,9 @@
     subsTimers[task.id] = setTimeout(() => flushSubs(task), SUBS_DEBOUNCE_MS);
   }
 
-  // Тот же позиционный diff, что в модалке и слоте: i-я строка правит i-ю
-  // подзадачу. Ошибку показываем баннером (v0.9.25) и оставляем текст как есть,
-  // чтобы правка не пропала молча.
+  // The same positional diff as in the modal and the slot: line i edits subtask i.
+  // An error is shown as a banner and the text is left as is, so the edit does not
+  // disappear silently.
   async function flushSubs(task: Task) {
     clearTimeout(subsTimers[task.id]);
     if (subsBusy[task.id]) return;
@@ -570,19 +572,19 @@
 
   let expanded = $state<Record<string, boolean>>({});
 
-  // Явный клик переопределяет авто-разворачивание; без клика — задачи с
-  // подзадачами открыты, если включена настройка show_subtasks_expanded.
+  // An explicit click overrides auto-expansion; without one, tasks with subtasks
+  // are open when the show_subtasks_expanded setting is on.
   function isExpanded(task: Task): boolean {
     return expanded[task.id] ?? (autoExpandSubs && task.subtasks.length > 0);
   }
 
-  // --- Ручная сортировка: drag строки в пределах своего списка (группы) ---
+  // --- Manual sorting: dragging a row within its own list (group) ---
   let dragTaskId: string | null = $state(null);
   let dropTargetId: string | null = $state(null);
 
-  // --- Мультивыбор (v0.9.15): Ctrl/Shift+клик по строке вместо открытия карточки.
-  // Ctrl — точечный тоггл, Shift — диапазон от последней выбранной строки в
-  // пределах текущего видимого списка (без учёта группировки — «плоский» порядок).
+  // --- Multi-select: Ctrl/Shift+click on a row instead of opening the card. Ctrl
+  // toggles one row, Shift selects a range from the last selected row within the
+  // currently visible list (ignoring grouping — a flat order).
   let selectedIds = $state<Set<string>>(new Set());
   let lastSelectedId: string | null = $state(null);
   let bulkBusy = $state(false);
@@ -705,7 +707,7 @@
     const ids = listForTask(target).map(t => t.id);
     const from = ids.indexOf(sourceId);
     const to = ids.indexOf(target.id);
-    if (from < 0 || to < 0) return; // перетаскивание между группами — не сортировка
+    if (from < 0 || to < 0) return; // dragging between groups is not sorting
     ids.splice(from, 1);
     ids.splice(to, 0, sourceId);
     await taskStore.reorder(ids);
@@ -744,7 +746,7 @@
     return null;
   }
 
-  // Компактный дедлайн: «сегодня 18:00», «завтра», «3 дн», «просрочено 2 дн»
+  // A compact deadline: "today 18:00", "tomorrow", "3 d", "2 d overdue"
   function deadlineInfo(iso: string): { label: string; overdue: boolean } {
     const d = new Date(iso);
     const now = new Date();
@@ -801,7 +803,7 @@
     };
   });
 
-  // «Что делать сейчас»: совет ИИ по текущему контексту (блоки, дедлайны, приоритеты)
+  // "What should I do now": AI advice from the current context (blocks, deadlines, priorities)
   let whatNow: string | null = $state(null);
   let whatNowPending = $state(false);
 
@@ -835,8 +837,8 @@
     ondrop={(e) => rowDrop(e, task)}
     ondragend={() => { dragTaskId = null; dropTargetId = null; }}
   >
-    <!-- Заблокированную задачу выполнить нельзя (v0.9.56). Бэкенд запрещает
-         это и сам, но disabled здесь — чтобы клик не приводил к ошибке. -->
+    <!-- A blocked task cannot be completed. The backend forbids it too, but
+         disabled here keeps a click from producing an error. -->
     <button
       class="task-check"
       onclick={() => completeRow(task)}
@@ -862,8 +864,8 @@
       {#if task.description}
         <div class="task-desc">{task.description}</div>
       {/if}
-      <!-- Причина блокировки текстом, а не только приглушением: иначе
-           непонятно, почему у задачи не нажимается галочка. -->
+      <!-- The reason is spelled out rather than only dimmed: otherwise it is
+           unclear why the task's checkmark will not click. -->
       {#if blocked}
         <div class="task-blocked-by">{t("Заблокирована: {tasks}", { tasks: blockerNames })}</div>
       {/if}
@@ -1157,11 +1159,11 @@
     <button class="btn-primary" onclick={() => { boardCreateStatus = "Todo"; showCreateModal = true; }}>{t("+ Новая")}</button>
   </div>
 
-  <!-- v0.9.25: ошибки стора наконец видны. Раньше taskStore.error только
-       выставлялся, но нигде не рендерился — упавшая операция выглядела как
-       «кнопка не работает», без единого признака, что что-то пошло не так
-       (ровно так выглядел баг с повтором в v0.9.24). Тот же инлайновый
-       .alert, что уже используется в Заметках и Настройках. -->
+  <!-- Store errors are finally visible. taskStore.error used to be set but never
+       rendered anywhere, so a failed operation looked like "the button does not
+       work", with no sign that anything had gone wrong (that is exactly how the
+       recurrence bug presented). This is the same inline .alert already used in
+       Notes and Settings. -->
   {#if taskStore.error}
     <div class="alert task-error" role="alert">
       <span>{taskStore.error}</span>
@@ -1485,8 +1487,8 @@
     margin: 0 auto;
   }
 
-  /* Доска (v0.9.20) шире списка — несколько колонок в ряд не помещаются
-     в узкий контейнер списка задач. */
+  /* The board is wider than the list: several columns in a row do not fit into
+     the narrow task-list container. */
   .page.board-mode {
     max-width: 1400px;
   }
@@ -1497,17 +1499,18 @@
     gap: 8px;
     margin-bottom: 14px;
     flex-wrap: wrap;
-    /* v0.9.40: кнопки окна плавают в правом верхнем углу — освобождаем под
-       них место, иначе поиск и фильтры оказываются под ними. Отступ здесь,
-       а не у .content: сужение всей колонки ломает вьюхи, считающие свою
-       ширину в пикселях (граф зажимает узлы в Math.min(width - 20)). */
+    /* The window buttons float in the top right corner, so we reserve room for
+       them or the search and filters end up underneath. The padding lives here
+       rather than on .content: narrowing the whole column breaks views that
+       compute their width in pixels (the graph clamps nodes with
+       Math.min(width - 20)). */
     padding-right: var(--wincontrols-w);
   }
 
   .count { font-size: 12px; }
 
-  /* .alert задаёт фон/цвет/паддинги глобально (app.css) — здесь только
-     раскладка под кнопку закрытия. */
+  /* .alert sets the background, colour and padding globally (app.css); only the
+     layout for the close button is here. */
   .task-error {
     display: flex;
     align-items: center;
@@ -1766,7 +1769,7 @@
     margin: 8px 0 0 0;
   }
 
-  /* --- Доска (v0.9.20) --- */
+  /* --- The board --- */
   .board {
     display: flex;
     gap: 12px;
@@ -1912,7 +1915,7 @@
     background: var(--bg-hover);
   }
 
-  /* Круглый чекбокс выполнения */
+  /* The round completion checkbox */
   .task-check {
     width: 16px;
     height: 16px;
@@ -1972,10 +1975,10 @@
     background: var(--prio, var(--prio-low));
   }
 
-  /* Заблокированная задача (v0.9.56): приглушена, но читаема — она остаётся
-     в списке, чтобы о ней не забыли. Приглушаем только содержимое строки,
-     а не саму строку: opacity на .task-row погасил бы и цветную полосу
-     приоритета слева, по которой список читается взглядом. */
+  /* A blocked task is dimmed but readable: it stays in the list so it is not
+     forgotten. Only the row's contents are dimmed, not the row itself — an
+     opacity on .task-row would also mute the coloured priority bar on the
+     left, which is what makes the list scannable. */
   .task-row.blocked .task-main,
   .task-row.blocked .task-meta { opacity: .55; }
   .task-row.blocked .task-check { cursor: not-allowed; }
@@ -2012,8 +2015,8 @@
   }
   .chip-sub:hover { background: var(--bg-hover); }
 
-  /* Задача С подзадачами визуально отличается от пустого «+» (v0.8.2):
-     акцентный чип с мини-прогрессом, зелёный — когда все выполнены. */
+  /* A task WITH subtasks looks different from an empty "+": an accent chip with
+     a mini progress bar, turning green once they are all done. */
   .chip-sub.has-subs {
     color: var(--accent);
     background: color-mix(in srgb, var(--accent) 12%, transparent);
@@ -2039,7 +2042,7 @@
     background: currentColor;
   }
 
-  /* Действия видны только при наведении на строку */
+  /* The actions are visible only on hovering the row */
   .task-actions {
     display: flex;
     gap: 1px;
@@ -2052,7 +2055,7 @@
     opacity: 1;
   }
 
-  /* Панель подзадач / ИИ-превью под строкой */
+  /* The subtasks panel / AI preview below the row */
   .task-sub-panel {
     list-style: none;
     padding: 6px 12px 8px 38px;
@@ -2077,17 +2080,17 @@
     font-size: 13px;
   }
 
-  /* Строки чек-листа переехали в ChecklistEditor (v0.9.45): зачёркивание
-     выполненного и стиль полей живут там же. .sub-line осталась — её
-     используют строки ИИ-предложений выше. */
+  /* The checklist rows moved into ChecklistEditor: striking through completed
+     items and the field styling live there now. .sub-line remains — it is used
+     by the AI suggestion rows above. */
 
   .history .task-row {
     opacity: 0.75;
   }
 
-  /* Корзина (v0.9.22) — тот же приглушённый ряд, что История, но с явным
-     красным акцентом на иконке, чтобы «выполнено» и «удалено» не путались
-     визуально (раньше оба использовали одинаковый зелёный .task-check.done). */
+  /* The Trash uses the same muted row as History but with an explicit red accent
+     on the icon, so "completed" and "deleted" are not confused visually (both
+     used to share the same green .task-check.done). */
   .trash .task-row {
     opacity: 0.75;
   }

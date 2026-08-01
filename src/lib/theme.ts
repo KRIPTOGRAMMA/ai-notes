@@ -1,6 +1,7 @@
-// Единый источник применения темы. Тема хранится в БД (AppSettings), но чтобы
-// главный экран не мигал до загрузки настроек, дублируем последнее применённое
-// значение в localStorage и применяем его синхронно на старте.
+// The single place a theme is applied from. The theme is stored in the DB
+// (AppSettings), but so the main screen does not flash before the settings load we
+// mirror the last applied value into localStorage and apply it synchronously at
+// startup.
 
 export type ThemeMode = "light" | "dark" | "system";
 
@@ -15,7 +16,7 @@ export interface ThemeColors {
 const LS_MODE = "theme_mode";
 const LS_COLORS = "theme_colors";
 
-// Осветление hex-цвета для --accent-hover (кастомный акцент не имеет своего hover).
+// Lightening a hex colour for --accent-hover (a custom accent has no hover of its own).
 function lighten(hex: string, amount = 0.15): string {
   const m = /^#?([0-9a-fA-F]{6})$/.exec(hex.trim());
   if (!m) return hex;
@@ -49,15 +50,15 @@ function applyColors(colors: Partial<ThemeColors>) {
   } else {
     root.style.removeProperty("--accent-hover");
   }
-  // Второй акцент — пусто = равен первому (градиент на .btn-primary вырождается в сплошной цвет).
+  // The second accent: empty means equal to the first (the .btn-primary gradient degenerates into a solid colour).
   set("--accent-secondary", colors.color_accent_secondary?.trim() ? colors.color_accent_secondary : colors.color_accent);
   set("--bg-primary", colors.color_bg);
   set("--text-primary", colors.color_text);
   set("--border", colors.color_border);
 }
 
-// Применяет тему и кеширует её в localStorage. Для system подписывается на смену
-// системной темы (переустанавливая слушатель, чтобы не копить дубликаты).
+// Applies the theme and caches it in localStorage. For "system" it subscribes to
+// system theme changes (reinstalling the listener so duplicates do not accumulate).
 export function applyTheme(mode: ThemeMode, colors: Partial<ThemeColors>) {
   currentMode = mode;
   applyDarkClass(mode);
@@ -78,11 +79,11 @@ export function applyTheme(mode: ThemeMode, colors: Partial<ThemeColors>) {
     localStorage.setItem(LS_MODE, mode);
     localStorage.setItem(LS_COLORS, JSON.stringify(colors ?? {}));
   } catch {
-    // приватный режим / недоступный localStorage — не критично
+    // private mode or an unavailable localStorage — not critical
   }
 }
 
-// Синхронное применение из кеша до загрузки настроек из БД (анти-мигание).
+// A synchronous application from the cache before the settings load from the DB (anti-flash).
 export function applyCachedTheme() {
   try {
     const mode = (localStorage.getItem(LS_MODE) as ThemeMode | null) ?? "system";

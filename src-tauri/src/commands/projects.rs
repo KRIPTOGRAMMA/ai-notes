@@ -1,11 +1,12 @@
-// Проекты (v0.5 фаза 2): группировка задач с прогрессом done/total.
-// Прогресс считается по completed_at (выполненные уходят в историю с hidden=1,
-// но у проекта они остаются в счётчике).
+// Projects: grouping tasks with done/total progress. Progress is counted by
+// completed_at (completed tasks move into history with hidden=1 but stay in the
+// project's counter).
 //
-// Цели (v0.5.5): goal_tasks и/или goal_mins за goal_period (week/month).
-// Прогресс за текущий период: задачи по completed_at, минуты — по тайм-блокам,
-// которые уже начались (scheduled_at в периоде и <= now). Границы периода —
-// локальные (понедельник 00:00 / первое число 00:00), в БД сравниваем в UTC.
+// Goals: goal_tasks and/or goal_mins per goal_period (week/month). Progress for
+// the current period counts tasks by completed_at and minutes by time blocks
+// that have already started (scheduled_at within the period and <= now). Period
+// boundaries are local (Monday 00:00 / the 1st at 00:00); the DB comparison is
+// done in UTC.
 
 use chrono::{DateTime, Datelike, Utc};
 use serde::{Deserialize, Serialize};
@@ -30,7 +31,7 @@ pub struct Project {
     pub id: String,
     pub name: String,
     pub color: String,
-    pub target_date: Option<String>, // RFC3339 или NULL
+    pub target_date: Option<String>, // RFC3339 or NULL
     pub archived: bool,
     pub created_at: String,
     pub task_total: i64,
@@ -41,7 +42,7 @@ pub struct Project {
     pub goal_done_tasks: i64,
     pub goal_done_mins: i64,
     #[serde(skip)]
-    pub notified_goal: String, // ключ периода последнего пуша о цели
+    pub notified_goal: String, // the period key of the last goal push
 }
 
 #[derive(Debug, Deserialize)]
@@ -57,17 +58,17 @@ pub struct CreateProject {
 pub struct UpdateProject {
     pub name: Option<String>,
     pub color: Option<String>,
-    // Как deadline у задач: пустая строка = убрать дату, отсутствие = не менять
+    // Like a task's deadline: an empty string clears the date, absence leaves it alone
     pub target_date: Option<String>,
     pub archived: Option<bool>,
-    // Цели: 0 или меньше = снять цель, отсутствие = не менять
+    // Goals: zero or less clears the goal, absence leaves it alone
     pub goal_tasks: Option<i64>,
     pub goal_mins: Option<i64>,
     pub goal_period: Option<String>,
 }
 
-// Начало текущего периода в локальном времени, возвращённое как UTC RFC3339
-// (для сравнения со строками в БД) — формат совпадает с Utc::now().to_rfc3339().
+// The start of the current period in local time, returned as UTC RFC3339 for
+// comparison with DB strings — the format matches Utc::now().to_rfc3339().
 pub fn period_start(now: DateTime<Utc>, period: &str) -> DateTime<Utc> {
     let local = now.with_timezone(&chrono::Local);
     let date = local.date_naive();
@@ -85,8 +86,8 @@ pub fn period_start(now: DateTime<Utc>, period: &str) -> DateTime<Utc> {
         .unwrap_or(now)
 }
 
-// Ключ периода для notified_goal: локальная дата его начала — без edge-кейсов
-// ISO-недель на границе года.
+// The period key for notified_goal: the local date of its start, avoiding the
+// ISO-week edge cases around a year boundary.
 pub fn period_key(now: DateTime<Utc>, period: &str) -> String {
     period_start(now, period)
         .with_timezone(&chrono::Local)
@@ -107,7 +108,7 @@ pub async fn get_projects_at(pool: &SqlitePool, now: DateTime<Utc>) -> AppResult
     let week = period_start(now, "week").to_rfc3339();
     let month = period_start(now, "month").to_rfc3339();
     let now_str = now.to_rfc3339();
-    // Начало периода зависит от goal_period проекта — выбираем через CASE.
+    // The period start depends on the project's goal_period — selected via CASE.
     let rows = sqlx::query(
         "SELECT p.id, p.name, p.color, p.target_date, p.archived, p.created_at,
                 p.goal_tasks, p.goal_mins, p.goal_period, p.notified_goal,
@@ -234,7 +235,7 @@ pub async fn update_project_impl(pool: &SqlitePool, id: String, patch: UpdatePro
         sqlx::query("UPDATE projects SET archived = ? WHERE id = ?")
             .bind(archived).bind(&id).execute(pool).await?;
     }
-    // Изменение цели перезаряжает пуш о её выполнении в текущем периоде
+    // Changing a goal re-arms the push about reaching it in the current period
     let mut goal_changed = false;
     if let Some(n) = patch.goal_tasks {
         sqlx::query("UPDATE projects SET goal_tasks = ? WHERE id = ?")
@@ -296,7 +297,7 @@ pub async fn delete_project(pool: State<'_, SqlitePool>, id: String) -> AppResul
 }
 
 pub async fn delete_project_impl(pool: &SqlitePool, id: String) -> AppResult<()> {
-    // Задачи и заметки не удаляем — только отвязываем (FK не enforced)
+    // Tasks and notes are not deleted, only unlinked (FKs are not enforced)
     sqlx::query("UPDATE tasks SET project_id = NULL WHERE project_id = ?")
         .bind(&id).execute(pool).await?;
     sqlx::query("UPDATE notes SET project_id = NULL WHERE project_id = ?")
@@ -343,8 +344,8 @@ mod tests {
         let pool = test_pool().await;
         let p = create(&pool, "Ремонт").await;
         insert_task(&pool, Some(&p.id), false).await;
-        insert_task(&pool, Some(&p.id), true).await; // выполненная (hidden) — в счётчике
-        insert_task(&pool, None, true).await; // без проекта — не считается
+        insert_task(&pool, Some(&p.id), true).await; // completed (hidden) — still in the counter
+        insert_task(&pool, None, true).await; // no project, so not counted
 
         let projects = get_projects_impl(&pool).await.unwrap();
         assert_eq!(projects.len(), 1);
@@ -372,7 +373,7 @@ mod tests {
         assert_eq!(got.target_date.as_deref(), Some("2026-12-31T00:00:00+00:00"));
         assert!(got.archived);
 
-        // пустая строка снимает дату
+        // an empty string clears the date
         update_project_impl(&pool, p.id.clone(), UpdateProject {
             target_date: Some(String::new()), ..Default::default()
         })
@@ -380,7 +381,7 @@ mod tests {
         .unwrap();
         assert_eq!(get_projects_impl(&pool).await.unwrap()[0].target_date, None);
 
-        // пустое имя — ошибка
+        // an empty name is an error
         assert!(update_project_impl(&pool, p.id, UpdateProject {
             name: Some("  ".into()), ..Default::default()
         })
@@ -416,10 +417,10 @@ mod tests {
             }
         };
 
-        // выполнена только что — в периоде; выполнена 60 дней назад — нет
+        // completed just now falls inside the period; 60 days ago does not
         insert(Some((now - chrono::Duration::minutes(1)).to_rfc3339()), None, None).await;
         insert(Some((now - chrono::Duration::days(60)).to_rfc3339()), None, None).await;
-        // две задачи для session-based goal_done_mins: одна с закрытой сессией, другая с открытой
+        // two tasks for session-based goal_done_mins: one with a closed session, one open
         let task_a = uuid::Uuid::new_v4().to_string();
         let task_b = uuid::Uuid::new_v4().to_string();
         sqlx::query("INSERT INTO tasks (id, title, status, priority, category, recurrence, tags, hidden, created_at, updated_at, project_id)
@@ -430,13 +431,13 @@ mod tests {
                      VALUES (?, 'B', 'Todo', ?, ?, ?)")
             .bind(&task_b).bind(now.to_rfc3339()).bind(now.to_rfc3339()).bind(&p.id)
             .execute(&pool).await.unwrap();
-        // сессия 45 мин на задачу A (закрытая, час назад)
+        // a 45-minute session on task A (closed, an hour ago)
         sqlx::query("INSERT INTO task_sessions (id, task_id, started_at, ended_at) VALUES (?, ?, ?, ?)")
             .bind(uuid::Uuid::new_v4().to_string()).bind(&task_a)
             .bind((now - chrono::Duration::hours(1)).to_rfc3339())
             .bind((now - chrono::Duration::minutes(15)).to_rfc3339())
             .execute(&pool).await.unwrap();
-        // сессия на задачу B — началась 30 мин назад, не закрыта (открытая, считается до now)
+        // a session on task B started 30 minutes ago and is still open (counted up to now)
         sqlx::query("INSERT INTO task_sessions (id, task_id, started_at, ended_at) VALUES (?, ?, ?, NULL)")
             .bind(uuid::Uuid::new_v4().to_string()).bind(&task_b)
             .bind((now - chrono::Duration::minutes(30)).to_rfc3339())
@@ -446,11 +447,11 @@ mod tests {
         assert_eq!(got.goal_tasks, Some(2));
         assert_eq!(got.goal_mins, Some(120));
         assert_eq!(got.goal_done_tasks, 1);
-        // 45 (закрытая) + ~30 (открытая) = ~75 минут
+        // 45 (closed) + ~30 (open) = ~75 minutes
         assert!(got.goal_done_mins >= 73 && got.goal_done_mins <= 77, "got {}", got.goal_done_mins);
         assert_eq!(got.task_total, 4);
 
-        // goal_tasks: 0 снимает цель
+        // goal_tasks: 0 clears the goal
         update_project_impl(&pool, p.id.clone(), UpdateProject {
             goal_tasks: Some(0), ..Default::default()
         })
@@ -473,6 +474,6 @@ mod tests {
         assert_eq!(orphans, 0);
         let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tasks")
             .fetch_one(&pool).await.unwrap();
-        assert_eq!(total, 1); // задача жива, просто без проекта
+        assert_eq!(total, 1); // the task is alive, just without a project
     }
 }

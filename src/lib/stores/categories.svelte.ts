@@ -17,10 +17,10 @@ export const categoryStore = {
   get error() { return error; },
   clearError() { error = null; },
 
-  // Отображение по id с фолбэком на сам id (задачи со старой/чужой категорией).
-  // Посевные категории переводятся (v0.9.47) — их имена написали мы миграцией,
-  // и это такая же часть интерфейса, как надписи на кнопках. Пользовательские
-  // и переименованные отдаются как есть; решает seededName по id.
+  // Display by id, falling back to the id itself (tasks carrying an old or foreign
+  // category). Seeded categories are translated — we wrote their names in a
+  // migration and they are as much part of the interface as the labels on buttons.
+  // User-defined and renamed ones are returned as is; seededName decides by id.
   name(id: string): string {
     const c = categories.find(c => c.id === id);
     if (!c) return id;

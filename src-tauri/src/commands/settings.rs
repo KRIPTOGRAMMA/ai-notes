@@ -37,22 +37,22 @@ pub struct AppSettings {
     pub openai_model: String,
     pub anthropic_key: String,
     pub anthropic_model: String,
-    pub idle_threshold_secs: u64,  // порог простоя; применяется после перезапуска
-    pub log_interval_secs: u64,    // интервал тика activity-loop
+    pub idle_threshold_secs: u64,  // the idle threshold; applied after a restart
+    pub log_interval_secs: u64,    // the tick interval of the activity loop
     pub work_mode: WorkMode,   // Light | Study | Focus
     pub onboarding_complete: bool,
-    pub deadline_warn_hours: u64,    // за сколько часов до дедлайна первое уведомление
-    pub deadline_warn_minutes: u64,  // за сколько минут до дедлайна второе уведомление
-    pub idle_notify_min_mins: u64,   // минимальный простой (минуты) для notify_return
-    pub pomodoro_work_mins: u64,     // длина рабочего блока помодоро
-    pub pomodoro_break_mins: u64,    // длина перерыва помодоро
-    pub nudge_after_mins: u64,       // напоминание о перерыве после N мин непрерывной работы (0 — выкл)
+    pub deadline_warn_hours: u64,    // how many hours before the deadline the first notification fires
+    pub deadline_warn_minutes: u64,  // how many minutes before the deadline the second notification fires
+    pub idle_notify_min_mins: u64,   // the minimum idle time in minutes for notify_return
+    pub pomodoro_work_mins: u64,     // the length of a pomodoro work block
+    pub pomodoro_break_mins: u64,    // the length of a pomodoro break
+    pub nudge_after_mins: u64,       // a break reminder after N minutes of continuous work (0 = off)
     #[serde(default)]
     pub theme_mode: String,          // "light" | "dark" | "system"
     #[serde(default)]
-    pub color_accent: String,        // оверрайды цветов; пусто = дефолт из CSS
+    pub color_accent: String,        // colour overrides; empty means the CSS default
     #[serde(default)]
-    pub color_accent_secondary: String, // второй акцент (градиент на .btn-primary); пусто = равен color_accent
+    pub color_accent_secondary: String, // the second accent (the .btn-primary gradient); empty means equal to color_accent
     #[serde(default)]
     pub color_bg: String,
     #[serde(default)]
@@ -60,55 +60,57 @@ pub struct AppSettings {
     #[serde(default)]
     pub color_border: String,
     #[serde(default)]
-    pub quiet_until: String,         // пауза уведомлений: RFC3339; пусто = выкл; QUIET_FOREVER = бессрочно
+    pub quiet_until: String,         // notification pause: RFC3339; empty means off; QUIET_FOREVER means indefinite
     #[serde(default = "default_true")]
-    pub context_notifications: bool, // контекстные триггеры (просрочки, возврат с InProgress, пропуски дней)
+    pub context_notifications: bool, // contextual triggers (overdue items, returning from InProgress, skipped days)
     #[serde(default)]
-    pub ai_fallback: bool,           // автопереключение ИИ-провайдера при ошибке/недоступности
+    pub ai_fallback: bool,           // automatic AI provider switching on error or unavailability
     #[serde(default)]
-    pub openai_in_keyring: bool,     // runtime-only: ключ хранится в keyring
+    pub openai_in_keyring: bool,     // runtime-only: the key lives in the keyring
     #[serde(default)]
-    pub anthropic_in_keyring: bool,  // runtime-only: ключ хранится в keyring
+    pub anthropic_in_keyring: bool,  // runtime-only: the key lives in the keyring
     #[serde(default)]
-    pub app_category_rules: String,  // JSON [{pattern, category}] — классы окон → категории
+    pub app_category_rules: String,  // JSON [{pattern, category}] — window classes to categories
     #[serde(default)]
-    pub app_limits: String,          // JSON [{category, daily_mins}] — 0/отсутствие = без лимита
+    pub app_limits: String,          // JSON [{category, daily_mins}] — 0 or absence means no limit
     #[serde(default)]
-    pub auto_backup_dir: String,     // пусто = авто-бэкап выключен
+    pub auto_backup_dir: String,     // empty means automatic backup is off
     #[serde(default = "default_seven")]
-    pub auto_backup_keep: u64,       // сколько копий хранить
+    pub auto_backup_keep: u64,       // how many copies to keep
     #[serde(default)]
-    pub morning_digest_time: String, // "HH:MM", пусто = выкл
+    pub morning_digest_time: String, // "HH:MM", empty means off
     #[serde(default = "default_true")]
-    pub show_subtasks_expanded: bool, // v0.8.3: подзадачи в списке видны без клика
+    pub show_subtasks_expanded: bool, // subtasks visible in the list without a click
     #[serde(default)]
-    pub keybinds: String,             // v0.8.9: JSON {action_id: combo}; отсутствие ключа = дефолт действия
-    // v0.9.35: то же самое для ГЛОБАЛЬНЫХ хоткеев быстрого ввода. Отдельным
-    // ключом, а не вместе с keybinds: у них разный механизм (регистрация в ОС
-    // против обработчика в webview) и разная цена ошибки — глобальная
-    // комбинация может оказаться занятой системой, локальная нет.
+    pub keybinds: String,             // JSON {action_id: combo}; a missing key means the action's default
+    // The same for GLOBAL quick-capture hotkeys. Kept under a separate key
+    // rather than alongside keybinds: they use a different mechanism (OS-level
+    // registration versus a webview handler) and carry a different cost of
+    // failure — a global combination may turn out to be taken by the system,
+    // a local one cannot.
     #[serde(default)]
     pub global_keybinds: String,
     #[serde(default = "default_true")]
-    pub focus_mode_auto: bool,        // v0.9.12: авто-пауза уведомлений на время помодоро-работы/тайм-блока
-    // v0.9.31: разбивка браузерного времени по сайтам. ВЫКЛ по умолчанию —
-    // требует разбора заголовков окон, а это вопрос приватности; включается
-    // только явно. Сам заголовок в БД не попадает ни при каких настройках,
-    // сохраняется лишь извлечённый из него домен (см. monitor/domain.rs).
+    pub focus_mode_auto: bool,        // automatically pause notifications during pomodoro work or a time block
+    // Breaking browser time down by site. OFF by default: it requires parsing
+    // window titles, which is a privacy matter, so it is only enabled
+    // explicitly. The title itself never reaches the DB under any setting —
+    // only the domain extracted from it is stored (see monitor/domain.rs).
     pub track_domains: bool,
-    // v0.9.32: язык интерфейса ("ru" | "en"). Пустая строка — язык не выбран
-    // явно, фронт определит по системной локали. Пустой дефолт, а не "ru":
-    // иначе у нероссийского пользователя при первом запуске был бы русский.
+    // Interface language ("ru" | "en"). An empty string means no explicit
+    // choice and the frontend falls back to the system locale. The default is
+    // empty rather than "ru", or a non-Russian user would get Russian on first
+    // launch.
     pub language: String,
     #[serde(default)]
-    pub history_cleanup_months: u64,  // v0.9.19: выполненные старше N мес. → авто-Корзина; 0 — выкл
+    pub history_cleanup_months: u64,  // completed items older than N months go to the Trash automatically; 0 = off
 }
 
 fn default_seven() -> u64 { 7 }
 
 fn default_true() -> bool { true }
 
-// Сентинел «бессрочной» паузы уведомлений.
+// The sentinel for an indefinite notification pause.
 pub const QUIET_FOREVER: &str = "9999-12-31T00:00:00+00:00";
 
 impl Default for AppSettings {
@@ -156,9 +158,9 @@ impl Default for AppSettings {
     }
 }
 
-// API-ключи храним в системном keyring (Secret Service / Windows Credential
-// Manager), а не в SQLite открытым текстом. Если keyring недоступен
-// (нет демона) — падаем обратно на таблицу settings.
+// API keys live in the system keyring (Secret Service / Windows Credential
+// Manager) rather than in SQLite as plain text. If the keyring is unavailable
+// (no daemon), we fall back to the settings table.
 fn keyring_set(name: &str, value: &str) -> Result<(), keyring::Error> {
     let entry = keyring::Entry::new("ai-notes", name)?;
     if value.is_empty() {
@@ -185,14 +187,14 @@ pub(crate) async fn get_setting(pool: &SqlitePool, key: &str) -> Option<String> 
         .map(|r| r.get("value"))
 }
 
-// Единая точка чтения числовой настройки: используется фоновыми циклами
-// (scheduler / pomodoro / activity), чтобы не плодить копии одного и того же
-// запроса. Отсутствие ключа или мусор в значении → default.
+// The single place a numeric setting is read from, used by the background loops
+// (scheduler / pomodoro / activity) so copies of the same query do not multiply.
+// A missing key or junk in the value yields the default.
 pub async fn get_u64_setting(pool: &SqlitePool, key: &str, default: u64) -> u64 {
     get_setting(pool, key).await.and_then(|v| v.parse().ok()).unwrap_or(default)
 }
 
-// Единая точка чтения булевой настройки (тем же паттерном, что get_u64_setting).
+// The single place a boolean setting is read from (same pattern as get_u64_setting).
 pub async fn get_bool_setting(pool: &SqlitePool, key: &str, default: bool) -> bool {
     get_setting(pool, key).await.map(|v| v != "false").unwrap_or(default)
 }
@@ -206,18 +208,18 @@ pub(crate) async fn set_setting(pool: &SqlitePool, key: &str, value: &str) -> Ap
     Ok(())
 }
 
-// Для переключения режима из трея: пишем в БД мимо полного save_settings
+// For switching the mode from the tray: writes to the DB bypassing the full save_settings
 pub async fn persist_work_mode(pool: &SqlitePool, mode: &WorkMode) -> AppResult<()> {
     set_setting(pool, "work_mode", mode.as_str()).await
 }
 
-// Для паузы уведомлений из трея: пустая строка = пауза снята.
+// For pausing notifications from the tray: an empty string means the pause is lifted.
 pub async fn persist_quiet_until(pool: &SqlitePool, value: &str) -> AppResult<()> {
     set_setting(pool, "quiet_until", value).await
 }
 
-// Какой пресет паузы выбран (id пункта трея: quiet_30/quiet_60/...) — чтобы
-// после перезапуска восстановить галочку таймерной паузы в трее.
+// Which pause preset is selected (the tray item id: quiet_30/quiet_60/...), so
+// the tray's timed-pause checkmark can be restored after a restart.
 pub async fn persist_quiet_preset(pool: &SqlitePool, id: &str) -> AppResult<()> {
     set_setting(pool, "quiet_preset", id).await
 }
@@ -268,7 +270,7 @@ pub async fn load_settings_raw(pool: &SqlitePool) -> AppResult<AppSettings> {
     s.track_domains = get_bool_setting(pool, "track_domains", false).await;
     s.language = get_setting(pool, "language").await.unwrap_or_default();
     s.history_cleanup_months = get_u64_setting(pool, "history_cleanup_months", 0).await;
-    // Ключи: сначала keyring, затем legacy-значение из БД
+    // Keys: the keyring first, then the legacy value from the DB
     let openai_from_keyring = keyring_get("openai_key");
     let anthropic_from_keyring = keyring_get("anthropic_key");
     s.openai_in_keyring = openai_from_keyring.is_some();
@@ -297,7 +299,7 @@ pub async fn save_settings(
     set_setting(pool.inner(), "ai_provider", &settings.ai_provider).await?;
     set_setting(pool.inner(), "openai_model", &settings.openai_model).await?;
     set_setting(pool.inner(), "anthropic_model", &settings.anthropic_model).await?;
-    // Минимумы: не даём выставить значения, ломающие трекинг
+    // Minimums: values that would break tracking cannot be set
     set_setting(pool.inner(), "idle_threshold_secs", &settings.idle_threshold_secs.max(60).to_string()).await?;
     set_setting(pool.inner(), "log_interval_secs", &settings.log_interval_secs.clamp(10, 600).to_string()).await?;
     set_setting(pool.inner(), "work_mode", settings.work_mode.as_str()).await?;
@@ -307,9 +309,9 @@ pub async fn save_settings(
     set_setting(pool.inner(), "idle_notify_min_mins", &settings.idle_notify_min_mins.max(1).to_string()).await?;
     set_setting(pool.inner(), "pomodoro_work_mins", &settings.pomodoro_work_mins.clamp(1, 120).to_string()).await?;
     set_setting(pool.inner(), "pomodoro_break_mins", &settings.pomodoro_break_mins.clamp(1, 60).to_string()).await?;
-    // 0 = выключено; иначе минимум 20 минут, чтобы не спамить
+    // 0 means off; otherwise at least 20 minutes so it does not spam
     set_setting(pool.inner(), "nudge_after_mins", &(if settings.nudge_after_mins == 0 { 0 } else { settings.nudge_after_mins.max(20) }).to_string()).await?;
-    // Тема: режим + цветовые оверрайды (пустая строка = дефолт из CSS)
+    // Theme: mode plus colour overrides (an empty string means the CSS default)
     let theme_mode = match settings.theme_mode.as_str() { "light" | "dark" | "system" => settings.theme_mode.as_str(), _ => "system" };
     set_setting(pool.inner(), "theme_mode", theme_mode).await?;
     set_setting(pool.inner(), "color_accent", &settings.color_accent).await?;
@@ -317,7 +319,7 @@ pub async fn save_settings(
     set_setting(pool.inner(), "color_bg", &settings.color_bg).await?;
     set_setting(pool.inner(), "color_text", &settings.color_text).await?;
     set_setting(pool.inner(), "color_border", &settings.color_border).await?;
-    // Пауза уведомлений: пусто = выкл; иначе только валидный RFC3339
+    // Notification pause: empty means off; otherwise only valid RFC3339
     let quiet = if settings.quiet_until.is_empty()
         || chrono::DateTime::parse_from_rfc3339(&settings.quiet_until).is_ok()
     {
@@ -328,16 +330,16 @@ pub async fn save_settings(
     set_setting(pool.inner(), "quiet_until", quiet).await?;
     set_setting(pool.inner(), "context_notifications", if settings.context_notifications { "true" } else { "false" }).await?;
     set_setting(pool.inner(), "ai_fallback", if settings.ai_fallback { "true" } else { "false" }).await?;
-    // Правила категоризации приложений: храним только валидный JSON-массив
+    // App categorization rules: only a valid JSON array is stored
     let rules = if crate::commands::monitor::parse_category_rules(&settings.app_category_rules).is_empty()
         && !settings.app_category_rules.trim().is_empty()
     {
-        "" // мусор не сохраняем
+        "" // junk is not saved
     } else {
         settings.app_category_rules.as_str()
     };
     set_setting(pool.inner(), "app_category_rules", rules).await?;
-    // Лимиты категорий: та же логика — мусор не сохраняем
+    // Category limits: same logic — junk is not saved
     let limits = if crate::commands::monitor::parse_app_limits(&settings.app_limits).is_empty()
         && !settings.app_limits.trim().is_empty()
     {
@@ -355,17 +357,17 @@ pub async fn save_settings(
     set_setting(pool.inner(), "focus_mode_auto", if settings.focus_mode_auto { "true" } else { "false" }).await?;
     set_setting(pool.inner(), "track_domains", if settings.track_domains { "true" } else { "false" }).await?;
     set_setting(pool.inner(), "language", &settings.language).await?;
-    // 0 = выключено; иначе минимум 1 месяц (не даём случайно выставить 0 через долю)
+    // 0 means off; otherwise at least 1 month (a fractional value must not silently become 0)
     set_setting(pool.inner(), "history_cleanup_months", &(if settings.history_cleanup_months == 0 { 0 } else { settings.history_cleanup_months.max(1) }).to_string()).await?;
 
     for (name, value) in [("openai_key", &settings.openai_key), ("anthropic_key", &settings.anthropic_key)] {
         match keyring_set(name, value) {
             Ok(()) => {
-                // Ключ в keyring — подчищаем возможную legacy-копию в БД
+                // The key is in the keyring — clean up any legacy copy in the DB
                 set_setting(pool.inner(), name, "").await?;
             }
             Err(_) => {
-                // Keyring недоступен — fallback на БД (как раньше)
+                // The keyring is unavailable — fall back to the DB as before
                 set_setting(pool.inner(), name, value).await?;
             }
         }
@@ -393,7 +395,7 @@ mod tests {
     assert_eq!(WorkMode::from_str(""), WorkMode::Light);
   }
 }
-// Интеграционные тесты на in-memory SQLite: реальные миграции, реальные запросы
+// Integration tests over in-memory SQLite: real migrations, real queries
 #[cfg(test)]
 mod db_tests {
     use super::*;
@@ -419,7 +421,7 @@ mod db_tests {
         set_setting(&pool, "ai_provider", "anthropic").await.unwrap();
         assert_eq!(get_setting(&pool, "ai_provider").await.unwrap(), "anthropic");
 
-        // Повторная запись перезаписывает, а не дублирует
+        // A repeated write overwrites rather than duplicating
         set_setting(&pool, "ai_provider", "openai").await.unwrap();
         assert_eq!(get_setting(&pool, "ai_provider").await.unwrap(), "openai");
     }

@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { applyTheme, applyCachedTheme } from "./theme";
 
-// jsdom не реализует matchMedia, а localStorage jsdom перекрывается «пустым»
-// экспериментальным глобалом Node — стабим оба управляемыми заглушками.
+// jsdom does not implement matchMedia, and its localStorage is shadowed by Node's
+// "empty" experimental global — we stub both with controllable fakes.
 let systemDark = false;
 const listeners = new Set<(e: MediaQueryListEvent) => void>();
 const store = new Map<string, string>();
@@ -57,7 +57,7 @@ describe("applyTheme", () => {
 
     applyTheme("light", {});
     expect(listeners.size).toBe(0);
-    // смена системной темы больше не влияет
+    // a change of the system theme no longer has any effect
     fireSystemThemeChange(true);
     expect(document.documentElement.classList.contains("dark")).toBe(false);
   });

@@ -1,10 +1,9 @@
--- Статусы задач (v0.9.20): те же id, что раньше были вариантами enum
--- TaskStatus (Todo/InProgress/Done/Archived), чтобы существующие значения
--- tasks.status остались валидными без миграции данных — тот же приём,
--- что categories (0015) сделала для Category. is_reserved=1 у исходных
--- четырёх — не переименовываются/не удаляются: с ними жёстко завязана
--- бизнес-логика (Done → hidden+completed_at, InProgress → тайм-трекинг,
--- несколько SQL-запросов сравнивают напрямую со строками этих статусов).
+-- Task statuses: the ids are the former TaskStatus enum variants
+-- (Todo/InProgress/Done/Archived), so existing tasks.status values stay valid
+-- with no data migration — the same trick categories (0015) used for Category.
+-- The original four carry is_reserved=1 and can be neither renamed nor deleted:
+-- business logic is tied to them (Done -> hidden+completed_at, InProgress -> time
+-- tracking, and several SQL queries compare against these strings directly).
 CREATE TABLE statuses (
     id TEXT NOT NULL PRIMARY KEY,
     name TEXT NOT NULL,

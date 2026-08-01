@@ -1,11 +1,10 @@
 <script lang="ts">
-  // v0.9.01: граф заметок — force-directed визуализация вики-связей.
-  // Узлы = заметки, рёбра = [[wikilinks]] (extractWikiLinks, тот же парсер,
-  // что и бэклинки в Notes.svelte). Без внешней библиотеки — своя простая
-  // симуляция (repulsion между всеми узлами + attraction вдоль рёбер +
-  // притяжение к центру), рендер в SVG. Изолированные заметки (без связей)
-  // остаются в графе, но приглушены и оттеснены к краям через более слабое
-  // центральное притяжение.
+  // The notes graph: a force-directed visualization of wiki links. Nodes are
+  // notes, edges are [[wikilinks]] (via extractWikiLinks, the same parser that
+  // powers backlinks in Notes.svelte). No external library — a simple simulation of
+  // our own (repulsion between all nodes, attraction along edges, and a pull
+  // towards the centre), rendered as SVG. Isolated notes with no links stay in the
+  // graph but are dimmed and pushed towards the edges by a weaker centre pull.
   import { untrack } from "svelte";
   import { noteStore } from "../lib/stores/notes.svelte";
   import { projectStore } from "../lib/stores/projects.svelte";
@@ -36,8 +35,8 @@
     return m;
   });
 
-  // Граф пересчитывается только когда реально меняется состав заметок/связей
-  // (не на каждый кадр симуляции — позиции живут отдельно в nodes-массиве).
+  // The graph is recomputed only when the set of notes or links actually changes,
+  // not on every simulation frame — the positions live separately from the nodes.
   const { nodes, edges } = $derived.by(() => {
     const notes = noteStore.notes;
     const byTitle = new Map<string, Note>();
@@ -75,16 +74,16 @@
     return { nodes, edges };
   });
 
-  // Позиции живут в отдельном reactive-массиве, обновляемом тиками симуляции
-  // (не пересоздаётся с $derived nodes, иначе drag/simulation сбрасывались бы
-  // при каждой правке любой заметки).
+  // The positions live in their own reactive map, updated by the simulation ticks
+  // (not recreated along with the $derived nodes, or a drag and the simulation
+  // would reset on every edit to any note).
   let positions = $state<Map<string, { x: number; y: number; vx: number; vy: number }>>(new Map());
   let draggingId: string | null = $state(null);
 
-  // Читает `nodes` реактивно (пересчёт при смене состава заметок), но
-  // `positions` — через untrack, иначе эффект читает и пишет одно и то же
-  // состояние и Svelte уходит в effect_update_depth_exceeded (бесконечный
-  // цикл на каждое обновление стора, даже нерелевантное графу).
+  // Reads `nodes` reactively (recomputing when the set of notes changes) but
+  // `positions` through untrack: otherwise the effect reads and writes the same
+  // state and Svelte hits effect_update_depth_exceeded — an infinite loop on every
+  // store update, even ones irrelevant to the graph.
   $effect(() => {
     const ids = nodes.map(n => n.id);
     untrack(() => {
@@ -104,37 +103,37 @@
       }
       if (changed) {
         positions = next;
-        // Координаты живут вне реактивности (см. paintFrame), поэтому у только
-        // что смонтированных узлов атрибутов ещё нет — без первой отрисовки все
-        // они наложились бы друг на друга в 0,0. Ждём tick(): к моменту
-        // следующего кадра Svelte уже смонтирует элементы и bind:this заполнит
-        // ссылки, а здесь, до обновления DOM, они ещё null.
-        wake(); // состав графа изменился (новая/удалённая заметка) — досчитать layout
+        // The coordinates live outside reactivity (see paintFrame), so freshly
+        // mounted nodes have no attributes yet and without a first paint they would
+        // all pile up at 0,0. We wait for tick(): by the next frame Svelte has
+        // mounted the elements and bind:this has filled the references, whereas here,
+        // before the DOM update, they are still null.
+        wake(); // the graph's contents changed (a note added or removed) — finish the layout
       }
     });
   });
 
   let rafId: number | null = null;
 
-  // Ссылки на живые SVG-элементы. Координаты в них пишет paintFrame() сам,
-  // минуя реактивность Svelte — см. объяснение над функцией.
+  // References to the live SVG elements. paintFrame() writes the coordinates into
+  // them itself, bypassing Svelte's reactivity — see the explanation above it.
   let nodeEls: Record<string, SVGGElement | null> = {};
   let edgeEls: Record<string, SVGLineElement | null> = {};
 
-  // Здесь была настоящая причина рывков, а не в частоте кадров.
+  // This, not the frame rate, was the real cause of the stuttering.
   //
-  // Раньше разметка читала координаты через {@const p = positions.get(n.id)},
-  // а тик в конце делал `positions = new Map(pos)`. Но это ПОВЕРХНОСТНАЯ
-  // копия: новый Map содержит те же самые объекты {x,y,vx,vy}, а физика
-  // мутирует их на месте (p.x += dx). Svelte видит присваивание positions,
-  // но объекты внутри те же — он считает их уже прочитанными и разметку не
-  // обновляет. Поэтому во время драга, когда меняются только координаты
-  // внутри объекта, DOM не трогался вовсе: узел стоял под курсором, а на
-  // отпускании draggingId менял $state, шла честная перерисовка — и узел
-  // прыгал туда, где давно был.
+  // The markup used to read coordinates through {@const p = positions.get(n.id)}
+  // while the tick ended with `positions = new Map(pos)`. But that is a SHALLOW
+  // copy: the new Map holds the very same {x,y,vx,vy} objects, and the physics
+  // mutates them in place (p.x += dx). Svelte sees the assignment to positions but
+  // finds the same objects inside, considers them already read, and does not update
+  // the markup. So during a drag, when only the coordinates inside an object
+  // change, the DOM was not touched at all: the node stood still under the cursor,
+  // and on release draggingId changed a $state, a genuine re-render ran, and the
+  // node jumped to where it had long been.
   //
-  // Пишем напрямую в атрибуты. Заодно уходит перерисовка всего SVG силами
-  // Svelte 72 раза в секунду: за кадр трогаем ровно n узлов и m рёбер.
+  // We write into the attributes directly. That also removes Svelte re-rendering
+  // the whole SVG 72 times a second: per frame we touch exactly n nodes and m edges.
   function paintFrame(pos: Map<string, { x: number; y: number }>) {
     for (const n of nodes) {
       const p = pos.get(n.id);
@@ -155,8 +154,8 @@
   function tick() {
     const pos = positions;
 
-    // Позиция перетаскиваемого узла применяется ровно один раз за кадр,
-    // а не на каждое событие указателя.
+    // The dragged node's position is applied exactly once per frame rather than on
+    // every pointer event.
     if (draggingId && pendingDrag) {
       const dp = pos.get(draggingId);
       if (dp) {
@@ -171,14 +170,14 @@
     const SPRING = 0.08;
     const SPRING_LEN = 110;
     const CENTER_PULL = 0.02;
-    const ISOLATED_CENTER_PULL = 0.003; // приглушённые узлы слабее тянутся к центру -> к краям
+    const ISOLATED_CENTER_PULL = 0.003; // dimmed nodes are pulled to the centre less, so they drift outward
     const DAMPING = 0.6;
 
-    // Barnes-Hut (v0.9.23): раньше здесь был точный O(n²) перебор всех пар
-    // узлов на каждый кадр — на графах в несколько сотен заметок это душило
-    // CPU и заметно тормозило симуляцию. Квадродерево строится заново каждый
-    // кадр (позиции меняются), но сам расчёт отталкивания на узел падает до
-    // O(log n) вместо O(n) — итого O(n log n) на кадр вместо O(n²).
+    // Barnes-Hut: this used to be an exact O(n²) pass over every pair of nodes on
+    // every frame, which on graphs of several hundred notes throttled the CPU and
+    // visibly slowed the simulation. The quadtree is rebuilt each frame (the
+    // positions change), but computing repulsion per node drops to O(log n) instead
+    // of O(n) — O(n log n) per frame rather than O(n²).
     const bodies = [...pos.entries()].map(([id, p]) => ({ id, x: p.x, y: p.y, mass: 1 }));
     const tree = new Quadtree(boundsFor(bodies), bodies);
 
@@ -220,12 +219,13 @@
     }
 
     paintFrame(pos);
-    // Симуляция «остывает»: как только суммарное движение узлов падает ниже
-    // порога, останавливаем RAF-цикл — иначе граф дёргается бесконечно (лишняя
-    // нагрузка на CPU и невозможно надёжно кликнуть по узлу в e2e). Драг узла
-    // или изменение состава графа снова запускают цикл (см. $effect ниже).
-    // Пока узел тянут, цикл не останавливаем: движение перетаскиваемого узла
-    // не учитывается в totalMotion, и граф «остыл» бы прямо под курсором.
+    // The simulation "cools down": as soon as the total motion of the nodes falls
+    // below a threshold we stop the RAF loop, or the graph would twitch forever
+    // (wasted CPU, and no way to click a node reliably in e2e). Dragging a node or
+    // changing the graph's contents starts the loop again (see the $effect below).
+    // While a node is being dragged the loop is not stopped: the dragged node's
+    // motion is excluded from totalMotion, so the graph would "cool" right under
+    // the cursor.
     if (draggingId !== null || totalMotion > 0.05 * nodes.length) {
       rafId = requestAnimationFrame(tick);
     } else {
@@ -237,16 +237,16 @@
     if (rafId === null) rafId = requestAnimationFrame(tick);
   }
 
-  // Отмена прежнего кадра обязательна: эффект перезапускается, и без неё он
-  // просто затирал rafId, оставляя старый цикл сиротой. Замеры ловили 137–145
-  // тиков/с при экране 72Гц — ровно вдвое, два цикла крутились параллельно, и
-  // половина физики с отрисовкой уходила впустую.
+  // Cancelling the previous frame is mandatory: the effect re-runs, and without it
+  // it simply overwrote rafId and left the old loop orphaned. Measurements caught
+  // 137-145 ticks/s on a 72Hz screen — exactly double, two loops running in
+  // parallel, with half the physics and rendering going to waste.
   $effect(() => {
     if (rafId !== null) cancelAnimationFrame(rafId);
     rafId = requestAnimationFrame(tick);
     return () => {
       if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
-      // Уход с раздела посреди перетаскивания оставил бы слушателей на window.
+      // Leaving the section mid-drag would leave the listeners on window.
       window.removeEventListener("pointermove", onWindowDrag);
       window.removeEventListener("pointerup", endDrag);
     };
@@ -264,35 +264,37 @@
     return () => ro.disconnect();
   });
 
-  // Рект контейнера кэшируется на время перетаскивания: getBoundingClientRect()
-  // на каждый pointermove — синхронный layout flush, а WebKitGTK шлёт эти
-  // события ~170/сек. Во время драга контейнер не двигается, читать его
-  // заново незачем.
+  // The container's rect is cached for the duration of a drag:
+  // getBoundingClientRect() on every pointermove is a synchronous layout flush, and
+  // WebKitGTK delivers those events at about 170/s. The container does not move
+  // during a drag, so re-reading it is pointless.
   let dragRect: DOMRect | null = null;
-  // Последняя позиция указателя, применяется один раз за кадр в tick():
-  // раньше каждый pointermove клонировал всю Map позиций ради реактивности,
-  // то есть ~170 клонов в секунду вместо 60.
+  // The last pointer position, applied once per frame in tick(): every pointermove
+  // used to clone the whole positions Map for reactivity's sake, i.e. about 170
+  // clones a second instead of 60.
   let pendingDrag: { x: number; y: number } | null = null;
 
   function startDrag(id: string, e: PointerEvent) {
     draggingId = id;
     dragRect = container.getBoundingClientRect();
-    // Захват вешаем на контейнер, а не на e.target: цель — дочерний <circle>
-    // или <rect> внутри узла, а его Svelte перерисовывает при обновлении
-    // позиции, и захват теряется вместе со старым элементом. Контейнер живёт
-    // всё перетаскивание. Приборы показали цену потери: pointermove падал со
-    // ~170/с до 14–19/с — узел получал новую позицию 15 раз в секунду, ровно
-    // те «15 fps на глаз», при том что кадры шли исправные 72.
-    // setPointerCapture здесь не нужен и вреден: слушатели на window и так
-    // ловят курсор где угодно, а захват переадресует последующие события на
-    // элемент-захватчик — из-за этого dblclick по узлу до него не доезжал.
+    // Pointer capture is not used here, and would be harmful: the listeners on
+    // window already catch the cursor anywhere, while a capture redirects subsequent
+    // events to the capturing element — which is why a dblclick on a node stopped
+    // reaching it.
+    //
+    // Capturing on e.target was doubly wrong: the target is a child <circle> or
+    // <rect> inside the node, which Svelte re-rendered on every position update, so
+    // the capture died with the old element. The instruments showed the price:
+    // pointermove fell from about 170/s to 14-19/s, meaning the node received a new
+    // position 15 times a second — exactly the "15 fps by eye", even though the
+    // frames themselves ran at a healthy 72.
     window.addEventListener("pointermove", onWindowDrag);
     window.addEventListener("pointerup", endDrag);
-    wake(); // тянут узел за другими остывшими — снова нужно пересчитывать соседей
+    wake(); // a node is dragged among cooled-down ones, so the neighbours need recomputing
   }
 
-  // Слушатель на window, а не на узле: пока курсор обгоняет узел, события над
-  // ним не происходят вовсе, и позиция обновляться перестаёт.
+  // The listener sits on window rather than on the node: while the cursor outruns
+  // the node no events occur over it at all and the position stops updating.
   function onWindowDrag(e: PointerEvent) {
     if (!draggingId || !dragRect) return;
     pendingDrag = { x: e.clientX - dragRect.left, y: e.clientY - dragRect.top };
@@ -330,8 +332,8 @@
     <div class="canvas" bind:this={container}>
       <svg {width} {height}>
         <g class="edges">
-          <!-- Координаты сюда пишет paintFrame() напрямую через setAttribute:
-               реактивность Svelte на них не работает (см. комментарий там). -->
+          <!-- paintFrame() writes the coordinates here directly via setAttribute:
+               Svelte's reactivity does not work on them (see the comment there). -->
           {#each edges as e (e.source + "|" + e.target)}
             <line
               bind:this={edgeEls[e.source + "|" + e.target]}
@@ -355,19 +357,20 @@
                 role="button"
                 tabindex="0"
               >
-                <!-- Невидимый увеличенный хитбокс: покрывает круг + подпись одним
-                     сплошным прямоугольником, иначе клик мимо пикселей круга/текста
-                     (в промежутке) не попадает по <g> — сложно кликнуть и ненадёжно
-                     в e2e (elementFromPoint промахивается на пустое место внутри bbox). -->
+                <!-- An invisible enlarged hitbox covering the circle and the label with one
+                     solid rectangle. Without it a click that misses the pixels of the
+                     circle or the text (landing in the gap between them) does not hit
+                     the <g>: hard to click and unreliable in e2e, where
+                     elementFromPoint lands on empty space inside the bbox. -->
                 <rect x="-10" y="-10" width={100} height="20" fill="transparent" />
                 <circle
                   r={n.degree === 0 ? 5 : 6 + Math.min(n.degree, 8)}
                   fill={n.color ?? (n.degree === 0 ? "var(--text-secondary)" : "var(--accent)")}
                 />
-                <!-- Плашка-подложка под подписью вместо stroke-обводки текста
-                     (v0.9.23) — WebKitGTK перерисовывает stroke-контур текста
-                     заново на каждый кадр симуляции (SVG не умеет частичную
-                     перерисовку), это заметно дороже одного залитого rect. -->
+                <!-- A backing plate under the label instead of a stroke outline on
+                     the text: WebKitGTK redraws a text stroke from scratch on every
+                     simulation frame (SVG cannot repaint partially), which is
+                     noticeably more expensive than one filled rect. -->
                 <rect class="label-bg" x="7" y="-6" width={n.title.length * 6 + 6} height="12" rx="2" />
                 <text x="10" y="4">{n.title}</text>
               </g>

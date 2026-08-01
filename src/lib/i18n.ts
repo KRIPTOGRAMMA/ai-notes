@@ -1,19 +1,20 @@
-// Локализация интерфейса — чистая часть (v0.9.32).
+// Interface localization — the pure part.
 //
-// Свой минимальный слой вместо svelte-i18n: языка два, интерполяция нужна
-// простая, а библиотека тянет свой стор, асинхронную загрузку локалей и
-// формат ICU — здесь это было бы весом без пользы. Плюс словарь как обычный
-// объект проверяется тестом на полноту, чего с ленивой загрузкой не сделать.
+// A minimal layer of our own instead of svelte-i18n: there are two languages, the
+// interpolation needed is simple, and the library brings its own store, async
+// locale loading and the ICU format — weight with no benefit here. Besides, a
+// dictionary that is a plain object can be checked for completeness by a test,
+// which lazy loading rules out.
 //
-// Реактивное состояние (текущий язык) живёт в i18n.svelte.ts: руны работают
-// только в .svelte.ts, а vitest в проекте покрывает лишь чистые .ts — тот же
-// раздел, что у guard.ts / clipboardNote.ts.
+// The reactive state (the current language) lives in i18n.svelte.ts: runes work
+// only in .svelte.ts, and vitest in this project covers pure .ts only — the same
+// split as guard.ts and clipboardNote.ts.
 //
-// Русский — язык оригинала: ключи совпадают с русским текстом слово в слово.
-// Это сознательно. Ключи вида `tasks.empty_state` означали бы переписать
-// ~650 строк разметки вслепую, потеряв читаемость диффа. При ключах-текстах
-// пропущенный перевод деградирует в русскую строку, а не в «tasks.empty_state»
-// на экране.
+// Russian is the source language: the keys match the Russian text word for word.
+// That is deliberate. Keys like `tasks.empty_state` would mean rewriting some 650
+// lines of markup blind and losing diff readability. With text-as-key a missing
+// translation degrades into a Russian string rather than into "tasks.empty_state"
+// on screen.
 
 import { EN } from "./i18n.en";
 
@@ -24,19 +25,19 @@ export const LANGS: { id: Lang; label: string }[] = [
   { id: "en", label: "English" },
 ];
 
-// Язык при первом запуске, пока пользователь не выбрал явно. Всё, что не
-// русское, — английский: нероссийскому пользователю английский полезнее
-// русского, обратное неверно.
+// The language on first launch, before the user has chosen explicitly. Anything
+// not Russian counts as English: to a non-Russian user English is more useful than
+// Russian, and the converse does not hold.
 export function detectLang(nav: string): Lang {
   return nav.toLowerCase().startsWith("ru") ? "ru" : "en";
 }
 
 /**
- * Перевод строки. `translate("Задачи", "en")` → «Tasks».
+ * Translates a string. `translate("Задачи", "en")` yields "Tasks".
  *
- * Подстановка — `{name}`: translate("Удалено {n}", "en", { n: 3 }).
- * Отсутствующий перевод возвращает ключ (русский оригинал), а не пустоту и
- * не «MISSING»: недоделанный перевод не должен ломать экран.
+ * Substitution uses `{name}`: translate("Удалено {n}", "en", { n: 3 }).
+ * A missing translation returns the key (the Russian original) rather than an
+ * empty string or "MISSING": an unfinished translation must not break the screen.
  */
 export function translate(
   key: string,
@@ -52,21 +53,21 @@ export function translate(
   return out;
 }
 
-// --- Посевные категории и статусы (v0.9.47) ---
+// --- Seeded categories and statuses ---
 //
-// Категории (миграция 0015) и статусы (0029) — строки из БД, а не из кода:
-// пользователь их создаёт, переименовывает и удаляет. Поэтому имя из таблицы
-// переводить нельзя — категория, названная пользователем «Работа», обязана
-// остаться «Работа» на любом языке: это его текст, а не наш.
+// Categories (migration 0015) and statuses (0029) are rows in the DB rather than
+// code: the user creates, renames and deletes them. So a name from the table must
+// not be translated — a category the user called "Работа" has to stay "Работа" in
+// any language: that is their text, not ours.
 //
-// Исключение — посевные записи: их имена написали мы, миграцией, и они
-// такая же часть интерфейса, как надписи на кнопках. Отличаем по паре
-// id + имя, а не по одному имени: пользователь может завести свою категорию
-// с именем «Работа», и она обязана остаться русской.
+// The exception is the seeded rows: we wrote their names, in a migration, and they
+// are as much part of the interface as the labels on buttons. They are recognized
+// by the id-and-name pair rather than by the name alone: the user may create their
+// own category named "Работа", and that one must stay Russian.
 //
-// Имена — ровно в том виде, в каком их записали миграции 0015 и 0029.
-// Несовпадение с этой таблицей означает одно из двух: запись пользовательская
-// (её id здесь нет) либо посевную переименовали. И то и другое — чужой текст.
+// The names are exactly as migrations 0015 and 0029 wrote them. A mismatch against
+// this table means one of two things: the row is user-defined (its id is not here)
+// or a seeded one was renamed. Either way it is someone else's text.
 const SEEDED_ORIGINALS: Record<string, string> = {
   "category:Work": "Работа",
   "category:Study": "Учёба",
@@ -79,10 +80,10 @@ const SEEDED_ORIGINALS: Record<string, string> = {
   "status:Archived": "Архив",
 };
 
-// Для вкладки «Категории задач» в Настройках: у категорий нет флага
-// is_reserved (в отличие от статусов), а поле переименования нужно
-// заблокировать ровно у посевных — иначе перевод уйдёт в БД поверх оригинала.
-// Выводится из таблицы выше, чтобы списки не разъехались при правке одного.
+// For the "Task categories" tab in Settings: categories have no is_reserved flag
+// (unlike statuses), yet the rename field must be disabled for exactly the seeded
+// ones — otherwise the translation would go into the DB over the original. Derived
+// from the table above so the two lists cannot drift apart when one is edited.
 export const SEEDED_CATEGORY_IDS = new Set(
   Object.keys(SEEDED_ORIGINALS)
     .filter(k => k.startsWith("category:"))
@@ -90,12 +91,12 @@ export const SEEDED_CATEGORY_IDS = new Set(
 );
 
 /**
- * Имя посевной категории/статуса на языке интерфейса; для пользовательских
- * и переименованных — имя из БД без изменений.
+ * The name of a seeded category or status in the interface language; for
+ * user-defined and renamed ones, the name from the DB unchanged.
  *
- * `name` сверяется с посевным оригиналом: если пользователь переименовал
- * посевную категорию (id остался прежним), перевод больше не применяется —
- * иначе его правка была бы не видна на английском.
+ * `name` is checked against the seeded original: if the user renamed a seeded
+ * category (keeping the same id), the translation no longer applies — otherwise
+ * their edit would be invisible in English.
  */
 export function seededName(
   kind: "category" | "status",
@@ -103,8 +104,8 @@ export function seededName(
   name: string,
   lang: Lang,
 ): string {
-  // Одной сверки достаточно и для uuid-записей: их id в таблице нет, и
-  // `undefined !== name` отсекает их так же, как переименованную посевную.
+  // One check suffices for uuid rows too: their id is absent from the table, and
+  // `undefined !== name` rejects them just as it rejects a renamed seeded row.
   const original = SEEDED_ORIGINALS[`${kind}:${id}`];
   if (original !== name) return name;
   return translate(name, lang);

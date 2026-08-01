@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 
-// Проверка по исходнику, а не по поведению: логика кнопок окна живёт в
-// .svelte, а vitest здесь настроен только на чистые .ts. Тот же приём, что
-// в i18n.test.ts.
+// Checked against the source rather than the behaviour: the window buttons' logic
+// lives in .svelte while vitest here is configured for pure .ts only. The same
+// approach as in i18n.test.ts.
 const SOURCES = import.meta.glob("./components/WindowControls.svelte", {
   eager: true,
   query: "?raw",
@@ -11,8 +11,8 @@ const SOURCES = import.meta.glob("./components/WindowControls.svelte", {
 
 const SRC = SOURCES["./components/WindowControls.svelte"];
 
-// Конфиг окна: без decorations: false системный заголовок вернётся, и все
-// эти кнопки станут вторым комплектом поверх первого.
+// The window config: without decorations: false the system title bar returns and all
+// these buttons become a second set on top of the first.
 const CONF = import.meta.glob("../../src-tauri/tauri.conf.json", {
   eager: true,
   query: "?raw",
@@ -24,19 +24,19 @@ describe("кнопки окна", () => {
     expect(SRC).toBeTypeOf("string");
   });
 
-  // Главный инвариант версии. Приложение живёт в трее: трекинг, помодоро и
-  // уведомления крутятся в фоновых циклах, когда окно скрыто. Замена hide()
-  // на close() убила бы их все, оставив трей, — и это выглядело бы как
-  // «приложение само выключается».
+  // The central invariant. The app lives in the tray: tracking, pomodoro and
+  // notifications run in background loops while the window is hidden. Replacing
+  // hide() with close() would kill them all and leave the tray behind — which would
+  // look like "the application turns itself off".
   it("кнопка закрытия прячет окно, а не завершает процесс", () => {
     expect(SRC).toContain("hide()");
-    // close() у окна допустим только как имя обработчика, но не как вызов
+    // close() on the window is acceptable only as a handler's name, never as a call
     const callsWindowClose = /getCurrentWindow\(\)\s*\.\s*close\s*\(/.test(SRC);
     expect(callsWindowClose, "закрытие окна убьёт фоновые циклы").toBe(false);
   });
 
-  // Без decorations: false у главного окна WebKitGTK рисует свой заголовок,
-  // и свои кнопки оказываются вторым рядом под системным.
+  // Without decorations: false on the main window WebKitGTK draws its own title bar
+  // and our buttons end up as a second row beneath the system one.
   it("главное окно объявлено без системных декораций", () => {
     const raw = CONF["../../src-tauri/tauri.conf.json"];
     const conf = JSON.parse(raw);
@@ -45,15 +45,15 @@ describe("кнопки окна", () => {
     expect(main.decorations).toBe(false);
   });
 
-  // Окно без декораций нечем таскать: WM больше не даёт шапку, перетаскивание
-  // обязано инициироваться из приложения.
+  // A window without decorations has nothing to drag it by: the WM no longer provides
+  // a title bar, so dragging must be initiated from the application.
   it("есть зона перетаскивания окна", () => {
     expect(SRC).toContain("startDragging()");
     expect(SRC).toMatch(/onmousedown/);
   });
 
-  // Иконка «развернуть/восстановить» должна следовать за реальным состоянием
-  // окна: развернуть можно двойным кликом и средствами WM, мимо этих кнопок.
+  // The maximize/restore icon must follow the window's real state: maximizing is
+  // possible by double-clicking and through the WM, bypassing these buttons.
   it("состояние «развёрнуто» синхронизируется с окном, а не только с кликами", () => {
     expect(SRC).toContain("isMaximized()");
     expect(SRC).toContain("onResized(");

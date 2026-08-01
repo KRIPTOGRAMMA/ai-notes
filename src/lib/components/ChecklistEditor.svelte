@@ -1,26 +1,27 @@
 <script lang="ts">
-  // Чек-лист подзадач одним редактором (v0.9.45).
+  // The subtask checklist as a single editor.
   //
-  // Раньше каждая подзадача была своим <input>: стрелки не переводили курсор
-  // между строками, выделить несколько строк было нельзя, вставка списка из
-  // буфера давала одну подзадачу с переводами строк внутри.
+  // Every subtask used to be its own <input>: arrow keys did not move the cursor
+  // between lines, several lines could not be selected, and pasting a list from
+  // the clipboard produced one subtask with newlines inside it.
   //
-  // Первый заход этой версии свёл список в <textarea> с видимыми префиксами
-  // `[x] `, а чекбоксы поставил колонкой сбоку. Разбор APK Xiaomi Notes
-  // (com.miui.richeditor.style.CheckboxSpan) показал, что там сделано иначе и
-  // разница принципиальная: чекбокс — часть строки, а не соседний столбец, а
-  // разметка пользователю не видна вообще (в их формате она живёт только в
-  // сериализации, `HtmlParser$CheckBoxElement` → `<input type="checkbox">`).
-  // Видимые скобки пользователь может испортить, а колонка сбоку разъезжается
-  // на любой строке, которая перенеслась.
+  // This version's first attempt folded the list into a <textarea> with visible
+  // `[x] ` prefixes and put the checkboxes in a column beside it. Taking apart the
+  // Xiaomi Notes APK (com.miui.richeditor.style.CheckboxSpan) showed it is done
+  // differently there, and the difference is fundamental: the checkbox is part of
+  // the line rather than a neighbouring column, and the markup is not visible to
+  // the user at all (in their format it exists only in serialization,
+  // `HtmlParser$CheckBoxElement` -> `<input type="checkbox">`). Visible brackets
+  // are something the user can corrupt, and a column beside the text drifts out of
+  // alignment on any line that wraps.
   //
-  // Поэтому здесь CodeMirror с тем же приёмом, что уже работает в заметках
-  // (v0.9.27): `Decoration.replace` прячет `[x] ` и рисует на его месте
-  // настоящий чекбокс внутри строки. Текст остаётся одним документом, поэтому
-  // стрелки, выделение через строки, undo и вставка достаются от редактора.
+  // So this uses CodeMirror with the same technique that already works in notes:
+  // `Decoration.replace` hides `[x] ` and draws a real checkbox in its place,
+  // inside the line. The text stays a single document, so arrow keys, selection
+  // across lines, undo and pasting all come from the editor.
   //
-  // Берём голый CodeMirror, а не LiveMarkdownEditor: тому нужны вики-ссылки,
-  // картинки, таблицы и автодополнение — здесь всё это лишнее.
+  // We take bare CodeMirror rather than LiveMarkdownEditor: that one brings wiki
+  // links, images, tables and autocompletion, none of which belong here.
   import { onMount, onDestroy } from "svelte";
   import { EditorState } from "@codemirror/state";
   import {
@@ -36,9 +37,9 @@
   type Props = {
     value: string;
     placeholder?: string;
-    // Текст отдаётся аргументом, а не только через bind:value — панель в
-    // списке задач держит его в словаре по id задачи, и двусторонний бинд к
-    // элементу словаря там неудобен.
+    // The text is passed as an argument rather than only through bind:value: the
+    // panel in the task list keeps it in a dictionary keyed by task id, and a
+    // two-way binding to a dictionary entry is awkward there.
     onchange?: (text: string) => void;
   };
 
@@ -63,8 +64,8 @@
       box.type = "checkbox";
       box.checked = this.checked;
       box.className = "cm-sub-checkbox";
-      // Фокус остаётся в тексте: клик по галочке не должен выбивать каретку из
-      // строки, которую пользователь правит.
+      // Focus stays in the text: clicking a checkbox must not knock the caret out
+      // of the line the user is editing.
       box.onmousedown = (e) => e.preventDefault();
       box.onclick = () => {
         if (!view) return;
@@ -79,17 +80,17 @@
     ignoreEvent() { return false; }
   }
 
-  // Разметку прячем всегда, в том числе на строке с курсором — в отличие от
-  // заметок, где маркеры показываются под кареткой. Здесь скобки не часть
-  // текста заметки, а способ хранения отметки: показывать их пользователю
-  // незачем, а испортить он их может.
+  // The markup is always hidden, including on the line with the cursor — unlike in
+  // notes, where markers show under the caret. Here the brackets are not part of a
+  // note's text but the way a tick is stored: there is no reason to show them to
+  // the user, and every chance they would corrupt them.
   //
-  // Чекбокс рисуется у КАЖДОЙ непустой строки, а не только у размеченной.
-  // Иначе получается рассинхрон: `parseChecklist` считает строку без префикса
-  // подзадачей (это нужно для вставки готового списка), и при сохранении она
-  // ею станет — а чекбокса у неё нет, и пользователь видит часть строк
-  // подзадачами, а часть просто текстом. У неразмеченной строки виджет
-  // вставляется в начало (`Decoration.widget`), а не заменяет текст.
+  // A checkbox is drawn on EVERY non-empty line, not only on a marked-up one.
+  // Otherwise things fall out of sync: `parseChecklist` treats a line with no
+  // prefix as a subtask (needed for pasting a ready-made list), so on save it
+  // becomes one — yet it has no checkbox, and the user sees some lines as subtasks
+  // and others as plain text. On an unmarked line the widget is inserted at the
+  // start (`Decoration.widget`) rather than replacing the text.
   function buildDecos(state: EditorState): DecorationSet {
     const items: { from: number; to: number; deco: Decoration }[] = [];
     for (let n = 1; n <= state.doc.lines; n++) {
@@ -127,15 +128,15 @@
     { decorations: (v) => v.decorations },
   );
 
-  // Enter продолжает список — как в любом редакторе с чек-листами. Без этого
-  // новая строка осталась бы без разметки, и отметить её было бы нечем.
+  // Enter continues the list, as in any editor with checklists. Without it a new
+  // line would have no markup and there would be nothing to tick.
   function newSubtaskLine(v: EditorView): boolean {
     const { state } = v;
     const at = state.selection.main.head;
-    // Разметку получает КАЖДАЯ новая строка, в том числе после пустой
-    // (v0.9.50). Раньше здесь стоял выход при пустой текущей строке, и Enter
-    // на ней проваливался в defaultKeymap — появлялась строка без чекбокса,
-    // которой в чек-листе быть не может: каждая строка тут подзадача.
+    // EVERY new line gets the markup, including one after an empty line. There
+    // used to be an early return on an empty current line, so Enter there fell
+    // through to defaultKeymap and produced a line with no checkbox — something a
+    // checklist cannot contain, since every line here is a subtask.
     const insert = "\n[ ] ";
     v.dispatch({
       changes: { from: at, to: at, insert },
@@ -146,39 +147,38 @@
 
   const enterKeymap = keymap.of([
     { key: "Enter", run: newSubtaskLine },
-    // Shift+Enter привязан явно, хотя defaultKeymap и так шлёт его в Enter
-    // (проверено в браузере: без этой строки поведение то же). Объявлено,
-    // чтобы оно не держалось на внутренней детали чужого keymap: в чек-листе
-    // каждая строка — подзадача, разрывов абзаца здесь не бывает, поэтому обе
-    // комбинации обязаны делать одно и то же.
+    // Shift+Enter is bound explicitly even though defaultKeymap already routes it
+    // to Enter (verified in a browser: without this line the behaviour is the
+    // same). It is declared so as not to rest on an internal detail of someone
+    // else's keymap: in a checklist every line is a subtask, there are no paragraph
+    // breaks, so both combinations must do the same thing.
     { key: "Shift-Enter", run: newSubtaskLine },
-    // Ctrl/Cmd+Enter принадлежит окну, а не редактору (v0.9.51): в быстром
-    // слоте это «сохранить», в модалке задачи — тоже. Без явной привязки
-    // комбинация проваливалась в defaultKeymap и вставляла пустую строку без
-    // разметки — список ломался, а сохранение не срабатывало.
+    // Ctrl/Cmd+Enter belongs to the window rather than to the editor: in the quick
+    // slot it means "save", and in the task modal too. Without an explicit binding
+    // the combination fell through to defaultKeymap and inserted an empty unmarked
+    // line — the list broke and the save did not fire.
     //
-    // Возвращаем true (комбинация обработана — CodeMirror ничего не делает),
-    // но событие не гасим: keydown всплывает до <svelte:window> снаружи,
-    // который и вызывает submit.
+    // We return true (the combination is handled, so CodeMirror does nothing) but do
+    // not stop the event: the keydown bubbles up to the <svelte:window> outside,
+    // which is what calls submit.
     { key: "Mod-Enter", run: () => true },
   ]);
 
-  // Backspace, стирающий последнюю букву подзадачи, убирает её целиком
-  // (v0.9.48).
+  // A Backspace that erases a subtask's last letter removes the subtask entirely.
   //
-  // Разметка `[ ] ` спрятана виджетом, поэтому для пользователя строка — это
-  // её текст. Подзадачи стирают с конца, а не ставят каретку в начало: когда
-  // исчезает последняя буква, подзадача должна исчезнуть вместе с ней. Иначе
-  // на экране остаётся пустая строка с чекбоксом (в данных её уже нет —
-  // parseChecklist пустые выбрасывает), и требуется ещё одно нажатие по
-  // невидимым скобкам.
+  // The `[ ] ` markup is hidden behind a widget, so to the user a line is its text.
+  // Subtasks are erased from the end rather than by putting the caret at the start:
+  // when the last letter disappears, the subtask must go with it. Otherwise an
+  // empty line with a checkbox stays on screen (it is already gone from the data —
+  // parseChecklist drops empty ones) and one more press on the invisible brackets
+  // is required.
   //
-  // Условие — «после этого удаления текста не останется», а не «каретка в
-  // начале строки»: второе описывает способ, которым до строки добираются,
-  // первое — то, что пользователь считает удалением подзадачи.
+  // The condition is "after this deletion no text will remain" rather than "the
+  // caret is at the start of the line": the latter describes how one gets to the
+  // line, the former describes what the user considers deleting a subtask.
   //
-  // Срабатывает только при схлопнутом выделении: выделенный кусок текста
-  // Backspace должен удалять как обычно, а не сносить строку.
+  // It only fires on a collapsed selection: Backspace over selected text must
+  // delete it as usual rather than remove the line.
   const backspaceKeymap = keymap.of([
     {
       key: "Backspace",
@@ -187,18 +187,19 @@
         const sel = state.selection.main;
         if (!sel.empty) return false;
         const line = state.doc.lineAt(sel.head);
-        // Текст в строке остаётся — обычное удаление символа.
+        // Text remains in the line — an ordinary character deletion.
         if (!emptyAfterBackspace(line.text, sel.head - line.from)) return false;
 
-        // Единственная пустая строка: удалять нечего, иначе Backspace на
-        // пустом поле «съел» бы его целиком без всякого видимого повода.
+        // The only empty line: there is nothing to delete, or Backspace on an empty
+        // field would swallow it whole for no visible reason.
         if (state.doc.lines === 1) return false;
 
         const doc = state.doc.toString();
         const next = removeLineAt(doc, sel.head);
-        // Каретка — в конец предыдущей строки, как при обычном Backspace на
-        // стыке строк (line.from - 1 — позиция её последнего символа после
-        // удаления перевода). Для первой строки ставим в начало документа.
+        // The caret goes to the end of the previous line, as with an ordinary
+        // Backspace at a line boundary (line.from - 1 is the position of its last
+        // character once the newline is gone). For the first line we put it at the
+        // start of the document.
         const anchor = line.number > 1 ? line.from - 1 : 0;
         v.dispatch({
           changes: { from: 0, to: doc.length, insert: next },
@@ -209,24 +210,24 @@
     },
   ]);
 
-  // Разметку нельзя испортить никаким удалением (v0.9.50).
+  // No deletion may corrupt the markup.
   //
-  // Свой Backspace закрывал только одну клавишу. Ctrl+Backspace (удалить
-  // слово) шёл мимо него и выедал скобки изнутри: в строке оставался видимый
-  // огрызок «[ » — та самая разметка, которую пользователю показывать нельзя.
-  // То же самое дают Delete, Ctrl+Delete и вставка поверх выделения.
+  // A custom Backspace covered only one key. Ctrl+Backspace (delete word) went past
+  // it and ate the brackets from the inside, leaving a visible stump "[ " in the
+  // line — precisely the markup the user must never see. Delete, Ctrl+Delete and
+  // pasting over a selection do the same.
   //
-  // Поэтому чиним не клавиши по списку, а результат: если после изменения
-  // строка потеряла целостность (текст есть, а разметка битая), приводим её к
-  // корректному виду. Перечислять комбинации бессмысленно — их больше, чем
-  // можно предугадать, и каждая новая версия CodeMirror может добавить свои.
+  // So we fix the result rather than the keys one by one: if a change left the line
+  // inconsistent (text present, markup broken), we restore it to a valid form.
+  // Enumerating the combinations is pointless — there are more of them than can be
+  // anticipated, and each new CodeMirror version may add its own.
   const repairMarkup = EditorState.transactionFilter.of((tr) => {
     if (!tr.docChanged) return tr;
     const text = tr.newDoc.toString();
     const fixed = repairChecklistMarkup(text);
     if (fixed === text) return tr;
-    // Каретку держим на месте: чинится то, что левее её, поэтому смещение
-    // считаем по разнице длин до позиции каретки.
+    // The caret is kept in place: what is repaired lies to its left, so the shift is
+    // computed from the difference in lengths up to the caret's position.
     const head = tr.newSelection.main.head;
     const delta = fixed.length - text.length;
     return [
@@ -257,21 +258,22 @@
           drawSelection(),
           checkboxPlugin,
           repairMarkup,
-          // Свои обработчики — до defaultKeymap: тот перехватил бы Backspace
-          // и удалил один невидимый символ разметки вместо строки.
+          // Our handlers come before defaultKeymap: that one would intercept
+          // Backspace and delete a single invisible markup character instead of the
+          // line.
           enterKeymap,
           backspaceKeymap,
           keymap.of([...defaultKeymap, ...historyKeymap]),
           EditorView.lineWrapping,
           cmPlaceholder(placeholder),
           theme,
-          // Уход фокуса — момент, когда правка закончена: пустые строки
-          // подчищаются здесь, а не по ходу набора (v0.9.49). Иначе строка
-          // исчезала бы под кареткой ровно тогда, когда пользователь нажал
-          // Enter и собрался печатать название.
+          // Losing focus is the moment editing is finished, so empty lines are
+          // cleaned up here rather than as the user types. Otherwise a line would
+          // vanish under the caret at exactly the moment the user pressed Enter and
+          // was about to type a name.
           //
-          // Замена документа рассылает обычное изменение, поэтому
-          // updateListener ниже сам отдаст очищенный текст наружу.
+          // Replacing the document dispatches an ordinary change, so the
+          // updateListener below passes the cleaned text outward by itself.
           EditorView.domEventHandlers({
             blur(_e, v) {
               const doc = v.state.doc.toString();
@@ -295,9 +297,10 @@
 
   onDestroy(() => view?.destroy());
 
-  // Внешняя подмена значения (загрузка слота, применение шаблона). Сравнение
-  // с текущим документом обязательно: без него собственная правка вернулась бы
-  // сюда через bind и переставила каретку в конец на каждой букве.
+  // An external value swap (loading the slot, applying a template). Comparing
+  // against the current document is mandatory: without it the editor's own edit
+  // would come back here through the bind and move the caret to the end on every
+  // letter.
   $effect(() => {
     const next = value;
     if (view && next !== view.state.doc.toString()) {

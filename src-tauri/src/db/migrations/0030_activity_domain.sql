@@ -1,4 +1,4 @@
--- v0.9.31: домен активной вкладки браузера. NULL всегда, пока пользователь
--- не включит track_domains в Настройках (по умолчанию выключено).
--- Хранится только домен — заголовок окна в БД не попадает никогда.
+-- The domain of the active browser tab. Always NULL until the user enables
+-- track_domains in Settings (off by default). Only the domain is stored — the
+-- window title never reaches the DB.
 ALTER TABLE activity_log ADD COLUMN domain TEXT;

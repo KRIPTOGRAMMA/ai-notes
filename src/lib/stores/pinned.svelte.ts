@@ -2,10 +2,10 @@ import { api } from "../api/tauri";
 import type { PinnedItem } from "../types";
 import { runGuarded } from "../guard";
 
-// v0.9.33: «быстрый слот» — одна закреплённая задача или заметка под
-// глобальным хоткеем. Стор нужен обеим вьюхам сразу: закрепить можно и из
-// Задач, и из Заметок, а слот один — закрепление задачи должно снять
-// подсветку с закреплённой ранее заметки, и наоборот.
+// The "quick slot": a single pinned task or note under a global hotkey. The store
+// is needed by both views at once: pinning is possible from Tasks and from Notes
+// while there is only one slot, so pinning a task must clear the highlight from a
+// previously pinned note, and vice versa.
 let item: PinnedItem | null = $state(null);
 let error: string | null = $state(null);
 
@@ -14,8 +14,9 @@ export const pinnedStore = {
   get error() { return error; },
   clearError() { error = null; },
 
-  // Закреплено ли именно это. Проверяем и вид, и id: id генерируются
-  // независимо у задач и заметок, поэтому одного id мало.
+  // Whether this particular item is pinned. Both the kind and the id are checked:
+  // ids are generated independently for tasks and notes, so the id alone is not
+  // enough.
   is(kind: "task" | "note", id: string): boolean {
     return item?.kind === kind && item.id === id;
   },
@@ -26,7 +27,7 @@ export const pinnedStore = {
     else error = r.error;
   },
 
-  // Повторное нажатие на закреплённом — открепление: одна кнопка вместо двух.
+  // Pressing again on a pinned item unpins it: one button instead of two.
   async toggle(kind: "task" | "note", id: string) {
     const unpin = pinnedStore.is(kind, id);
     const r = await runGuarded(() =>

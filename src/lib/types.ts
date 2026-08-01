@@ -1,16 +1,16 @@
-// Зеркало src-tauri/src/core/task.rs::Task.
-// Rust-сторона не использует #[serde(rename_all)], поэтому имена полей
-// в JSON совпадают с именами полей структуры один в один.
+// A mirror of src-tauri/src/core/task.rs::Task.
+// The Rust side does not use #[serde(rename_all)], so the field names in JSON
+// match the struct's field names one for one.
 
-// С v0.9.20 статус — id строки в таблице statuses (тот же приём, что
-// категория получила в v0.6.3), не фиксированный набор. Todo/InProgress/
-// Done/Archived остаются зарезервированными id (см. StatusInfo.is_reserved) —
-// с ними завязана бизнес-логика (Done → hidden+completed_at, InProgress →
-// тайм-трекинг), но появляются и свои промежуточные статусы для канбана.
+// A status is the id of a row in the statuses table (the same trick the category
+// uses) rather than a fixed set. Todo/InProgress/Done/Archived remain reserved ids
+// (see StatusInfo.is_reserved) because business logic is tied to them (Done ->
+// hidden+completed_at, InProgress -> time tracking), but custom intermediate
+// statuses for the kanban board can appear alongside them.
 export type TaskStatus = string;
 export type Priority = "Low" | "Medium" | "High" | "Critical";
-// С v0.6.3 категория — id строки в таблице categories (пользовательские),
-// а не фиксированный набор. Имя/цвет — через CategoryInfo.
+// A category is the id of a row in the categories table (user-defined) rather
+// than a fixed set. The name and colour come through CategoryInfo.
 export type Category = string;
 export type RecurrenceUnit = "Minutes" | "Hours" | "Days" | "Weeks";
 
@@ -35,7 +35,7 @@ export type Recurrence =
   | "Daily"
   | "Weekly"
   | { Custom: [number, RecurrenceUnit] }
-  | { Weekdays: number }; // битовая маска: бит 0 = Пн ... бит 6 = Вс
+  | { Weekdays: number }; // a bitmask: bit 0 = Monday ... bit 6 = Sunday
 
 export interface Subtask {
   id: string;
@@ -52,27 +52,27 @@ export interface Task {
   status: TaskStatus;
   priority: Priority;
   category: Category;
-  deadline: string | null; // RFC3339, приходит как строка через JSON
+  deadline: string | null; // RFC3339, arrives as a string through JSON
   tags: string[];
   created_at: string;
   updated_at: string;
   completed_at: string | null;
   recurrence: Recurrence;
   hidden: boolean;
-  deleted_at: string | null; // мягкое удаление (v0.8.12) — не null = в корзине
+  deleted_at: string | null; // soft deletion — non-null means it is in the Trash
   project_id: string | null;
-  scheduled_at: string | null; // тайм-блок: начало (RFC3339)
-  scheduled_mins: number | null; // тайм-блок: длительность
-  sort_order: number; // ручной порядок в списке (drag)
+  scheduled_at: string | null; // time block: the start (RFC3339)
+  scheduled_mins: number | null; // time block: the duration
+  sort_order: number; // manual ordering in the list (drag)
   subtasks: Subtask[];
-  // Зависимости (v0.9.56): незакрытые блокеры этой задачи. Пустой массив =
-  // задача свободна. Блокер в Корзине сюда не попадает (не блокирует), но
-  // связь жива и вернётся вместе с ним при восстановлении.
+  // Dependencies: the open blockers of this task. An empty array means the task is
+  // free. A blocker in the Trash does not appear here (it does not block), but the
+  // link is alive and returns with it on restore.
   blocked_by: Blocker[];
 }
 
-// Блокер с названием — чтобы показать «Заблокирована задачей X» без
-// дополнительного запроса за именем.
+// A blocker with its title, so "Blocked by X" can be shown without an extra
+// request for the name.
 export interface Blocker {
   id: string;
   title: string;
@@ -87,10 +87,10 @@ export interface Project {
   created_at: string;
   task_total: number;
   task_done: number;
-  goal_tasks: number | null; // цель: задач за период
-  goal_mins: number | null; // цель: минут тайм-блоков за период
+  goal_tasks: number | null; // goal: tasks per period
+  goal_mins: number | null; // goal: minutes of time blocks per period
   goal_period: "week" | "month";
-  goal_done_tasks: number; // прогресс за текущий период
+  goal_done_tasks: number; // progress for the current period
   goal_done_mins: number;
 }
 
@@ -108,10 +108,10 @@ export interface GoalSnapshot {
 export interface UpdateProjectPayload {
   name?: string;
   color?: string;
-  target_date?: string; // пустая строка = убрать дату
+  target_date?: string; // an empty string clears the date
   archived?: boolean;
-  goal_tasks?: number; // 0 = снять цель
-  goal_mins?: number; // 0 = снять цель
+  goal_tasks?: number; // 0 clears the goal
+  goal_mins?: number; // 0 clears the goal
   goal_period?: "week" | "month";
 }
 
@@ -136,8 +136,8 @@ export interface UpdateTaskPayload {
   deadline?: string;
   tags?: string[];
   recurrence?: Recurrence;
-  project_id?: string; // пустая строка = отвязать от проекта
-  scheduled_at?: string; // пустая строка = снять тайм-блок
+  project_id?: string; // an empty string detaches it from the project
+  scheduled_at?: string; // an empty string clears the time block
   scheduled_mins?: number;
 }
 
@@ -206,33 +206,33 @@ export interface AppSettings {
   nudge_after_mins: number;
   theme_mode: "light" | "dark" | "system";
   color_accent: string;
-  color_accent_secondary: string; // второй акцент (градиент на .btn-primary); пусто = равен color_accent
+  color_accent_secondary: string; // the second accent (the .btn-primary gradient); empty means equal to color_accent
   color_bg: string;
   color_text: string;
   color_border: string;
-  quiet_until: string; // RFC3339; пусто = выкл; далёкая дата = бессрочно
+  quiet_until: string; // RFC3339; empty means off; a distant date means indefinite
   context_notifications: boolean;
   ai_fallback: boolean;
   openai_in_keyring: boolean;
   anthropic_in_keyring: boolean;
   app_category_rules: string; // JSON [{pattern, category}]
-  app_limits: string;         // JSON [{category, daily_mins}] — 0/отсутствие = без лимита
-  auto_backup_dir: string;    // пусто = авто-бэкап выключен
-  auto_backup_keep: number;   // сколько копий хранить (мин 1)
-  morning_digest_time: string; // "HH:MM", пусто = выкл
-  show_subtasks_expanded: boolean; // подзадачи в списке видны без клика (v0.8.3)
-  keybinds: string; // JSON {action_id: combo} (v0.8.9); отсутствие ключа = дефолт действия
-  // v0.9.35: то же для глобальных хоткеев быстрого ввода. Отдельным ключом:
-  // у них другой механизм (регистрация в ОС) и комбинация может не примениться.
+  app_limits: string;         // JSON [{category, daily_mins}] — 0 or absence means no limit
+  auto_backup_dir: string;    // empty means automatic backup is off
+  auto_backup_keep: number;   // how many copies to keep (minimum 1)
+  morning_digest_time: string; // "HH:MM", empty means off
+  show_subtasks_expanded: boolean; // subtasks visible in the list without a click
+  keybinds: string; // JSON {action_id: combo}; a missing key means the action's default
+  // The same for global quick-capture hotkeys, under a separate key: they use a
+  // different mechanism (OS-level registration) and a combination may fail to apply.
   global_keybinds: string;
-  focus_mode_auto: boolean; // авто-пауза уведомлений на время помодоро-работы/тайм-блока (v0.9.12)
-  track_domains: boolean; // разбивка браузерного времени по сайтам; выкл по умолчанию (v0.9.31)
-  language: string; // "ru" | "en"; пусто — определить по системной локали (v0.9.32)
-  history_cleanup_months: number; // выполненные старше N мес. → авто-Корзина; 0 — выкл (v0.9.19)
+  focus_mode_auto: boolean; // automatically pause notifications during pomodoro work or a time block
+  track_domains: boolean; // breaking browser time down by site; off by default
+  language: string; // "ru" | "en"; empty means detect from the system locale
+  history_cleanup_months: number; // completed items older than N months go to the Trash automatically; 0 = off
 }
 
-// v0.9.35: действие, запускаемое глобальным хоткеем. Список отдаёт бэкенд
-// (list_global_actions) — он же их регистрирует, и разъехаться копии не должны.
+// An action launched by a global hotkey. The list comes from the backend
+// (list_global_actions), which also registers them, so the copies must not drift.
 export interface GlobalAction {
   id: string;
   label: string;
@@ -317,27 +317,26 @@ export interface ModelOption {
   recommended: boolean;
 }
 
-// Режим окна быстрого ввода. "clipboard" (v0.9.26) — та же форма заметки,
-// но предзаполненная текстом из буфера обмена; зеркало normalize_quick_mode
-// в lib.rs, где неизвестный режим схлопывается в "task".
-// "pinned" (v0.9.33) — единственный режим, который не создаёт запись, а
-// открывает существующую на правку текста.
+// The quick-capture window's mode. "clipboard" is the same note form but
+// pre-filled with text from the clipboard; it mirrors normalize_quick_mode in
+// lib.rs, where an unknown mode folds into "task". "pinned" is the only mode that
+// creates no record but opens an existing one for text editing.
 export type QuickMode = "task" | "note" | "clipboard" | "pinned";
 
-// Содержимое «быстрого слота» (v0.9.33). `text` — description задачи или
-// content заметки: окно правит только текст, поэтому поле одно.
+// The contents of the quick slot. `text` is a task's description or a note's
+// content: the window edits text only, hence a single field.
 export interface PinnedItem {
   kind: "task" | "note";
   id: string;
   title: string;
   text: string;
-  // v0.9.34: чек-лист задачи едет вместе со слотом. У заметки всегда пуст —
-  // поле есть всегда, чтобы не ветвиться на «а бывает ли оно тут».
+  // A task's checklist travels with the slot. For a note it is always empty — the
+  // field is always present so callers need not branch on whether it exists.
   subtasks: Subtask[];
 }
 
-// Простой внутри запланированного тайм-блока (v0.9.30): план из задачи,
-// факт — из мониторинга активности.
+// Idle time inside a planned time block: the plan comes from the task, the actual
+// from activity monitoring.
 export interface BlockIdle {
   task_id: string;
   task_title: string;

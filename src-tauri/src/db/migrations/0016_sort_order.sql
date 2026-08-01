@@ -1,4 +1,4 @@
--- Ручной порядок задач. Бэкфилл по rowid = прежний фактический порядок
--- (get_tasks без ORDER BY отдавал именно его). Новые задачи получают max+1.
+-- Manual task ordering. The backfill by rowid matches the previous de facto order
+-- (get_tasks without an ORDER BY returned exactly that). New tasks get max+1.
 ALTER TABLE tasks ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;
 UPDATE tasks SET sort_order = rowid;

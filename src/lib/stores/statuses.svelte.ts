@@ -17,8 +17,8 @@ export const statusStore = {
   get error() { return error; },
   clearError() { error = null; },
 
-  // Отображение по id с фолбэком на сам id (задачи со старым/чужим статусом).
-  // Посевные (is_reserved) переводятся — см. categories.svelte.ts
+  // Display by id, falling back to the id itself (tasks carrying an old or foreign
+  // status). Seeded ones (is_reserved) are translated — see categories.svelte.ts
   name(id: string): string {
     const s = statuses.find(s => s.id === id);
     if (!s) return id;

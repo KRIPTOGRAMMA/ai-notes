@@ -4,15 +4,14 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use crate::error::AppResult;
 
-// Статус-фолбэк для невалидных/удалённых значений — тот же принцип, что
-// FALLBACK_CATEGORY у categories.rs.
+// The fallback status for invalid or deleted values — the same principle as
+// FALLBACK_CATEGORY in categories.rs.
 pub const FALLBACK_STATUS: &str = "Todo";
 
-// Исходные 4 статуса (бывшие варианты enum TaskStatus) — с ними завязана
-// бизнес-логика (Done → hidden+completed_at в complete_task, InProgress →
-// тайм-трекинг, дедлайн/триггер-запросы сравнивают напрямую со строками),
-// поэтому не переименовываются и не удаляются, в отличие от пользовательских
-// колонок канбана.
+// The original 4 statuses (the former TaskStatus enum variants) carry business
+// logic (Done -> hidden+completed_at in complete_task, InProgress -> time
+// tracking, and deadline/trigger queries compare against the strings directly),
+// so unlike user-defined kanban columns they cannot be renamed or deleted.
 pub const RESERVED_STATUSES: [&str; 4] = ["Todo", "InProgress", "Done", "Archived"];
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, sqlx::FromRow)]
@@ -108,7 +107,7 @@ pub async fn delete_status_impl(pool: &SqlitePool, id: String) -> AppResult<()> 
     if RESERVED_STATUSES.contains(&id.as_str()) {
         return Err("Встроенный статус нельзя удалить".to_string().into());
     }
-    // Задачи удаляемого статуса переезжают в фолбэк (Todo)
+    // Tasks in the status being deleted move to the fallback (Todo)
     sqlx::query("UPDATE tasks SET status = ? WHERE status = ?")
         .bind(FALLBACK_STATUS)
         .bind(&id)
@@ -121,8 +120,8 @@ pub async fn delete_status_impl(pool: &SqlitePool, id: String) -> AppResult<()> 
     Ok(())
 }
 
-// Валидация статуса на записи задачи: неизвестный id тихо становится
-// фолбэком (Todo) — тот же принцип, что valid_or_fallback у категорий.
+// Status validation when writing a task: an unknown id silently becomes the
+// fallback (Todo) — the same principle as valid_or_fallback for categories.
 pub async fn valid_or_fallback(pool: &SqlitePool, status: &str) -> String {
     let exists: Option<i64> = sqlx::query_scalar("SELECT 1 FROM statuses WHERE id = ?")
         .bind(status)
@@ -161,7 +160,7 @@ mod tests {
         let pool = test_pool().await;
 
         let status = create_status_impl(&pool, "На ревью".into(), "#ff0000".into()).await.unwrap();
-        assert_eq!(status.position, 4); // после посевных 0..3
+        assert_eq!(status.position, 4); // after the seeded 0..3
         assert!(!status.is_reserved);
 
         update_status_impl(&pool, status.id.clone(), UpdateStatus {
@@ -211,7 +210,7 @@ mod tests {
     #[tokio::test]
     async fn reserved_status_color_can_still_be_customized() {
         let pool = test_pool().await;
-        // Только имя защищено — цвет менять можно (косметика, не логика)
+        // Only the name is protected — the colour can change (cosmetics, not logic)
         update_status_impl(&pool, "Done".into(), UpdateStatus {
             name: None, color: Some("#123123".into()),
         }).await.unwrap();

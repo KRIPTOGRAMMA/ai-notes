@@ -21,16 +21,16 @@ describe("parseChecklist", () => {
   });
 
   it("строка без префикса — невыполненная подзадача", () => {
-    // Главный сценарий вставки: список скопирован откуда угодно, размечать
-    // его руками пользователь не обязан.
+    // The main paste scenario: the list was copied from anywhere and the user is
+    // under no obligation to mark it up by hand.
     expect(parseChecklist("собрать сумку")).toEqual([
       { title: "собрать сумку", done: false },
     ]);
   });
 
   it("пустые строки не становятся подзадачами", () => {
-    // Пользователь жмёт Enter раньше, чем начинает печатать — это норма, а не
-    // повод создать подзадачу без названия.
+    // The user presses Enter before starting to type — normal, and not a reason to
+    // create a nameless subtask.
     expect(parseChecklist("[x] раз\n\n\n[ ] два\n   \n")).toHaveLength(2);
   });
 
@@ -44,7 +44,7 @@ describe("parseChecklist", () => {
   });
 
   it("текст в скобках внутри названия не путается с префиксом", () => {
-    // Префикс — только в начале строки; скобки дальше по тексту это данные.
+    // The prefix only counts at the start of a line; brackets further along are data.
     const r = parseChecklist("[ ] позвонить [важно]");
     expect(r).toEqual([{ title: "позвонить [важно]", done: false }]);
   });
@@ -52,8 +52,8 @@ describe("parseChecklist", () => {
 
 describe("formatChecklist", () => {
   it("пишет префикс и невыполненным тоже", () => {
-    // Без `[ ]` отметить строку было бы нечем: пришлось бы печатать скобки
-    // руками вместо того, чтобы поставить x между готовых.
+    // Without `[ ]` there would be nothing to tick with: one would have to type the
+    // brackets by hand instead of putting an x between ready-made ones.
     expect(formatChecklist([{ title: "раз", done: false }])).toBe("[ ] раз");
   });
 
@@ -70,8 +70,8 @@ describe("toggleLine", () => {
   });
 
   it("нумерация пропускает пустые строки, как и разбор", () => {
-    // Индекс приходит от отрисованного списка, где пустых строк нет; если бы
-    // toggleLine считал их, галочка ставилась бы не на ту строку.
+    // The index comes from the rendered list, which has no empty lines; if toggleLine
+    // counted them the tick would land on the wrong line.
     expect(toggleLine("[ ] раз\n\n[ ] два", 1)).toBe("[ ] раз\n\n[x] два");
   });
 
@@ -80,15 +80,15 @@ describe("toggleLine", () => {
   });
 
   it("сохраняет пустые строки и текст без разметки", () => {
-    // Пересборка из parseChecklist потеряла бы пустую строку — поэтому
-    // toggleLine правит текст на месте, а не собирает его заново.
+    // Reassembling from parseChecklist would lose the empty line, which is why
+    // toggleLine edits the text in place rather than rebuilding it.
     expect(toggleLine("[ ] раз\n\n[ ] два", 0)).toBe("[x] раз\n\n[ ] два");
   });
 });
 
-// Границы CHECK_RE — контракт с редактором: на них считается диапазон, который
-// прячется виджетом-чекбоксом. Съедет граница — пользователь увидит скобки или,
-// наоборот, потеряет первую букву подзадачи.
+// CHECK_RE's bounds are a contract with the editor: the range hidden behind the
+// checkbox widget is computed from them. If a bound slips the user either sees the
+// brackets or loses the subtask's first letter.
 describe("CHECK_RE (границы разметки для виджета)", () => {
   it("совпадение покрывает скобки и пробел после них, но не текст", () => {
     const m = CHECK_RE.exec("[x] купить билеты");
@@ -98,7 +98,7 @@ describe("CHECK_RE (границы разметки для виджета)", () 
   });
 
   it("ведущий маркер списка уходит в первую группу", () => {
-    // Группа 1 не прячется — иначе исчез бы отступ вложенного пункта.
+    // Group 1 is not hidden, or a nested item's indent would disappear.
     const m = CHECK_RE.exec("  - [ ] собрать сумку");
     expect(m?.[1]).toBe("  - ");
     expect(m?.[0]).toBe("  - [ ] ");
@@ -127,9 +127,9 @@ describe("lineIndexAt", () => {
   });
 });
 
-// v0.9.48: разметка `[ ] ` спрятана виджетом, поэтому «стереть подзадачу» для
-// пользователя = стереть видимый текст. Раньше после этого оставалась строка
-// `[ ] ` — на экране пустая строка с чекбоксом, в данных ничего.
+// The `[ ] ` markup is hidden behind a widget, so to the user "erase the subtask"
+// means erasing the visible text. That used to leave a `[ ] ` line behind: an empty
+// line with a checkbox on screen and nothing in the data.
 describe("removeLineAt", () => {
   it("удаляет строку целиком вместе со скрытой разметкой", () => {
     const text = "[ ] раз\n[x] два\n[ ] три";
@@ -143,8 +143,8 @@ describe("removeLineAt", () => {
     expect(out.split("\n")).toHaveLength(1);
   });
 
-  // Первая строка — особый случай: перед ней нет перевода строки, и удалять
-  // надо тот, что после неё, иначе вторая строка останется с пустой над ней.
+  // The first line is a special case: there is no newline before it, so the one
+  // after it must go instead, or the second line is left with a blank above it.
   it("удаление первой строки поднимает вторую наверх", () => {
     const text = "[ ] раз\n[ ] два\n[ ] три";
     expect(removeLineAt(text, 0)).toBe("[ ] два\n[ ] три");
@@ -159,8 +159,8 @@ describe("removeLineAt", () => {
     expect(removeLineAt(text, text.length)).toBe("[ ] раз");
   });
 
-  // Удаление строки — операция над текстом, а не над списком подзадач:
-  // пустые строки, которые пользователь набрал, но не заполнил, сохраняются.
+  // Deleting a line is an operation on text rather than on the list of subtasks:
+  // empty lines the user typed but never filled in are preserved.
   it("не трогает соседние строки и их отметки", () => {
     const text = "[x] сделано\n[ ] лишняя\n[x] тоже сделано";
     expect(removeLineAt(text, text.indexOf("лишняя")))
@@ -175,13 +175,13 @@ describe("removeLineAt", () => {
 });
 
 
-// Главный сценарий удаления: пользователь стирает подзадачу С КОНЦА, а не
-// ставит каретку в начало строки. Когда исчезает последняя буква, подзадача
-// должна исчезнуть вместе с ней — иначе на экране остаётся пустая строка с
-// чекбоксом и требуется ещё одно нажатие по невидимым скобкам.
+// The main deletion scenario: the user erases a subtask FROM THE END rather than
+// putting the caret at the start of the line. When the last letter goes the subtask
+// must go with it — otherwise an empty line with a checkbox stays on screen and one
+// more press on the invisible brackets is required.
 describe("emptyAfterBackspace", () => {
   it("удаление последней буквы опустошает строку", () => {
-    // «[ ] я» — каретка в конце (col 5), стираем «я»
+    // "[ ] я" with the caret at the end (col 5); we erase "я"
     expect(emptyAfterBackspace("[ ] я", 5)).toBe(true);
   });
 
@@ -191,13 +191,13 @@ describe("emptyAfterBackspace", () => {
   });
 
   it("разметка за текст не считается", () => {
-    // Каретка сразу после скрытых скобок: текста нет вообще.
+    // The caret right after the hidden brackets: there is no text at all.
     expect(emptyAfterBackspace("[ ] ", 4)).toBe(true);
     expect(emptyAfterBackspace("[x] ", 4)).toBe(true);
   });
 
   it("каретка в начале строки с текстом — строка не пустеет", () => {
-    // Backspace здесь склеил бы строки, но текст подзадачи никуда не делся.
+    // Backspace here would join the lines, but the subtask's text has not gone anywhere.
     expect(emptyAfterBackspace("[ ] хлеб", 0)).toBe(false);
   });
 
@@ -214,17 +214,18 @@ describe("emptyAfterBackspace", () => {
     expect(emptyAfterBackspace("[ ] хлеб", 6)).toBe(false);
   });
 
-  // Отступ и markdown-маркер — тоже разметка: строка `  - [ ] я` пустеет на
-  // удалении единственной буквы, а не считается непустой из-за дефиса.
+  // The indent and the markdown marker are markup too: the line `  - [ ] я` becomes
+  // empty when its only letter is deleted rather than counting as non-empty because
+  // of the hyphen.
   it("markdown-маркер и отступ за текст не считаются", () => {
     expect(emptyAfterBackspace("  - [ ] я", 9)).toBe(true);
     expect(emptyAfterBackspace("  - [ ] яд", 10)).toBe(false);
   });
 });
 
-// v0.9.49: пустая подзадача (`[ ] ` после Enter) и голая пустая строка
-// (Shift+Enter) видны на экране, но parseChecklist их выбрасывает — в БД они
-// не попадают. Расхождение между тем, что видно, и тем, что сохранено.
+// An empty subtask (`[ ] ` after Enter) and a bare blank line (Shift+Enter) are
+// visible on screen, but parseChecklist drops them and they never reach the DB — a
+// discrepancy between what is seen and what is saved.
 describe("dropEmptyLines", () => {
   it("убирает пустую подзадачу с чекбоксом", () => {
     expect(dropEmptyLines("[ ] раз\n[ ] \n[ ] два")).toBe("[ ] раз\n[ ] два");
@@ -253,24 +254,24 @@ describe("dropEmptyLines", () => {
     expect(dropEmptyLines("")).toBe("");
   });
 
-  // Побочный эффект пересборки через formatChecklist, принятый сознательно:
-  // разметка приводится к одному виду. Пользователь её не видит (она спрятана
-  // виджетом), а разнобой пришёл бы только вставкой из буфера.
+  // A deliberately accepted side effect of reassembling through formatChecklist: the
+  // markup is normalized to one form. The user does not see it (a widget hides it),
+  // and inconsistency could only arrive by pasting from the clipboard.
   it("нормализует разметку вставленного markdown", () => {
     expect(dropEmptyLines("- [X] раз\n  * [ ] два")).toBe("[x] раз\n[ ] два");
   });
 
-  // Строка без разметки — подзадача (так работает вставка списка), поэтому
-  // очистка её не выбрасывает, а дописывает префикс.
+  // A line with no markup is a subtask (that is how pasting a list works), so the
+  // cleanup does not drop it but adds the prefix.
   it("строка без разметки становится подзадачей, а не мусором", () => {
     expect(dropEmptyLines("раз\n\nдва")).toBe("[ ] раз\n[ ] два");
   });
 });
 
-// v0.9.50: свой Backspace закрывал одну клавишу, а Ctrl+Backspace (удалить
-// слово) шёл мимо и выедал скобки изнутри — в строке оставался видимый
-// огрызок «[ ». Показывать разметку пользователю нельзя, поэтому чинится
-// результат любого удаления, а не перечень клавиш.
+// A custom Backspace covered one key while Ctrl+Backspace (delete word) went past
+// it and ate the brackets from the inside, leaving a visible stump "[ " in the line.
+// The markup must never be shown to the user, so the result of any deletion is
+// repaired rather than a list of keys.
 describe("repairChecklistMarkup", () => {
   it("целую разметку не трогает", () => {
     const text = "[ ] раз\n[x] два";
@@ -283,9 +284,9 @@ describe("repairChecklistMarkup", () => {
     expect(repairChecklistMarkup("[x раз")).toBe("[ ] раз");
   });
 
-  // Огрызок должен быть отделён от текста пробелом. `[раз` не чинится
-  // намеренно: отличить остаток разметки от слова, начатого со скобки,
-  // невозможно, а испортить набранный текст хуже, чем оставить скобку.
+  // A stump must be separated from the text by a space. `[раз` is deliberately left
+  // alone: telling a leftover of the markup from a word begun with a bracket is
+  // impossible, and corrupting typed text is worse than leaving a bracket.
   it("скобка, приклеенная к слову, — текст, а не огрызок", () => {
     expect(repairChecklistMarkup("[раз")).toBe("[раз");
     expect(repairChecklistMarkup("[важно] сделать")).toBe("[важно] сделать");
@@ -294,7 +295,7 @@ describe("repairChecklistMarkup", () => {
   });
 
   it("строка из одного огрызка становится пустой", () => {
-    // Дальше её уберёт dropEmptyLines при уходе фокуса.
+    // dropEmptyLines will remove it later, when focus is lost.
     expect(repairChecklistMarkup("[ ")).toBe("");
     expect(repairChecklistMarkup("[")).toBe("");
   });
@@ -308,8 +309,8 @@ describe("repairChecklistMarkup", () => {
     expect(repairChecklistMarkup("  - [ дело")).toBe("  - [ ] дело");
   });
 
-  // Главный риск этой функции: съесть законный текст. Строка без разметки —
-  // валидная подзадача (так работает вставка списка), трогать её нельзя.
+  // This function's main risk is eating legitimate text. A line with no markup is a
+  // valid subtask (that is how pasting a list works) and must not be touched.
   it("строку без разметки не трогает", () => {
     expect(repairChecklistMarkup("просто текст")).toBe("просто текст");
     expect(repairChecklistMarkup("раз\nдва")).toBe("раз\nдва");

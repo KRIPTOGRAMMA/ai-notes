@@ -5,7 +5,7 @@ import { EN } from "./i18n.en";
 describe("translate", () => {
   it("русский возвращает ключ как есть — он и есть оригинал", () => {
     expect(translate("Задачи", "ru")).toBe("Задачи");
-    // даже если ключа нет в словаре EN
+    // even when the key is absent from the EN dictionary
     expect(translate("Никогда не переводившаяся строка", "ru"))
       .toBe("Никогда не переводившаяся строка");
   });
@@ -15,9 +15,9 @@ describe("translate", () => {
     expect(translate("Заметки", "en")).toBe("Notes");
   });
 
-  // Ключевое свойство схемы «ключ = русский текст»: недоделанный перевод
-  // деградирует в читаемую русскую строку, а не в «tasks.empty_state»
-  // или пустоту на экране.
+  // The key property of the "key = Russian text" scheme: an unfinished translation
+  // degrades into a readable Russian string rather than into "tasks.empty_state" or
+  // emptiness on screen.
   it("отсутствующий перевод отдаёт русский оригинал, а не пустоту", () => {
     const missing = "Строка, которой точно нет в словаре 12345";
     expect(translate(missing, "en")).toBe(missing);
@@ -39,10 +39,9 @@ describe("translate", () => {
   });
 });
 
-// v0.9.47: категории и статусы приходят из БД, поэтому ни один статический
-// тест по исходникам их не видел — «Работа» и «В работе» оставались русскими
-// на английском интерфейсе. Переводим только посевные записи и только пока их
-// не тронул пользователь.
+// Categories and statuses come from the DB, so no static test over the sources ever
+// saw them — "Работа" and "В работе" stayed Russian in an English interface. We
+// translate only the seeded rows, and only while the user has not touched them.
 describe("seededName", () => {
   it("посевная категория переводится по id", () => {
     expect(seededName("category", "Work", "Работа", "en")).toBe("Work");
@@ -59,38 +58,41 @@ describe("seededName", () => {
     expect(seededName("status", "Done", "Готово", "ru")).toBe("Готово");
   });
 
-  // Главное свойство: имя, которое написал пользователь, — его текст.
-  // Переводить его нельзя ни при каком совпадении с посевным.
+  // The key property: a name the user wrote is their text. It must not be translated
+  // no matter how it coincides with a seeded one.
   //
-  // «Работа» здесь проверяет проверку по id в чистом виде: id не посевной,
-  // поэтому сверка с оригиналом не участвует (uuid нет в таблице оригиналов),
-  // а имя переводимое — значит, отработать может только отсечка по id.
+  // "Работа" here exercises the id check in its pure form: the id is not a seeded
+  // one, so the comparison against the original does not come into play (a uuid is
+  // absent from the originals table) while the name is translatable — meaning only
+  // the id cutoff can be what fires.
   it("пользовательская категория не переводится", () => {
     expect(seededName("category", "b3f1c2a4-uuid", "Работа", "en")).toBe("Работа");
     expect(seededName("category", "b3f1c2a4-uuid", "Мои дела", "en")).toBe("Мои дела");
   });
 
   it("переименованная посевная категория не переводится", () => {
-    // id посевной, но имя уже не то — значит, пользователь его сменил.
-    // Перевод здесь спрятал бы правку от него самого.
+    // The id is a seeded one but the name no longer matches, which means the user
+    // changed it. Translating here would hide their edit from them.
     //
-    // Новые имена взяты ИЗ СЛОВАРЯ намеренно: на строке, которой в словаре
-    // нет, translate() и так вернул бы её как есть, и тест прошёл бы даже
-    // без сверки с оригиналом — проверял бы неполноту словаря, а не защиту.
+    // The new names are taken FROM THE DICTIONARY deliberately: on a string absent
+    // from it translate() would return the string as is anyway and the test would
+    // pass even without the comparison against the original — it would be testing the
+    // dictionary's incompleteness rather than the guard.
     expect(seededName("category", "Work", "Здоровье", "en")).toBe("Здоровье");
     expect(seededName("status", "Done", "Архив", "en")).toBe("Архив");
   });
 
-  // kind — часть ключа, а не украшение: без него статус «Done» нашёлся бы
-  // среди категорий и наоборот. Пары ниже не существуют ни в одной таблице.
+  // kind is part of the key rather than decoration: without it the status "Done"
+  // would be found among the categories and vice versa. The pairs below exist in
+  // neither table.
   it("kind участвует в поиске оригинала", () => {
     expect(seededName("category", "Done", "Готово", "en")).toBe("Готово");
     expect(seededName("status", "Work", "Работа", "en")).toBe("Работа");
   });
 
-  // Настройки блокируют поле переименования по этому списку. Разъедься он с
-  // таблицей оригиналов — посевная категория стала бы редактируемой, и первая
-  // же правка записала бы английский перевод в БД поверх русского оригинала.
+  // Settings disables the rename field based on this list. Should it drift from the
+  // originals table, a seeded category would become editable and the very first edit
+  // would write the English translation into the DB over the Russian original.
   it("список id для Настроек совпадает с посевными категориями", () => {
     expect([...SEEDED_CATEGORY_IDS].sort())
       .toEqual(["Health", "Home", "Other", "Study", "Work"]);
@@ -110,8 +112,8 @@ describe("detectLang", () => {
     expect(detectLang("RU-ru")).toBe("ru");
   });
 
-  // Всё нерусское — английский: нероссийскому пользователю английский
-  // полезнее русского, обратное неверно.
+  // Anything not Russian counts as English: to a non-Russian user English is more
+  // useful than Russian, and the converse does not hold.
   it("любая другая локаль — английский", () => {
     expect(detectLang("en-US")).toBe("en");
     expect(detectLang("de")).toBe("en");
@@ -126,8 +128,8 @@ describe("словарь EN", () => {
     }
   });
 
-  // Перевод, совпадающий с оригиналом, обычно означает забытую строку,
-  // а не намеренное решение. Исключения — общие для обоих языков слова.
+  // A translation identical to the original usually means a forgotten string rather
+  // than a deliberate decision. The exceptions are words shared by both languages.
   it("переводы не совпадают с русским оригиналом", () => {
     const sameAsKey = Object.entries(EN).filter(([k, v]) => k === v);
     expect(sameAsKey).toEqual([]);
@@ -147,22 +149,24 @@ describe("словарь EN", () => {
   });
 });
 
-// v0.9.36: главный риск постепенного наполнения словаря — обернуть строку в
-// t() и забыть добавить перевод. Тогда английский интерфейс молча покажет
-// русскую строку: механизм так и задуман (деградация лучше пустоты), но для
-// УЖЕ размеченных файлов это баг, а не незаконченный перевод.
+// The main risk of filling the dictionary gradually is wrapping a string in t() and
+// forgetting to add the translation. The English interface then silently shows a
+// Russian string: the mechanism is designed that way (degradation beats emptiness),
+// but for files ALREADY marked up that is a bug rather than an unfinished
+// translation.
 //
-// Поэтому проверяется не «весь UI переведён», а более узкое и честное: в
-// файлах, которые мы объявили переведёнными, каждый ключ есть в словаре.
-// Список файлов растёт по мере локализации — новый файл добавляется сюда же.
+// So what is checked is not "the whole UI is translated" but something narrower and
+// more honest: in the files we declared translated, every key is in the dictionary.
+// The list of files grows as localization proceeds — a new file is added right here.
 describe("покрытие словаря по размеченным файлам", () => {
-  // Файлы читаются через import.meta.glob (Vite, `as: "raw"`), а не через
-  // node:fs: @types/node в проекте нет, и тянуть его ради одного теста
-  // несоразмерно — glob типизирован самим Vite и работает в jsdom-окружении.
+  // The files are read through import.meta.glob (Vite, `as: "raw"`) rather than
+  // node:fs: there is no @types/node in this project and pulling it in for a single
+  // test would be disproportionate — glob is typed by Vite itself and works in the
+  // jsdom environment.
   const SOURCES = import.meta.glob("/src/**/*.svelte", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
 
-  // Список растёт по мере локализации: сюда добавляется файл, который мы
-  // объявили переведённым целиком.
+  // The list grows as localization proceeds: a file we have declared fully
+  // translated is added here.
   const LOCALIZED = [
     "/src/App.svelte",
     "/src/views/Settings.svelte",
@@ -193,40 +197,40 @@ describe("покрытие словаря по размеченным файла
     }
   });
 
-  // v0.9.46: тест выше ловит только строки, УЖЕ обёрнутые в t(). Русская
-  // строка, которую забыли обернуть, была для него невидима — именно так
-  // «локализация завершена» (v0.9.38) разошлась с реальностью: пользователь
-  // нашёл русский текст в Настройках, Sidebar, графе и подсказках. Этот тест
-  // смотрит с другой стороны: в размеченных файлах не должно остаться
-  // кириллицы вне t()/tr().
+  // The test above catches only strings ALREADY wrapped in t(). A Russian string
+  // someone forgot to wrap was invisible to it — that is exactly how "localization is
+  // finished" diverged from reality: the user found Russian text in Settings, the
+  // sidebar, the graph and the tooltips. This test looks from the other side: in
+  // marked-up files no Cyrillic may remain outside t()/tr().
   //
-  // Что сознательно НЕ считается нарушением:
-  // - комментарии (весь код проекта комментируется по-русски);
-  // - <style> (там кириллица бывает только в комментариях);
-  // - ключи внутри самих t("...") — это и есть словарные ключи;
-  // - блоки, помеченные `/* i18n-ok */` — их переводит не место объявления,
-  //   а место отрисовки (списки NAV и команд палитры: `{t(item.label)}`).
-  //   Пометка снимает проверку с блока до ближайшей строки `];` и обязана
-  //   быть явной: иначе тест либо молчит о реальных пропусках, либо требует
-  //   «чинить» рабочий код.
+  // What deliberately does NOT count as a violation:
+  // - comments (the whole project is commented in Russian);
+  // - <style> (Cyrillic appears there only in comments);
+  // - the keys inside t("...") themselves — those are the dictionary keys;
+  // - blocks marked `/* i18n-ok */`, which are translated where they are rendered
+  //   rather than where they are declared (the NAV and palette command lists:
+  //   `{t(item.label)}`). The marker lifts the check from the block up to the nearest
+  //   `];` line and must be explicit: otherwise the test either stays silent about
+  //   real omissions or demands "fixing" working code.
   it("в размеченных файлах нет кириллицы вне t()", () => {
     const offenders: string[] = [];
     for (const file of LOCALIZED) {
       let src = SOURCES[file] ?? "";
       src = src.replace(/<style[\s\S]*?<\/style>/g, "");
       src = src.replace(/<!--[\s\S]*?-->/g, "");
-      // Порядок важен: пометку `/* i18n-ok */` защищаем ДО вырезания
-      // блочных комментариев, иначе она удаляется вместе с ними и блок
-      // снова считается нарушением.
+      // The order matters: the `/* i18n-ok */` marker is protected BEFORE block
+      // comments are stripped, otherwise it is removed along with them and the block
+      // counts as a violation again.
       src = src.replace(/\/\*\s*i18n-ok\s*\*\//g, "@@I18N_OK@@");
       src = src.replace(/\/\*[\s\S]*?\*\//g, "");
       src = src.replace(/(^|[^:"'`\\])\/\/.*$/gm, (m, p1) =>
         m.includes("@@I18N_OK@@") ? `${p1}@@I18N_OK@@` : p1);
       src = src.replace(/@@I18N_OK@@/g, "i18n-ok");
-      // Вырезаем содержимое t("...") / tr("...") — оно обязано быть русским.
-      // Одинарные кавычки нужны наравне с двойными: внутри атрибута разметки
-      // (`title="{t('Поиск')} (Ctrl+K)"`) иначе не написать, и без этой ветки
-      // тест считал бы уже переведённую строку нарушением.
+      // The contents of t("...") / tr("...") are stripped — they are required to be
+      // Russian. Single quotes are needed as much as double ones: inside a markup
+      // attribute (`title="{t('Поиск')} (Ctrl+K)"`) there is no other way to write it,
+      // and without this branch the test would count an already-translated string as a
+      // violation.
       src = src.replace(/(?<![\w.])tr?\((["'])(?:(?!\1).)*\1/g, "t()");
       let skipUntilClose = false;
       for (const [i, line] of src.split("\n").entries()) {
@@ -242,10 +246,10 @@ describe("покрытие словаря по размеченным файла
     expect(offenders, `не обёрнуто в t():\n${offenders.join("\n")}`).toEqual([]);
   });
 
-  // Справка (help.ts) — чистые данные без t(): переводится при отрисовке в
-  // Settings.svelte (`{t(item.desc)}`). Поэтому предыдущие два теста её не
-  // видят вовсе, и без этой проверки новая тема справки молча осталась бы
-  // русской на английском интерфейсе — ровно так и вышло в v0.9.29→v0.9.45.
+  // The help (help.ts) is pure data with no t(): it is translated at render time in
+  // Settings.svelte (`{t(item.desc)}`). The previous two tests therefore do not see it
+  // at all, and without this check a new help topic would silently stay Russian in an
+  // English interface — which is exactly what happened.
   it("вся справка (help.ts) есть в словаре EN", () => {
     const HELP_SRC = import.meta.glob("/src/lib/help.ts", {
       query: "?raw", import: "default", eager: true,
@@ -260,9 +264,9 @@ describe("покрытие словаря по размеченным файла
     expect(missing, `нет перевода:\n${missing.join("\n")}`).toEqual([]);
   });
 
-  // keybinds.ts — та же схема, что help.ts: чистые данные, перевод при
-  // отрисовке (`{t(action.label)}` в Settings). Названия действий видны на
-  // вкладке «Хоткеи», и без этой проверки новое действие осталось бы русским.
+  // keybinds.ts follows the same scheme as help.ts: pure data translated at render
+  // time (`{t(action.label)}` in Settings). The action names are visible on the
+  // "Hotkeys" tab, and without this check a new action would stay Russian.
   it("названия действий (keybinds.ts) есть в словаре EN", () => {
     const KB = import.meta.glob("/src/lib/keybinds.ts", {
       query: "?raw", import: "default", eager: true,
@@ -276,11 +280,11 @@ describe("покрытие словаря по размеченным файла
     expect(missing, `нет перевода:\n${missing.join("\n")}`).toEqual([]);
   });
 
-  // Описания моделей приходят из Rust (commands/model.rs) и переводятся при
-  // отрисовке в ModelDownloader.svelte. Ни один из тестов выше их не видит:
-  // сам .svelte-файл размечен и чист, а кириллица живёт за пределами /src —
-  // ровно тот же слепой участок, из-за которого вкладка ИИ осталась русской
-  // после «локализация завершена» (v0.9.46).
+  // The model descriptions come from Rust (commands/model.rs) and are translated at
+  // render time in ModelDownloader.svelte. None of the tests above sees them: the
+  // .svelte file itself is marked up and clean while the Cyrillic lives outside /src —
+  // the very same blind spot that left the AI tab Russian after "localization is
+  // finished".
   it("описания моделей (model.rs) есть в словаре EN", () => {
     const RS = import.meta.glob("/src-tauri/src/commands/model.rs", {
       query: "?raw", import: "default", eager: true,
@@ -294,8 +298,8 @@ describe("покрытие словаря по размеченным файла
       const key = m[1].replace(/\\"/g, '"');
       if (!(key in EN)) missing.push(key);
     }
-    // Иначе тест «проходит», перестав что-либо находить: сменится формат
-    // строки в model.rs — и пустой список молча сойдёт за отсутствие пропусков.
+    // Otherwise the test "passes" by ceasing to find anything: if the string format in
+    // model.rs changes, an empty list would silently pass for an absence of omissions.
     expect(found, "в model.rs не найдено ни одного описания — изменился формат").toBeGreaterThan(0);
     expect(missing, `нет перевода:\n${missing.join("\n")}`).toEqual([]);
   });
@@ -304,10 +308,11 @@ describe("покрытие словаря по размеченным файла
     const missing: string[] = [];
     for (const file of LOCALIZED) {
       const src = SOURCES[file] ?? "";
-      // `tr(` — Calendar.svelte: там `t` занято переменной задачи в {#each},
-      // и перевод импортирован как `tr`. Без этой ветки тест молча считал бы
-      // файл переведённым, не проверив ни одного его ключа.
-      // (?<![\w.]) — чтобы не поймать split("...") / import("...")
+      // `tr(` is for Calendar.svelte, where `t` is taken by the task variable in
+      // {#each} and the translation helper is imported as `tr`. Without this branch the
+      // test would silently count the file as translated without checking a single one
+      // of its keys.
+      // (?<![\w.]) keeps split("...") and import("...") from being caught.
       for (const m of src.matchAll(/(?<![\w.])tr?\("([^"]+)"/g)) {
         if (!(m[1] in EN)) missing.push(`${file}: ${m[1]}`);
       }

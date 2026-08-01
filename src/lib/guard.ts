@@ -1,10 +1,10 @@
-// Общая обёртка вокруг вызовов бэкенда для сторов (v0.9.25).
+// A shared wrapper around backend calls for the stores.
 //
-// Вынесена из tasks.svelte.ts отдельным чистым модулем сознательно: vitest
-// в этом проекте настроен только на чистые ts-модули (vitest.config.ts,
-// include: src/**/*.test.ts, без svelte-плагина), поэтому логику, живущую
-// рядом с $state-рунами, юнит-тестами не покрыть. Здесь же — обычные
-// функции, и поведение ошибок проверяется тестами.
+// Deliberately extracted from tasks.svelte.ts into its own pure module: vitest in
+// this project is configured for pure ts modules only (vitest.config.ts, include:
+// src/**/*.test.ts, with no svelte plugin), so logic living next to $state runes
+// cannot be covered by unit tests. Here these are ordinary functions and the error
+// behaviour is verified by tests.
 
 export function describeError(e: unknown): string {
   if (typeof e === "string") return e;
@@ -14,9 +14,9 @@ export function describeError(e: unknown): string {
 
 export type GuardResult<T> = { ok: true; value: T } | { ok: false; error: string };
 
-// Выполняет операцию, приводя любую ошибку к строке для показа пользователю.
-// Вызывающий сам решает, что делать с результатом — стор кладёт error в
-// $state, откуда его рендерит вью.
+// Runs an operation, reducing any error to a string for display to the user. What
+// to do with the result is the caller's decision — the store puts the error into
+// $state, from where the view renders it.
 export async function runGuarded<T>(op: () => Promise<T>): Promise<GuardResult<T>> {
   try {
     return { ok: true, value: await op() };

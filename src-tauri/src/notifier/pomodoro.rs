@@ -4,8 +4,8 @@ use tokio::time::{sleep, Duration};
 use crate::commands::settings::{WorkMode, get_u64_setting, get_bool_setting, set_setting};
 use crate::notifier::scheduler::send_notification;
 
-// Пользовательская команда управления циклом (пауза/возобновление/пропуск фазы/
-// ручной старт-стоп вне Study).
+// A user command controlling the cycle (pause/resume/skip phase/manual
+// start-stop outside Study).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PomodoroCmd {
     TogglePause,
@@ -14,8 +14,9 @@ pub enum PomodoroCmd {
     Stop,
 }
 
-// Пишем строку в pomodoro_log при каждом завершении work-фазы (переход work→break).
-// task_id — активная сессия трекинга задачи, если она в этот момент идёт.
+// A row is written to pomodoro_log every time a work phase finishes (the
+// work->break transition). task_id is the active task-tracking session, if one is
+// running at that moment.
 async fn log_completed_work(pool: &SqlitePool) {
     let task_id: Option<String> = sqlx::query_scalar(
         "SELECT task_id FROM task_sessions WHERE ended_at IS NULL LIMIT 1"
@@ -35,14 +36,15 @@ async fn log_completed_work(pool: &SqlitePool) {
     .await;
 }
 
-// Канал команд из Tauri-команд (UI) в цикл. Управляемое состояние —
-// тип-обёртка, чтобы app.manage() не конфликтовал с другими Sender<T>.
+// The command channel from the Tauri commands (the UI) into the loop. The
+// managed state is a wrapper type so app.manage() does not clash with other
+// Sender<T> instances.
 pub struct PomodoroCmdTx(pub tokio::sync::mpsc::UnboundedSender<PomodoroCmd>);
 
-// Персистентный снимок цикла — читается фронтом (poll) и `ai-notes --status`.
-// phase: "work" | "break" | "paused" | "off". until — RFC3339 конца текущей
-// фазы (для "paused"/"off" не используется фронтом, но пишем на всякий случай
-// последнее актуальное значение).
+// A persistent snapshot of the cycle, read by the frontend (polling) and by
+// `ai-notes --status`. phase is "work" | "break" | "paused" | "off"; until is the
+// RFC3339 end of the current phase (unused by the frontend for "paused"/"off",
+// but we still write the last meaningful value just in case).
 async fn persist_state(pool: &SqlitePool, phase: &str, until: chrono::DateTime<chrono::Utc>) {
     let _ = set_setting(pool, "pomodoro_phase", phase).await;
     let _ = set_setting(pool, "pomodoro_until", &until.to_rfc3339()).await;
@@ -57,8 +59,8 @@ pub fn start_pomodoro(
 
     tokio::spawn(async move {
         let mut in_study = false;
-        // Ручной старт независим от Study: выставляется по PomodoroCmd::Start,
-        // гасится только по Stop (выход из Study его не трогает).
+        // A manual start is independent of Study: set by PomodoroCmd::Start and
+        // cleared only by Stop (leaving Study does not touch it).
         let mut manual = false;
         let mut working = true;
         let mut paused = false;
@@ -130,7 +132,7 @@ pub fn start_pomodoro(
                 in_study = true;
                 working = true;
                 paused = false;
-                // .max(1) — страховка от 0 в БД: иначе remaining -= 1 уйдёт в underflow
+                // .max(1) guards against a 0 in the DB: otherwise remaining -= 1 underflows
                 work_secs = get_u64_setting(&pool, "pomodoro_work_mins", 25).await.max(1) * 60;
                 break_secs = get_u64_setting(&pool, "pomodoro_break_mins", 5).await.max(1) * 60;
                 remaining = work_secs;
@@ -139,8 +141,8 @@ pub fn start_pomodoro(
                 if get_bool_setting(&pool, "focus_mode_auto", true).await {
                     crate::notifier::mute::extend_quiet_until(&pool, until).await;
                 }
-                // Пауза уведомлений: таймер идёт, но молча. Проверяем только в момент
-                // отправки — не дёргаем БД каждый секундный тик.
+                // Notification pause: the timer runs but stays silent. Checked only
+                // at the moment of sending, so the DB is not hit every second.
                 if !crate::notifier::mute::muted_now(&pool, &mode).await {
                     {
                         let lang = crate::i18n::current_lang(&pool).await;
@@ -150,8 +152,9 @@ pub fn start_pomodoro(
                 }
                 continue;
             } else if !in_study && manual {
-                // Study включился поверх уже идущего ручного цикла — считаем его "в Study"
-                // для единообразия статуса, но цикл продолжается без перезапуска.
+                // Study switched on over an already-running manual cycle: we treat it
+                // as "in Study" for a consistent status, but the cycle continues
+                // without a restart.
                 in_study = true;
             }
 

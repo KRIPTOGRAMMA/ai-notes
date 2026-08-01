@@ -21,8 +21,8 @@ mod tests {
     use super::*;
     use sqlx::Row;
 
-    // init_db работает с файловой БД (create_database/database_exists), поэтому
-    // тестируем на временном файле, а не sqlite::memory:.
+    // init_db works with a file-backed DB (create_database/database_exists), so we
+    // test against a temporary file rather than sqlite::memory:.
     fn temp_db_url() -> (String, std::path::PathBuf) {
         let path = std::env::temp_dir()
             .join(format!("ai-notes-test-{}.db", uuid::Uuid::new_v4()));
@@ -40,7 +40,7 @@ mod tests {
         let (url, path) = temp_db_url();
         let pool = init_db(&url).await.expect("init_db failed");
 
-        // Все ключевые таблицы из миграций 0001–0007 на месте
+        // Every key table from migrations 0001-0007 is present
         for table in ["tasks", "notes", "settings", "activity_log", "tasks_fts"] {
             let row = sqlx::query(
                 "SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name = ?"
@@ -52,7 +52,7 @@ mod tests {
             assert!(row.is_some(), "таблица {table} не создана миграциями");
         }
 
-        // Повторный init_db на уже существующем файле не падает (идемпотентность)
+        // A second init_db over an existing file does not fail (idempotence)
         drop(pool);
         let pool2 = init_db(&url).await.expect("повторный init_db упал");
         drop(pool2);
@@ -61,8 +61,9 @@ mod tests {
 
     #[tokio::test]
     async fn fts_triggers_sync_on_insert_update_delete() {
-        // Регресс на баг 0004: триггеры tasks_fts должны работать по rowid,
-        // иначе после UPDATE индекс расходится и MATCH падает "malformed".
+        // Regression for the 0004 bug: the tasks_fts triggers must work by rowid,
+        // otherwise the index diverges after an UPDATE and MATCH fails as
+        // "malformed".
         let (url, path) = temp_db_url();
         let pool = init_db(&url).await.unwrap();
 
@@ -81,7 +82,7 @@ mod tests {
             .fetch_one(&pool).await.unwrap().get("c");
         assert_eq!(found, 1, "FTS не нашёл задачу после INSERT");
 
-        // UPDATE: старый заголовок больше не ищется, новый — ищется, без malformed
+        // UPDATE: the old title no longer matches, the new one does, with no malformed error
         sqlx::query("UPDATE tasks SET title = ? WHERE title = ?")
             .bind("полить цветы").bind("покормить кота")
             .execute(&pool).await.unwrap();
@@ -96,7 +97,7 @@ mod tests {
             .fetch_one(&pool).await.unwrap().get("c");
         assert_eq!(new_found, 1, "FTS не нашёл задачу по новому заголовку");
 
-        // DELETE: индекс очищается
+        // DELETE: the index is cleared
         sqlx::query("DELETE FROM tasks WHERE title = ?")
             .bind("полить цветы")
             .execute(&pool).await.unwrap();

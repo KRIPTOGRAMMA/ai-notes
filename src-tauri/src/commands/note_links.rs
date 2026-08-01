@@ -1,8 +1,8 @@
-// ИИ-автолинковка заметок (v0.6.8): «Предложить связи» — модель смотрит на
-// текст текущей заметки и список названий остальных, предлагает, на какие
-// стоит сослаться. Тот же принцип, что у планировщика (commands::planner):
-// ответ — строгий JSON, но модели не доверяем — сами вырезаем массив и
-// фильтруем по реальным названиям заметок.
+// AI auto-linking of notes: "Suggest links" — the model looks at the current
+// note's text and the list of other notes' titles and proposes which ones are
+// worth linking to. The same principle as the planner (commands::planner): the
+// answer is strict JSON, but the model is not trusted — we cut the array out
+// ourselves and filter it against the real note titles.
 
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
@@ -24,9 +24,9 @@ pub struct LinkSuggestPayload {
     pub error: Option<String>,
 }
 
-// Модель отвечает произвольным текстом вокруг JSON — вырезаем массив, парсим
-// снисходительно, но каждый заголовок обязан совпасть (без учёта регистра) с
-// одним из реально существующих — иначе выдумка модели тихо отбрасывается.
+// The model answers with arbitrary text around the JSON, so we cut the array
+// out and parse leniently, but every title must match (case-insensitively) one
+// that really exists — otherwise the model's invention is silently discarded.
 pub fn parse_link_suggestions(raw: &str, known_titles: &[String]) -> Vec<String> {
     let Some(s) = raw.find('[') else { return vec![] };
     let Some(e) = raw.rfind(']') else { return vec![] };
@@ -86,8 +86,8 @@ pub async fn ai_suggest_links(app: tauri::AppHandle, note_id: String) -> Result<
         let r: Result<Vec<String>, String> = async {
             let pool = app.state::<SqlitePool>();
             let (prompt, others) = build_prompt(pool.inner(), &note_id).await?;
-            // verbatim: модель выбирает заголовки из готового списка, а не
-            // сочиняет текст — язык задаёт список, не интерфейс.
+            // verbatim: the model picks titles from a ready-made list rather
+            // than writing prose — the list sets the language, not the interface.
             let raw = ask_ai_verbatim(&app, SYSTEM_LINKS, &prompt).await?;
             Ok(parse_link_suggestions(&raw, &others))
         }.await;
@@ -156,6 +156,6 @@ mod tests {
         assert_eq!(others, vec!["Соседняя"]);
         assert!(prompt.contains("Одинокая"));
         assert!(prompt.contains("Соседняя"));
-        assert!(!prompt.contains(&other.id)); // id не должен утекать в промпт
+        assert!(!prompt.contains(&other.id)); // the id must not leak into the prompt
     }
 }

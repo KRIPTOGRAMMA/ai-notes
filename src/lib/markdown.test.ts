@@ -45,7 +45,7 @@ describe("renderMarkdown", () => {
     const html = renderMarkdown('[[<img src=x onerror="alert(1)">]]');
     const doc = new DOMParser().parseFromString(html, "text/html");
     expect(doc.querySelector("img")).toBeNull();
-    // Название целиком ушло в data-атрибут как строка
+    // The whole title went into the data attribute as a string
     expect(doc.querySelector("a.wikilink")?.getAttribute("data-wikilink"))
       .toBe('<img src=x onerror="alert(1)">');
   });
@@ -141,7 +141,7 @@ describe("parseTableAt", () => {
     expect(res!.table.header).toEqual(["A", "B"]);
     expect(res!.table.align).toEqual([null, null]);
     expect(res!.table.rows).toEqual([["1", "2"], ["3", "4"]]);
-    expect(res!.endLine).toBe(5); // 0-based индекс первой строки после таблицы
+    expect(res!.endLine).toBe(5); // the 0-based index of the first line after the table
   });
 
   it("разбирает выравнивание :---/:---:/---:", () => {

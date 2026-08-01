@@ -3,7 +3,7 @@
   import { onMount } from "svelte";
   import Icon from "./Icon.svelte";
 
-  // `t` здесь занято локальной переменной, перевод импортируется как `tr`.
+  // `t` is taken here by a local variable, so the translation helper is imported as `tr`.
   import { t as tr } from "../i18n.svelte";
   let { onClose }: { onClose: () => void } = $props();
 

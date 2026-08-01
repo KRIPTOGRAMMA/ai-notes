@@ -1,7 +1,7 @@
--- Подзадачи как чек-лист внутри задачи (§4.1 / §5.1 ТЗ).
--- Прогресс задачи = done / total. Привязка к родителю через task_id.
--- FK не объявляем жёстко (в SQLite enforcement off по умолчанию) — целостность
--- держим в коде: delete_task чистит свои подзадачи.
+-- Subtasks as a checklist inside a task. A task's progress is done / total, and
+-- the link to the parent is task_id. No hard FK is declared (enforcement is off
+-- by default in SQLite) — integrity is maintained in code: delete_task clears its
+-- own subtasks.
 CREATE TABLE IF NOT EXISTS subtasks (
     id          TEXT NOT NULL PRIMARY KEY,
     task_id     TEXT NOT NULL,

@@ -1,13 +1,13 @@
-// CLI-режим `ai-notes --status`: короткоживущий процесс для waybar custom
-// module (и любого другого статус-бара). Открывает БД read-only (WAL позволяет
-// читать параллельно с работающим приложением), печатает одну строку JSON в
-// stdout и выходит — Tauri не поднимается, single-instance не задевается.
+// The `ai-notes --status` CLI mode: a short-lived process for a waybar custom
+// module (or any other status bar). It opens the DB read-only (WAL allows reading
+// in parallel with the running app), prints a single JSON line to stdout and
+// exits — Tauri is never started and single-instance is not disturbed.
 //
-// Приоритет текста: активная сессия трекинга → идущий тайм-блок → идущая
-// рутина → следующий блок → следующая рутина → задача InProgress → счётчик
-// задач с дедлайном на сегодня → «свободно». Режим работы и пауза уведомлений —
-// в tooltip. Помодоро-таймер — рантайм-состояние приложения, в БД его нет,
-// поэтому в статусе не показывается.
+// Text priority: an active tracking session -> a running time block -> a running
+// routine -> the next block -> the next routine -> an InProgress task -> a count
+// of tasks due today -> "free". The work mode and any notification pause go into
+// the tooltip. The pomodoro timer is runtime state of the app and is absent from
+// the DB, so it is not shown in the status.
 
 use chrono::{DateTime, Datelike, Duration, Local, NaiveTime, TimeZone, Utc};
 use serde::Serialize;
@@ -19,9 +19,9 @@ const TITLE_MAX: usize = 28;
 pub struct StatusPayload {
     pub text: String,
     pub tooltip: String,
-    // Для стилизации в waybar: tracking | block | next | task | due | idle | off
+    // For styling in waybar: tracking | block | next | task | due | idle | off
     pub class: String,
-    // Режим работы (Light | Study | Focus) — для format-icons
+    // The work mode (Light | Study | Focus), for format-icons
     pub alt: String,
 }
 
@@ -54,10 +54,10 @@ struct Block {
 }
 
 pub async fn status_payload(pool: &SqlitePool, now: DateTime<Utc>) -> Result<StatusPayload, sqlx::Error> {
-    // v0.9.39: строка статуса читается из waybar, то есть вне окна приложения,
-    // поэтому язык берётся из тех же настроек, что и остальной интерфейс.
+    // The status line is read from waybar, i.e. outside the application window,
+    // so the language comes from the same settings as the rest of the interface.
     let lang = crate::i18n::current_lang(pool).await;
-    // Тайм-блоки сегодняшнего локального дня (не Done, не скрытые)
+    // Time blocks of today's local day (not Done, not hidden)
     let rows = sqlx::query(
         "SELECT title, scheduled_at, COALESCE(scheduled_mins, 60) AS mins FROM tasks
          WHERE hidden = 0 AND status != 'Done' AND scheduled_at IS NOT NULL AND deleted_at IS NULL",
@@ -87,7 +87,7 @@ pub async fn status_payload(pool: &SqlitePool, now: DateTime<Utc>) -> Result<Sta
     let current = blocks.iter().filter(|b| b.start <= now && now < b.end).last();
     let next = blocks.iter().find(|b| b.start > now);
 
-    // Рутины на сегодня: время в минутах от полуночи → абсолютное время сегодня
+    // Today's routines: minutes since midnight converted to an absolute time today
     let routine_rows = sqlx::query(
         "SELECT title, start_mins, duration_mins FROM routines
          WHERE active = 1 AND (days_mask & ?) != 0
@@ -126,8 +126,8 @@ pub async fn status_payload(pool: &SqlitePool, now: DateTime<Utc>) -> Result<Sta
     .await?
     .map(|r| r.get("title"));
 
-    // Дедлайн «на сегодня» = до локальной полуночи, просрочка входит.
-    // Сравнение строк корректно: оба операнда — RFC3339 в UTC.
+    // "Due today" means before local midnight, overdue items included. Comparing
+    // the strings is correct: both operands are RFC3339 in UTC.
     let tomorrow_local = today.succ_opt().unwrap_or(today);
     let tomorrow_utc = Local
         .from_local_datetime(&tomorrow_local.and_hms_opt(0, 0, 0).unwrap())
@@ -147,7 +147,7 @@ pub async fn status_payload(pool: &SqlitePool, now: DateTime<Utc>) -> Result<Sta
     let due: i64 = due_row.get("due");
     let overdue: i64 = due_row.get::<Option<i64>, _>("overdue").unwrap_or(0);
 
-    // Активная сессия трекинга (v0.7.9)
+    // The active tracking session
     let active_session: Option<(String, i64)> = sqlx::query(
         "SELECT s.started_at, t.title
          FROM task_sessions s
@@ -185,8 +185,9 @@ pub async fn status_payload(pool: &SqlitePool, now: DateTime<Utc>) -> Result<Sta
         .and_then(|s| DateTime::parse_from_rfc3339(&s).ok())
         .map(|t| t.with_timezone(&Utc));
 
-    // Помодоро — самое сиюминутное состояние (v0.6.6: раньше не показывалось,
-    // т.к. фаза жила только в рантайме и короткоживущий CLI её не видел).
+    // Pomodoro is the most immediate state. It used not to be shown at all,
+    // because the phase lived only in the runtime and the short-lived CLI could
+    // not see it.
     let pomo_label = match (pomo_phase.as_str(), pomo_until) {
         ("work", Some(t)) if t > now => Some(format!("🍅 {}", crate::i18n::tr_args("до {time}", lang, &[("time", hhmm(t))]))),
         ("break", Some(t)) if t > now => Some(format!("☕ {}", crate::i18n::tr_args("до {time}", lang, &[("time", hhmm(t))]))),
@@ -266,8 +267,9 @@ pub async fn status_payload(pool: &SqlitePool, now: DateTime<Utc>) -> Result<Sta
 }
 
 async fn open_readonly() -> Option<SqlitePool> {
-    // Тот же путь, что app.path().app_data_dir() у Tauri: data_dir + identifier
-    // (см. tauri.conf.json). mode=ro — файл не создаём и не трогаем схему.
+    // The same path Tauri's app.path().app_data_dir() yields: data_dir plus the
+    // identifier (see tauri.conf.json). mode=ro means we neither create the file
+    // nor touch the schema.
     let path = dirs::data_dir()?.join("com.ainotes.app").join("data.db");
     if !path.exists() {
         return None;
@@ -277,7 +279,7 @@ async fn open_readonly() -> Option<SqlitePool> {
         .ok()
 }
 
-// Точка входа CLI: печатает JSON для waybar и возвращается (вызывающий выходит).
+// The CLI entry point: prints the JSON for waybar and returns (the caller exits).
 pub fn print_status() {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -299,15 +301,15 @@ mod tests {
     async fn test_pool() -> SqlitePool {
         let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
         sqlx::migrate!("./src/db/migrations").run(&pool).await.unwrap();
-        // v0.9.39: язык задаётся явно. Без этого пустая настройка означала бы
-        // «определить по локали ОС», и тесты ниже, сверяющие русские строки,
-        // падали бы у разработчика с LANG=en_US — то есть результат зависел
-        // бы от машины, а не от кода.
+        // The language is set explicitly. Without this an empty setting would mean
+        // "detect from the OS locale", and the tests below that compare Russian
+        // strings would fail for a developer running LANG=en_US — the result would
+        // depend on the machine rather than on the code.
         crate::commands::settings::set_setting(&pool, "language", "ru").await.unwrap();
         pool
     }
 
-    // Сегодня, локальный полдень — детерминированное «сейчас» без краёв суток.
+    // Local noon today: a deterministic "now" away from the edges of the day.
     fn noon_utc() -> DateTime<Utc> {
         let today = Local::now().date_naive();
         Local
@@ -346,7 +348,7 @@ mod tests {
     async fn pomodoro_takes_priority_over_everything() {
         let pool = test_pool().await;
         let now = noon_utc();
-        // Идущий блок есть, но помодоро всё равно должно выиграть приоритет
+        // A block is running, but pomodoro must still win on priority
         insert_task(&pool, "писать отчёт", "Todo", None, Some(now - Duration::minutes(30)), Some(60)).await;
 
         for (k, v) in [
@@ -361,20 +363,20 @@ mod tests {
         assert!(p.text.starts_with("🍅 до "), "text: {}", p.text);
         assert!(p.tooltip.contains("Помодоро: работа"));
 
-        // Перерыв — другой символ и метка
+        // A break uses a different symbol and label
         sqlx::query("UPDATE settings SET value = 'break' WHERE key = 'pomodoro_phase'")
             .execute(&pool).await.unwrap();
         let p = status_payload(&pool, now).await.unwrap();
         assert!(p.text.starts_with("☕ до "), "text: {}", p.text);
         assert!(p.tooltip.contains("Помодоро: перерыв"));
 
-        // Пауза — без времени
+        // A pause carries no time
         sqlx::query("UPDATE settings SET value = 'paused' WHERE key = 'pomodoro_phase'")
             .execute(&pool).await.unwrap();
         let p = status_payload(&pool, now).await.unwrap();
         assert_eq!(p.text, "🍅 пауза");
 
-        // Истёкшая фаза (цикл ещё не тикнул) не должна перекрывать блок
+        // An expired phase (the loop has not ticked yet) must not mask the block
         sqlx::query("UPDATE settings SET value = 'work' WHERE key = 'pomodoro_phase'")
             .execute(&pool).await.unwrap();
         sqlx::query("UPDATE settings SET value = ? WHERE key = 'pomodoro_until'")
@@ -383,24 +385,25 @@ mod tests {
         let p = status_payload(&pool, now).await.unwrap();
         assert_eq!(p.class, "block");
 
-        // "off" — не показывается вовсе
+        // "off" is not shown at all
         sqlx::query("UPDATE settings SET value = 'off' WHERE key = 'pomodoro_phase'")
             .execute(&pool).await.unwrap();
         let p = status_payload(&pool, now).await.unwrap();
         assert_eq!(p.class, "block");
     }
 
-    // v0.9.39: весь тултип уходит в waybar, то есть виден вне окна. Проверяем
-    // не отдельную строку, а что при language=en в нём не остаётся кириллицы —
-    // тот же приём, что в e2e для экранов фронта.
+    // The whole tooltip goes to waybar, i.e. it is visible outside the window. We
+    // check not one particular string but that no Cyrillic remains in it when
+    // language=en — the same technique the e2e tests use for the frontend screens.
     #[tokio::test]
     async fn english_status_has_no_russian_left() {
         let pool = test_pool().await;
         crate::commands::settings::set_setting(&pool, "language", "en").await.unwrap();
         crate::commands::settings::set_setting(&pool, "work_mode", "Light").await.unwrap();
         let now = noon_utc();
-        // Идущий блок — чтобы в text попала ветка «▶ … до …», а не только
-        // «в работе»: иначе четыре строки с временем остались бы непроверенными.
+        // A running block, so the "▶ ... until ..." branch reaches text rather than
+        // just "in progress": otherwise four strings containing times would stay
+        // unchecked.
         insert_task(&pool, "Report", "Todo", None, Some(now - Duration::minutes(30)), Some(60)).await;
 
         let p = status_payload(&pool, now).await.unwrap();
@@ -418,7 +421,7 @@ mod tests {
         let p = status_payload(&pool, noon_utc()).await.unwrap();
         assert_eq!(p.text, "✓");
         assert_eq!(p.class, "idle");
-        assert_eq!(p.alt, "Light"); // дефолтный режим без настроек
+        assert_eq!(p.alt, "Light"); // the default mode with no settings
         assert!(p.tooltip.contains("Режим: Light"));
     }
 
@@ -426,7 +429,7 @@ mod tests {
     async fn current_block_wins_and_shows_end_time() {
         let pool = test_pool().await;
         let now = noon_utc();
-        // Идущий блок 11:30–12:30, следующий в 14:00, плюс InProgress-задача
+        // A running 11:30-12:30 block, the next at 14:00, plus an InProgress task
         insert_task(&pool, "писать отчёт", "Todo", None, Some(now - Duration::minutes(30)), Some(60)).await;
         insert_task(&pool, "созвон", "Todo", None, Some(now + Duration::hours(2)), Some(30)).await;
         insert_task(&pool, "фоновая задача", "InProgress", None, None, None).await;
@@ -444,7 +447,7 @@ mod tests {
         let pool = test_pool().await;
         let now = noon_utc();
 
-        // Только дедлайны: один просрочен, один вечером
+        // Deadlines only: one overdue, one in the evening
         insert_task(&pool, "просроченная", "Todo", Some(now - Duration::hours(3)), None, None).await;
         insert_task(&pool, "вечерняя", "Todo", Some(now + Duration::hours(5)), None, None).await;
         let p = status_payload(&pool, now).await.unwrap();
@@ -452,19 +455,19 @@ mod tests {
         assert_eq!(p.class, "due");
         assert!(p.tooltip.contains("Задач на сегодня: 2 (просрочено: 1)"));
 
-        // Появилась InProgress — приоритетнее счётчика
+        // An InProgress task appeared — higher priority than the counter
         insert_task(&pool, "важное дело прямо сейчас", "InProgress", None, None, None).await;
         let p = status_payload(&pool, now).await.unwrap();
         assert_eq!(p.class, "task");
         assert!(p.text.starts_with("▶ важное дело"));
 
-        // Будущий блок сегодня — приоритетнее InProgress
+        // A future block today outranks InProgress
         insert_task(&pool, "блок после обеда", "Todo", None, Some(now + Duration::hours(1)), Some(45)).await;
         let p = status_payload(&pool, now).await.unwrap();
         assert_eq!(p.class, "next");
         assert!(p.text.contains("блок после обеда"));
 
-        // Завершённые и вчерашние блоки не считаются
+        // Finished blocks and yesterday's do not count
         insert_task(&pool, "вчерашний блок", "Todo", None, Some(now - Duration::days(1)), Some(60)).await;
         insert_task(&pool, "сделанный блок", "Done", None, Some(now - Duration::minutes(10)), Some(60)).await;
         let p = status_payload(&pool, now).await.unwrap();
@@ -488,14 +491,14 @@ mod tests {
         assert!(p.tooltip.contains("Режим: Focus"));
         assert!(p.tooltip.contains("Уведомления: пауза до"));
 
-        // Истёкшая пауза не показывается
+        // An expired pause is not shown
         sqlx::query("UPDATE settings SET value = ? WHERE key = 'quiet_until'")
             .bind((now - Duration::minutes(1)).to_rfc3339())
             .execute(&pool).await.unwrap();
         let p = status_payload(&pool, now).await.unwrap();
         assert!(!p.tooltip.contains("Уведомления"));
 
-        // Бессрочная пауза
+        // An indefinite pause
         sqlx::query("UPDATE settings SET value = ? WHERE key = 'quiet_until'")
             .bind(crate::commands::settings::QUIET_FOREVER)
             .execute(&pool).await.unwrap();
@@ -508,7 +511,7 @@ mod tests {
         assert_eq!(ellipsize("короткое", 28), "короткое");
         let long = "очень длинное название задачи которое не влезает";
         let cut = ellipsize(long, 10);
-        assert_eq!(cut.chars().count(), 11); // 10 символов + …
+        assert_eq!(cut.chars().count(), 11); // 10 characters plus the ellipsis
         assert!(cut.ends_with('…'));
     }
 

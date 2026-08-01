@@ -1,21 +1,21 @@
-// Локализация бэкенда (v0.9.39).
+// Backend localization.
 //
-// Схема та же, что на фронте (src/lib/i18n.ts): **ключ — это русский текст**.
-// Причины те же и здесь: непереведённая строка деградирует в читаемый
-// русский оригинал, а не в «notify.deadline_now», и диффы остаются
-// читаемыми глазами. Держать две разные схемы в одном приложении было бы
-// хуже, чем переиспользовать доказавшую себя.
+// The scheme matches the frontend's (src/lib/i18n.ts): **the key is the Russian
+// text**. The reasons hold here too: an untranslated string degrades into the
+// readable Russian original rather than into "notify.deadline_now", and diffs
+// stay readable by eye. Keeping two different schemes in one application would
+// be worse than reusing the one that has proved itself.
 //
-// Что локализуется: только то, что пользователь реально видит вне окна —
-// уведомления, меню трея, строка статуса для waybar. Промпты к модели
-// (SYSTEM_* в commands/ai.rs, planner.rs) НЕ трогаются: это инструкции для
-// LLM, а не интерфейс; их перевод меняет качество ответов и требует
-// проверки на живой модели.
+// What is localized: only what the user actually sees outside the window —
+// notifications, the tray menu, the waybar status line. Prompts to the model
+// (SYSTEM_* in commands/ai.rs and planner.rs) are NOT touched: they are
+// instructions for an LLM, not interface; translating them changes answer
+// quality and requires verification against a live model.
 //
-// Язык читается из настроек при каждом обращении, а не кэшируется в статике:
-// уведомления шлются из фоновых циклов, которые живут всё время работы
-// приложения, и после переключения языка в Настройках следующий же пуш
-// должен прийти на новом языке — без перезапуска.
+// The language is read from the settings on every call rather than cached in a
+// static: notifications are sent from background loops that live for the whole
+// run, and after switching the language in Settings the very next push must
+// arrive in the new one — without a restart.
 
 use sqlx::SqlitePool;
 
@@ -25,9 +25,9 @@ pub enum Lang {
     En,
 }
 
-// Пустая настройка означает «пользователь не выбирал» — тогда, как и на
-// фронте, всё нерусское считается английским. Локаль ОС здесь читается из
-// LANG/LC_ALL: navigator.language бэкенду недоступен.
+// An empty setting means "the user has not chosen", in which case, as on the
+// frontend, anything non-Russian counts as English. The OS locale is read here
+// from LANG/LC_ALL: navigator.language is not available to the backend.
 pub fn lang_from_setting(saved: &str) -> Lang {
     match saved.trim() {
         "ru" => Lang::Ru,
@@ -44,8 +44,9 @@ fn detect_from_env() -> Lang {
     if raw.to_lowercase().starts_with("ru") { Lang::Ru } else { Lang::En }
 }
 
-// Текущий язык интерфейса из БД. Ошибка чтения — не повод падать в фоновом
-// цикле: язык определяется по окружению, уведомление всё равно уходит.
+// The current interface language from the DB. A read error is no reason to fail
+// inside a background loop: the language falls back to the environment and the
+// notification is still delivered.
 pub async fn current_lang(pool: &SqlitePool) -> Lang {
     let saved = crate::commands::settings::get_setting(pool, "language")
         .await
@@ -53,30 +54,30 @@ pub async fn current_lang(pool: &SqlitePool) -> Lang {
     lang_from_setting(&saved)
 }
 
-// Словарь: русский оригинал → английский перевод. Отсутствие ключа не
-// ошибка — вернётся сам ключ (русский текст).
+// The dictionary: Russian original -> English translation. A missing key is not
+// an error — the key itself (the Russian text) is returned.
 fn en(key: &str) -> Option<&'static str> {
     Some(match key {
-        // --- Уведомления: дедлайны ---
+        // --- Notifications: deadlines ---
         "Дедлайн наступил!" => "Deadline reached!",
         "Дедлайн через {n} ч" => "Deadline in {n} h",
         "Дедлайн через {n} мин" => "Deadline in {n} min",
-        // --- Уведомления: тайм-блоки ---
+        // --- Notifications: time blocks ---
         "Начался блок (до {time})" => "Block started (until {time})",
-        // --- Уведомления: помодоро ---
+        // --- Notifications: pomodoro ---
         "Помодоро запущено: {n} минут работы" => "Pomodoro started: {n} minutes of work",
         "Перерыв {n} минут — отдохни" => "Break for {n} minutes — take a rest",
         "Перерыв окончен: {n} минут работы" => "Break over: {n} minutes of work",
-        // --- Уведомления: сводка, цели, лимиты ---
+        // --- Notifications: digest, goals, limits ---
         "Утренняя сводка" => "Morning digest",
         "{cat}: {mins} мин из {limit} сегодня" => "{cat}: {mins} min of {limit} today",
-        // --- Уведомления: активность ---
+        // --- Notifications: activity ---
         "Вы отсутствовали {n} мин. Продолжим задачу «{task}» или сделаем перерыв?" =>
             "You were away for {n} min. Continue the task “{task}” or take a break?",
         "Вы отсутствовали {n} мин. Ближайшая задача: {task}" =>
             "You were away for {n} min. Next up: {task}",
         "Вы отсутствовали {n} мин. С возвращением!" => "You were away for {n} min. Welcome back!",
-        // --- Меню трея ---
+        // --- Tray menu ---
         "Показать" => "Show",
         "Быстрая задача" => "Quick task",
         "Быстрая заметка" => "Quick note",
@@ -93,7 +94,7 @@ fn en(key: &str) -> Option<&'static str> {
         "Помодоро: пауза/продолжить" => "Pomodoro: pause/resume",
         "Помодоро: пропустить фазу" => "Pomodoro: skip phase",
         "{base} — осталось {n} мин" => "{base} — {n} min left",
-        // --- Строка статуса (waybar) ---
+        // --- Status line (waybar) ---
         "БД не найдена" => "Database not found",
         "пауза" => "paused",
         "до {time}" => "until {time}",
@@ -112,10 +113,10 @@ fn en(key: &str) -> Option<&'static str> {
         "Задач на сегодня: {n}" => "Tasks due today: {n}",
         " (просрочено: {n})" => " (overdue: {n})",
         "Режим: {mode}" => "Mode: {mode}",
-        // --- Контекст для ИИ (v0.9.43) ---
-        // Это не интерфейс, а данные, которые уходят в промпт. Язык контекста
-        // обязан совпадать с языком промпта: английская инструкция поверх
-        // русского контекста не работает — модель отвечает на языке данных.
+        // --- Context for the AI ---
+        // This is not interface but data that goes into the prompt. The context's
+        // language must match the prompt's: an English instruction on top of
+        // Russian context does not work — the model answers in the data's language.
         "{date}: {n} мин" => "{date}: {n} min",
         "нет данных" => "no data",
         "Активные минуты по дням: {mins}. Выполнено задач за последние дни: {done}. Топ-категория выполненных задач: {cat}." =>
@@ -134,7 +135,7 @@ fn en(key: &str) -> Option<&'static str> {
         "Идёт блок «{task}» до {time}." => "Block “{task}” is running until {time}.",
         "Следующий блок: {time} «{task}»." => "Next block: {time} “{task}”.",
         "Просрочено: {tasks}." => "Overdue: {tasks}.",
-        // Зависимости задач (v0.9.56)
+        // Task dependencies
         "Сначала выполните: {tasks}." => "Complete these first: {tasks}.",
         "Задача разблокирована" => "Task unblocked",
         "Можно взяться: {task}." => "Ready to start: {task}.",
@@ -147,8 +148,8 @@ fn en(key: &str) -> Option<&'static str> {
     })
 }
 
-/// Перевод строки. Ключ — русский оригинал; отсутствующий перевод
-/// возвращает ключ, а не пустоту.
+/// Translates a string. The key is the Russian original; a missing translation
+/// returns the key rather than an empty string.
 pub fn tr(key: &str, lang: Lang) -> String {
     match lang {
         Lang::Ru => key.to_string(),
@@ -156,7 +157,7 @@ pub fn tr(key: &str, lang: Lang) -> String {
     }
 }
 
-/// Перевод с подстановкой `{name}`.
+/// Translation with `{name}` substitution.
 pub fn tr_args(key: &str, lang: Lang, args: &[(&str, String)]) -> String {
     let mut out = tr(key, lang);
     for (name, value) in args {
@@ -172,7 +173,7 @@ mod tests {
     #[test]
     fn russian_returns_key_unchanged() {
         assert_eq!(tr("Дедлайн наступил!", Lang::Ru), "Дедлайн наступил!");
-        // даже если ключа нет в словаре
+        // even when the key is absent from the dictionary
         assert_eq!(tr("Строки нет в словаре", Lang::Ru), "Строки нет в словаре");
     }
 
@@ -182,8 +183,9 @@ mod tests {
         assert_eq!(tr("Выход", Lang::En), "Quit");
     }
 
-    // Главное свойство схемы «ключ = русский текст»: недоделанный перевод
-    // деградирует в читаемую строку, а не в пустоту или имя ключа.
+    // The central property of the "key = Russian text" scheme: an unfinished
+    // translation degrades into a readable string rather than into emptiness or a
+    // key name.
     #[test]
     fn missing_translation_falls_back_to_russian() {
         let missing = "Строка, которой точно нет 12345";
@@ -211,8 +213,8 @@ mod tests {
         assert_eq!(lang_from_setting("  ru  "), Lang::Ru);
     }
 
-    // Плейсхолдеры перевода обязаны совпадать с оригиналом: разошедшийся
-    // {n} означал бы подстановку в никуда и «{n}» на экране пользователя.
+    // A translation's placeholders must match the original: a diverged {n} would
+    // mean substituting into nothing and showing "{n}" on the user's screen.
     #[test]
     fn placeholders_match_between_key_and_translation() {
         let keys = [
@@ -249,10 +251,10 @@ mod tests {
         }
     }
 
-    // Ключи, которые реально используются в коде, обязаны быть в словаре.
-    // Проверка идёт по исходникам: забыть добавить перевод после правки
-    // строки легко, и на английском она молча деградирует в русскую —
-    // механизм так задуман, но для уже локализованных мест это баг.
+    // Keys actually used in the code must be present in the dictionary. The check
+    // reads the sources: forgetting to add a translation after editing a string is
+    // easy, and in English it silently degrades into Russian — that is the
+    // mechanism working as designed, but for an already-localized place it is a bug.
     #[test]
     fn every_used_key_is_translated() {
         let sources = [
@@ -261,7 +263,7 @@ mod tests {
             include_str!("notifier/pomodoro.rs"),
             include_str!("monitor/activity.rs"),
             include_str!("lib.rs"),
-            // v0.9.43: контекст, уходящий в промпт ИИ, — тот же словарь
+            // the context that goes into the AI prompt uses the same dictionary
             include_str!("commands/ai.rs"),
             include_str!("commands/planner.rs"),
         ];
@@ -273,7 +275,7 @@ mod tests {
                 let after = &rest[q1 + 1..];
                 let Some(q2) = after.find('"') else { continue };
                 let key = &after[..q2];
-                // ключи без кириллицы — не наши (например, имена аргументов)
+                // keys with no Cyrillic are not ours (argument names, for instance)
                 if !key.chars().any(|c| ('а'..='я').contains(&c) || ('А'..='Я').contains(&c)) {
                     continue;
                 }

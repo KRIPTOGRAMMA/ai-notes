@@ -46,7 +46,7 @@ describe("parseComposer", () => {
 });
 
 describe("parseTaskText", () => {
-  const now = new Date("2026-07-23T10:00:00"); // четверг
+  const now = new Date("2026-07-23T10:00:00"); // a Thursday
 
   it("чистое название без маркеров — priority/category/tags/deadline пустые", () => {
     const d = parseTaskText("купить хлеб", now);
@@ -95,7 +95,7 @@ describe("parseTaskText", () => {
   });
 
   it("день недели — ближайшее будущее вхождение", () => {
-    // now = четверг 2026-07-23; "пятница" → завтра (2026-07-24)
+    // now is Thursday 2026-07-23, so "пятница" (Friday) means tomorrow (2026-07-24)
     const d = parseTaskText("встреча пятница 10:00", now);
     expect(d.deadline).toEqual(new Date("2026-07-24T10:00:00"));
   });
@@ -120,7 +120,7 @@ describe("parseTaskText", () => {
   });
 
   it("неизвестное слово после ! или @ не считается маркером-приоритетом, но @ и # всегда режутся", () => {
-    // ! с нераспознанным словом — оставляем токен как есть в названии (не смогли понять)
+    // ! followed by an unrecognized word: the token stays in the title as is (we could not parse it)
     const d = parseTaskText("сделать !абракадабра", now);
     expect(d.priority).toBeNull();
     expect(d.title).toBe("сделать !абракадабра");

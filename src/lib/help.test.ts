@@ -19,27 +19,27 @@ describe("HELP_TOPICS", () => {
     }
   });
 
-  // Главный риск справки — молчаливое устаревание. Переназначаемые хоткеи
-  // живут данными в keybinds.ts и рендерятся на вкладке «Хоткеи» с ТЕКУЩИМИ
-  // комбинациями; продублировать их здесь текстом — значит начать врать при
-  // первом же переназначении. Поэтому справка пишет, ГДЕ смотреть, а не какие.
+  // The help's main risk is going stale silently. Rebindable hotkeys live as data in
+  // keybinds.ts and are rendered on the "Hotkeys" tab with their CURRENT
+  // combinations; duplicating them here as text would start lying at the first
+  // rebinding. So the help says WHERE to look rather than which they are.
   //
-  // Комбинации внутри полей ввода (Ctrl+Enter, Shift+Enter, Ctrl+V, Ctrl+Tab,
-  // Ctrl+клик) — другое дело: они зашиты в обработчиках, в keybinds.ts их нет,
-  // переназначить их нельзя, поэтому устареть они не могут.
+  // Combinations inside input fields (Ctrl+Enter, Shift+Enter, Ctrl+V, Ctrl+Tab,
+  // Ctrl+click) are a different matter: they are hardcoded in handlers, absent from
+  // keybinds.ts and cannot be rebound, so they cannot go stale.
   it("не дублирует переназначаемые хоткеи — их значения только в keybinds.ts", () => {
     const text = HELP_TOPICS
       .flatMap(t => t.items.map(i => `${i.term} ${i.desc}`))
       .join(" ");
-    // Комбинации навигации и палитры (Ctrl+K, Ctrl+D, Ctrl+1..7)
+    // Navigation and palette combinations (Ctrl+K, Ctrl+D, Ctrl+1..7)
     expect(text).not.toMatch(/Ctrl\s*\+\s*[KDkd]\b/);
     expect(text).not.toMatch(/Ctrl\s*\+\s*\d/);
-    // Глобальные хоткеи быстрого ввода (Ctrl+Shift+N/M/B)
+    // The global quick-capture hotkeys (Ctrl+Shift+N/M/B)
     expect(text).not.toMatch(/Ctrl\s*\+?\s*Shift\s*\+?\s*[NMBnmb]\b/);
   });
 
-  // Пути зависят от ОС и от identifier'а приложения — в v0.9.28 зашитая
-  // строка `~/.local/share/ai-notes/...` оказалась неверной на всех ОС.
+  // Paths depend on the OS and on the application's identifier — a hardcoded
+  // `~/.local/share/ai-notes/...` turned out to be wrong on every OS.
   it("не содержит захардкоженных путей", () => {
     const text = HELP_TOPICS
       .flatMap(t => t.items.map(i => i.desc))

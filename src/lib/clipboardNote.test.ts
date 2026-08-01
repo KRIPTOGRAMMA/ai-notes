@@ -16,8 +16,8 @@ describe("parseClipboardNote", () => {
     });
   });
 
-  // Скопированное из браузера часто начинается с пустых строк — без этого
-  // заметка получила бы пустой заголовок при непустом буфере.
+  // Text copied from a browser often starts with blank lines — without this the note
+  // would get an empty title from a non-empty clipboard.
   it("ведущие пустые строки пропускаются, а не дают пустой заголовок", () => {
     expect(parseClipboardNote("\n\n  \nНастоящий заголовок\nтекст")).toEqual({
       title: "Настоящий заголовок",
@@ -42,8 +42,8 @@ describe("parseClipboardNote", () => {
     expect(r.content).toBe("абзац один\n\nабзац два");
   });
 
-  // Голый URL в заголовке нечитаем в списке заметок и в вики-ссылках —
-  // такой буфер целиком уходит в тело.
+  // A bare URL is unreadable as a title in the notes list and in wiki links, so such
+  // a clipboard goes entirely into the body.
   it("скопированная ссылка идёт в тело, а не в заголовок", () => {
     expect(parseClipboardNote("https://example.com/a/b?x=1")).toEqual({
       title: "",
@@ -62,8 +62,8 @@ describe("parseClipboardNote", () => {
     });
   });
 
-  // Ключевое отличие от «в строке есть ссылка»: у предложения со ссылкой
-  // внутри заголовок из первой строки по-прежнему осмысленный.
+  // The key difference from "the line contains a link": for a sentence with a link
+  // inside, a title taken from the first line still makes sense.
   it("предложение со ссылкой внутри остаётся заголовком", () => {
     expect(parseClipboardNote("смотри https://example.com потом")).toEqual({
       title: "смотри https://example.com потом",

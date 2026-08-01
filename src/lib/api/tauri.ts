@@ -100,13 +100,13 @@ export const api = {
   summarizeDay: () => invoke<void>("summarize_day"),
   summarizeWeek: () => invoke<void>("summarize_week"),
   getSettings: () => invoke<AppSettings>("get_settings"),
-  // v0.9.35: глобальные хоткеи. Список действий отдаёт бэкенд — он же их
-  // регистрирует, второй копии в TS быть не должно.
+  // Global hotkeys. The action list comes from the backend, which also registers
+  // them; there must be no second copy in TS.
   listGlobalActions: () => invoke<GlobalAction[]>("list_global_actions"),
-  // Проверка комбинации делается global-hotkey, а не своими правилами в TS.
+  // The combination is validated by global-hotkey rather than by our own rules in TS.
   validateGlobalCombo: (combo: string) => invoke<void>("validate_global_combo", { combo }),
-  // Применяет сохранённые комбинации без перезапуска; возвращает те, что не
-  // удалось зарегистрировать (заняты системой).
+  // Applies the saved combinations without a restart; returns those that could not
+  // be registered (taken by the system).
   applyGlobalHotkeys: () => invoke<string[]>("apply_global_hotkeys"),
   saveSettings: (settings: AppSettings) => invoke<void>("save_settings", { settings }),
   isWayland: () => invoke<boolean>("is_wayland"),

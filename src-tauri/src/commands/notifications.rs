@@ -3,8 +3,8 @@ use sqlx::{Row, SqlitePool};
 use serde::Serialize;
 use crate::error::AppResult;
 
-// Центр уведомлений (v0.9.16): лента из notification_log — история пушей
-// внутри приложения, populate'ится централизованно в notifier::scheduler::send_notification.
+// The Notification Centre: a feed backed by notification_log, the in-app history
+// of pushes, populated centrally in notifier::scheduler::send_notification.
 #[derive(Debug, Serialize, Clone, PartialEq)]
 pub struct NotificationEntry {
     pub id: String,
@@ -13,8 +13,8 @@ pub struct NotificationEntry {
     pub body: String,
     pub created_at: String,
     pub read_at: Option<String>,
-    // v0.9.18: если задано — клик по записи в Центре уведомлений открывает
-    // эту сущность (сейчас только "note", задел под другие типы на будущее).
+    // When set, clicking the entry in the Notification Centre opens this entity
+    // (currently only "note"; other types are anticipated).
     pub entity_type: Option<String>,
     pub entity_id: Option<String>,
 }
@@ -115,8 +115,8 @@ mod tests {
         assert_eq!(feed[1].title, "старое");
     }
 
-    // v0.9.18: записи без entity-ссылки (большинство существующих kind) —
-    // entity_type/entity_id должны читаться как None, не падать/паниковать.
+    // For entries without an entity reference (most existing kinds),
+    // entity_type/entity_id must read as None rather than failing or panicking.
     #[tokio::test]
     async fn entries_without_entity_ref_read_as_none() {
         let pool = test_pool().await;
@@ -191,6 +191,6 @@ mod tests {
         }
         let feed = get_notification_log_impl(&pool).await.unwrap();
         assert_eq!(feed.len(), 100);
-        assert_eq!(feed[0].title, "n0"); // самое свежее (наименьший offset) первым
+        assert_eq!(feed[0].title, "n0"); // the newest (smallest offset) comes first
     }
 }

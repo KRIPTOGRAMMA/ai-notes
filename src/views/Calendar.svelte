@@ -9,13 +9,13 @@
   import RoutinesModal from "../lib/components/RoutinesModal.svelte";
   import Icon from "../lib/components/Icon.svelte";
   import type { Task, CreateTaskPayload, RoutineBlock } from "../lib/types";
-  // `t` в этом файле занято переменной задачи в {#each}, поэтому перевод
-  // импортируется как `tr` — переименовывать циклы ради имени функции хуже.
+  // `t` is taken in this file by the task variable in {#each}, so the translation
+  // helper is imported as `tr` — renaming the loops for a function's sake is worse.
   import { t as tr, i18n } from "../lib/i18n.svelte";
 
-  // Задача открывается прямо здесь, а не переключением на экран Задач
-  // (v0.9.53): в календаре смотрят неделю целиком, и уход в другой раздел
-  // ради одной задачи ломал этот сценарий.
+  // A task opens right here rather than by switching to the Tasks screen: in the
+  // calendar one looks at the week as a whole, and leaving for another section over
+  // a single task broke that.
   let openTaskId = $state<string | null>(null);
 
   const today = new Date();
@@ -23,7 +23,7 @@
   let month = $state(today.getMonth()); // 0-11
   let viewMode = $state<"month" | "week">("month");
 
-  // ИИ-планировщик: предложенные блоки (призраки в сетке) до «Применить»
+  // The AI planner: proposed blocks (ghosts in the grid) before "Apply"
   interface PlannedBlock { id: string; title: string; scheduled_at: string; mins: number }
   let planning = $state(false);
   let proposed: PlannedBlock[] | null = $state(null);
@@ -32,8 +32,8 @@
   let aiEnabled = $state(false);
   let showRoutinesModal = $state(false);
 
-  // Сигнал «спланировать день» из командной палитры (Ctrl+K): переключить на
-  // неделю и запустить планировщик, как кнопка «⚡ Спланировать день».
+  // The "plan my day" signal from the command palette (Ctrl+K): switch to the week
+  // and start the planner, just like the "⚡ Plan my day" button.
   let planDayKey = $state(0);
   $effect(() => {
     planDayKey;
@@ -46,7 +46,7 @@
   onMount(() => {
     taskStore.load();
     routineStore.load();
-    // Капабилити-детект: при выключенном ИИ планировщик просто скрыт
+    // Capability detection: with AI turned off the planner is simply hidden
     api.getSettings().then(s => aiEnabled = s.ai_provider !== "none").catch(() => {});
     const unlisteners: UnlistenFn[] = [];
     (async () => {
@@ -79,7 +79,7 @@
     proposed = null;
   }
 
-  // Призраки по дням (план всегда на сегодня, но раскладываем универсально)
+  // Ghosts per day (a plan is always for today, but we lay them out generically)
   const proposedByDay = $derived.by(() => {
     const map = new Map<string, PlannedBlock[]>();
     for (const b of proposed ?? []) {
@@ -101,11 +101,11 @@
     return `${fmt(start)}–${fmt(end)}`;
   }
 
-  // v0.9.37: названия месяцев и дней недели берутся у Intl, а не из словаря.
-  // Это данные календаря, а не строки интерфейса: класть 19 записей в
-  // i18n.en.ts значило бы поддерживать вручную то, что платформа уже знает
-  // для обоих языков (и знала бы для третьего, если он появится).
-  // $derived — чтобы список пересобрался при смене языка без перезагрузки.
+  // Month and weekday names come from Intl rather than from the dictionary. These
+  // are calendar data, not interface strings: putting 19 entries into i18n.en.ts
+  // would mean maintaining by hand what the platform already knows for both
+  // languages (and would know for a third one, should it appear). A $derived so the
+  // list is rebuilt when the language changes, without a reload.
   const locale = $derived(i18n.lang === "en" ? "en-US" : "ru-RU");
   const MONTHS = $derived(
     Array.from({ length: 12 }, (_, m) => {
@@ -113,8 +113,8 @@
       return name.charAt(0).toUpperCase() + name.slice(1);
     })
   );
-  // Начало недели — понедельник (2021-03-01 был понедельником), как во всём
-  // приложении; Intl сам по себе порядок дней не задаёт.
+  // The week starts on Monday (2021-03-01 was one), as everywhere in the app; Intl
+  // by itself does not define the order of days.
   const WEEKDAYS = $derived(
     Array.from({ length: 7 }, (_, i) => {
       const name = new Intl.DateTimeFormat(locale, { weekday: "short" })
@@ -127,7 +127,7 @@
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   }
 
-  // Задачи по локальной дате дедлайна (скрытые из истории не показываем).
+  // Tasks by the local date of their deadline (hidden history items are not shown).
   const tasksByDay = $derived.by(() => {
     const map = new Map<string, Task[]>();
     for (const t of taskStore.activeTasks) {
@@ -148,10 +148,10 @@
     tasks: Task[];
   }
 
-  // Сетка месяца: недели с понедельника, всегда полные строки по 7.
+  // The month grid: weeks starting on Monday, always full rows of 7.
   const grid = $derived.by(() => {
     const first = new Date(year, month, 1);
-    const lead = (first.getDay() + 6) % 7; // сколько дней прошлого месяца показать
+    const lead = (first.getDay() + 6) % 7; // how many days of the previous month to show
     const start = new Date(year, month, 1 - lead);
     const todayKey = localDateKey(new Date());
 
@@ -187,8 +187,8 @@
     weekAnchor = new Date();
   }
 
-  // ===== Неделя: тайм-блокинг =====
-  const HOUR_H = 44; // px на час
+  // ===== Week: time blocking =====
+  const HOUR_H = 44; // px per hour
   const SNAP_MIN = 15;
 
   let weekAnchor = $state(new Date());
@@ -214,7 +214,7 @@
     return `${start.getDate()} ${MONTHS[start.getMonth()].slice(0, 3).toLowerCase()} — ${end.getDate()} ${MONTHS[end.getMonth()].slice(0, 3).toLowerCase()} ${end.getFullYear()}`;
   });
 
-  // Активная переработка размера блока: живой предпросмотр без сохранения на каждый пиксель
+  // An in-progress block resize: a live preview without saving on every pixel
   let resizing: { id: string; mins: number } | null = $state(null);
 
   function blockMins(t: Task): number {
@@ -222,7 +222,7 @@
     return t.scheduled_mins ?? 60;
   }
 
-  // Блоки по дням недели (только не скрытые задачи)
+  // Blocks by weekday (only tasks that are not hidden)
   const blocksByDay = $derived.by(() => {
     const map = new Map<string, Task[]>();
     for (const t of taskStore.activeTasks) {
@@ -235,13 +235,13 @@
     return map;
   });
 
-  // Простой в блоках (v0.9.30): task_id → минуты простоя. Грузится только
-  // для видимой недели и только в недельном режиме — в месячном блоки не
-  // показываются, запрашивать нечего.
+  // Idle time within blocks: task_id -> idle minutes. Loaded only for the visible
+  // week and only in week mode — the month view shows no blocks, so there is
+  // nothing to request.
   //
-  // Прошлое и настоящее, а не будущее: у блока в будущем простоя нет по
-  // определению, поэтому нулевые значения ничего не значат и не показываются
-  // (см. фильтр idle_mins > 0 в разметке).
+  // The past and present, not the future: a block in the future has no idle time by
+  // definition, so zero values mean nothing and are not shown (see the
+  // idle_mins > 0 filter in the markup).
   let blockIdle = $state(new Map<string, number>());
 
   async function loadBlockIdle() {
@@ -256,18 +256,18 @@
     blockIdle = map;
   }
 
-  // Перезагружаем при смене недели и при переключении в недельный режим.
+  // Reloaded when the week changes and when switching into week mode.
   $effect(() => {
     void viewMode;
     void weekAnchor;
     loadBlockIdle();
   });
 
-  // Рутины по дням недели: для каждого дня недели проверяем маску
+  // Routines by weekday: for each day of the week we check the mask
   const routinesByDay = $derived.by(() => {
     const map = new Map<string, { title: string; start_mins: number; duration_mins: number }[]>();
     for (const d of weekDays) {
-      const dayOfWeek = d.date.getDay() === 0 ? 6 : d.date.getDay() - 1; // 0=пн
+      const dayOfWeek = d.date.getDay() === 0 ? 6 : d.date.getDay() - 1; // 0 = Monday
       const blocks: RoutineBlock[] = [];
       for (const r of routineStore.active) {
         if (r.days_mask & (1 << dayOfWeek)) {
@@ -279,7 +279,7 @@
     return map;
   });
 
-  // Бэклог: активные задачи без блока (Todo/InProgress)
+  // The backlog: active tasks with no block (Todo/InProgress)
   const backlog = $derived(
     taskStore.activeTasks.filter(t => !t.scheduled_at && (t.status === "Todo" || t.status === "InProgress"))
   );
@@ -300,8 +300,8 @@
     return Math.round(mins / SNAP_MIN) * SNAP_MIN;
   }
 
-  // --- Drag&drop (HTML5): бэклог → слот, блок → другой слот ---
-  // dataTransfer хранит только id; смещение хвата держим в модульной переменной.
+  // --- Drag and drop (HTML5): backlog to slot, block to another slot ---
+  // dataTransfer holds only the id; the grab offset lives in a module variable.
   let dragOffsetY = 0;
 
   function onBlockDragStart(e: DragEvent, t: Task) {
@@ -337,7 +337,7 @@
     await taskStore.update(id, { scheduled_at: "" });
   }
 
-  // --- Ресайз за нижнюю кромку ---
+  // --- Resizing by the bottom edge ---
   function startResize(e: MouseEvent, t: Task) {
     e.preventDefault();
     e.stopPropagation();
@@ -360,7 +360,7 @@
     window.addEventListener("mouseup", up);
   }
 
-  // При входе в недельный режим прокручиваем сетку к 8 утра
+  // On entering week mode we scroll the grid to 8 in the morning
   let weekScrollEl: HTMLDivElement | undefined = $state();
   $effect(() => {
     if (viewMode === "week" && weekScrollEl) {
@@ -376,7 +376,7 @@
 
   const MAX_CHIPS = 3;
 
-  // Клик по дню — создание задачи с дедлайном на этот день (ключ ячейки).
+  // Clicking a day creates a task with a deadline on it (the cell's key).
   let createFor = $state<string | null>(null);
 
   async function handleCreate(data: unknown) {
@@ -440,9 +440,9 @@
                   <button class="block-body" onclick={() => openTaskId = t.id}>
                     <span class="block-time">{blockLabel(t)}</span>
                     <span class="block-title">{t.title}</span>
-                    <!-- Простой (v0.9.30): показывается только когда он есть.
-                         Ноль не рисуем — у будущих блоков он ноль по определению,
-                         и «0 мин простоя» выглядело бы как утверждение о факте. -->
+                    <!-- Idle time: shown only when there is any. Zero is not drawn —
+                         for future blocks it is zero by definition, and "0 min idle"
+                         would read as a statement of fact. -->
                     {#if blockIdle.get(t.id)}
                       <span class="block-idle" title={tr("Простой внутри блока по данным мониторинга")}>
                         {tr("простой {n} мин", { n: blockIdle.get(t.id) ?? 0 })}
@@ -592,7 +592,7 @@
     align-items: center;
     gap: 6px;
     margin-bottom: 12px;
-    /* см. Tasks.svelte: место под кнопки окна (v0.9.40) */
+    /* see Tasks.svelte: room for the window buttons */
     padding-right: var(--wincontrols-w);
   }
 
@@ -697,8 +697,8 @@
     padding-left: 5px;
   }
 
-  /* ===== Неделя ===== */
-  /* v0.9.54: вид — общий .seg в app.css, здесь только отступ от заголовка. */
+  /* ===== Week ===== */
+  /* The look comes from the shared .seg in app.css; only the gap from the heading is set here. */
   .mode-toggle {
     margin-left: 12px;
   }
@@ -793,8 +793,8 @@
     z-index: 2;
   }
 
-  /* Предложение ИИ: полупрозрачный пунктирный «призрак» до подтверждения */
-  /* Рутина: полупрозрачный блок без интерактивности */
+  /* An AI proposal: a translucent dashed "ghost" until it is confirmed */
+  /* A routine: a translucent block with no interactivity */
   .block.routine {
     background: color-mix(in srgb, var(--accent) 8%, var(--bg-primary));
     border: 1px dashed var(--accent);
@@ -890,9 +890,9 @@
     text-overflow: ellipsis;
   }
 
-  /* Простой (v0.9.30): приглушённый — это справка о факте, а не
-     предупреждение. Красным было бы упрёком за то, что пользователь
-     отошёл от компьютера. */
+  /* Idle time is muted because it states a fact rather than warning about
+     one. In red it would read as a reproach for stepping away from the
+     computer. */
   .block-idle {
     font-size: 10px;
     opacity: 0.75;
