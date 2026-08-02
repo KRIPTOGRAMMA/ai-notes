@@ -768,6 +768,26 @@
             { id: "qwen2.5-1.5b", name: "Qwen2.5 1.5B Instruct", url: "https://example.com/qwen2.5-1.5b.gguf", size_bytes: 1120000000, description: "Баланс скорости и качества.", ram_gb: 3, recommended: true, kind: "llm" },
             { id: "phi-3.5-mini", name: "Phi-3.5 Mini Instruct", url: "https://example.com/phi-3.5-mini.gguf", size_bytes: 2390000000, description: "Лучшее качество, но медленнее.", ram_gb: 5, recommended: false, kind: "llm" },
           ],
+    // Голосовой ввод (v0.9.65). Доступность управляется сидом: по умолчанию
+    // выключено — так же, как у настоящего пользователя без скачанной модели,
+    // поэтому существующие тесты не видят новой кнопки.
+    voice_available: () => db.voiceAvailable === true,
+    start_voice_recording: () => {
+      if (db.voiceAvailable !== true) throw new Error("Голосовой ввод недоступен");
+      db.voiceRecording = true;
+      persist();
+    },
+    stop_voice_recording: () => {
+      db.voiceRecording = false;
+      persist();
+      // Реального микрофона в e2e нет: мок отдаёт заранее заданный текст, как
+      // Rust отдал бы распознанный.
+      return db.voiceText ?? "надиктованный текст";
+    },
+    cancel_voice_recording: () => {
+      db.voiceRecording = false;
+      persist();
+    },
     download_model: ({ kind }) => {
       db.models = { ...(db.models ?? {}), [kind ?? "llm"]: { exists: true, size_bytes: 1024 } };
       persist();

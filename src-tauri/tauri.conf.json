@@ -50,7 +50,8 @@
     "targets": "all",
     "externalBin": [
       "binaries/llamafile",
-      "binaries/llamafile-wrapper"
+      "binaries/llamafile-wrapper",
+      "binaries/whisper-cli"
     ],
     "icon": [
       "icons/32x32.png",

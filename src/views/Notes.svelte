@@ -11,8 +11,9 @@
   import { convertFileSrc } from "@tauri-apps/api/core";
   import { save as saveDialog } from "@tauri-apps/plugin-dialog";
   import Icon from "../lib/components/Icon.svelte";
+  import VoiceButton from "../lib/components/VoiceButton.svelte";
   import type { Note, NoteRevision } from "../lib/types";
-  type EditorExports = { focus: () => void; formatBold: () => void; formatItalic: () => void; formatCode: () => void; formatHeading: () => void; formatChecklist: () => void; formatWikiLink: () => void; formatQuote: () => void; formatOrderedList: () => void; formatLink: () => void; insertTable: () => void; replaceRange: (from: number, to: number, text: string) => void };
+  type EditorExports = { focus: () => void; formatBold: () => void; formatItalic: () => void; formatCode: () => void; formatHeading: () => void; formatChecklist: () => void; formatWikiLink: () => void; formatQuote: () => void; formatOrderedList: () => void; formatLink: () => void; insertTable: () => void; replaceRange: (from: number, to: number, text: string) => void; insertAtCursor: (text: string) => void };
   let editorRef: EditorExports | undefined = $state();
 
   let selectedId: string | null = $state(null);
@@ -992,6 +993,9 @@ ${bodyHtml}
           <button class="btn-icon" title={t("Ссылка")} onclick={() => editorRef?.formatLink()}><Icon name="link" /></button>
           <button class="btn-icon" title={t("Код")} onclick={() => editorRef?.formatCode()}><Icon name="code" /></button>
           <button class="btn-icon" title={t("Таблица")} onclick={() => editorRef?.insertTable()}><Icon name="table" /></button>
+          <!-- Dictation (v0.9.65). The component renders nothing when voice input is
+               unavailable, so the toolbar simply looks as it did before. -->
+          <VoiceButton onText={(text) => editorRef?.insertAtCursor(text)} />
         </div>
       {/if}
 

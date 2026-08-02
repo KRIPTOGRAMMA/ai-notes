@@ -185,6 +185,7 @@ describe("покрытие словаря по размеченным файла
     "/src/lib/components/NotificationPanel.svelte",
     "/src/lib/components/TrackingWidget.svelte",
     "/src/lib/components/ModelDownloader.svelte",
+    "/src/lib/components/VoiceButton.svelte",
     "/src/views/NotesGraph.svelte",
     "/src/lib/components/TaskHistoryDetail.svelte",
     "/src/lib/components/WindowControls.svelte",

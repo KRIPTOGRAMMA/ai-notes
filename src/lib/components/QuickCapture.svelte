@@ -7,6 +7,8 @@
   import { parseClipboardNote } from "../clipboardNote";
   import { parseChecklist, formatChecklist } from "../checklistText";
   import ChecklistEditor from "./ChecklistEditor.svelte";
+  import VoiceButton from "./VoiceButton.svelte";
+  import { voice } from "../voice.svelte";
   import { applyCachedTheme } from "../theme";
   import type { PinnedItem, Subtask } from "../types";
   import { t } from "../i18n.svelte";
@@ -23,6 +25,11 @@
   let pinned = $state<PinnedItem | null>(null);
   let pinnedTitle = $state("");
   let pinnedText = $state("");
+  // Refs for voice input (v0.9.65): dictated text is spliced in at the caret, and
+  // a textarea gives its caret position only through the element itself.
+  let pinnedTextEl: HTMLTextAreaElement | undefined = $state();
+  let noteContentEl: HTMLTextAreaElement | undefined = $state();
+  let descriptionEl: HTMLTextAreaElement | undefined = $state();
   let saved = $state(false);
   // The pinned task's checklist. Unlike TaskModal, where edits accumulate and leave
   // as a diff on "Save", here every click goes to the DB at once: the slot is opened
@@ -257,7 +264,38 @@
     reset();
   }
 
+  // Dictation by Ctrl+Shift+D (v0.9.66). The text goes into whichever field holds
+  // the caret: this window has three of them depending on the mode, and asking the
+  // DOM is the only reliable way to tell which one the user is in.
+  //
+  // KeyD by e.code rather than e.key: on a Russian layout e.key is "в", and the
+  // hotkey must not depend on the layout — the same reason the global hotkeys are
+  // stored as "Ctrl+Shift+KeyN".
+  async function dictate() {
+    if (!(await voice.ensureChecked())) return;
+    const el = document.activeElement;
+    if (!(el instanceof HTMLTextAreaElement)) return;
+
+    const text = await voice.toggle();
+    if (!text) return;
+
+    if (el === pinnedTextEl) {
+      pinnedText = insertIntoTextarea(el, pinnedText, text);
+      saved = false;
+    } else if (el === noteContentEl) {
+      noteContent = insertIntoTextarea(el, noteContent, text);
+      fromClipboard = false;
+    } else if (el === descriptionEl) {
+      description = insertIntoTextarea(el, description, text);
+    }
+  }
+
   function onKeydown(e: KeyboardEvent) {
+    if (e.ctrlKey && e.shiftKey && e.code === "KeyD") {
+      e.preventDefault();
+      void dictate();
+      return;
+    }
     // Ctrl+Tab switches the creation tabs. In pinned-editing mode there are no tabs —
     // moving away into a creation form would mean abandoning an unsaved edit, so that
     // mode ignores the switch.
@@ -274,6 +312,32 @@
       if (mode === "task") { e.preventDefault(); submit(); }
       else if (e.ctrlKey) { e.preventDefault(); submit(); }
     }
+  }
+
+  // Inserts dictated text into a textarea at the caret, replacing the selection —
+  // the same thing typing would do (v0.9.65). Unlike the note editor there is no
+  // CodeMirror here, so the value is spliced by hand and the caret is put after the
+  // insertion; without that it would jump to the start on the next keystroke.
+  //
+  // Spaces are added on whichever side abuts a word character: whisper returns a
+  // bare phrase, so dictating mid-sentence would otherwise glue it to the
+  // neighbouring word on that side.
+  function insertIntoTextarea(el: HTMLTextAreaElement, current: string, text: string): string {
+    const from = el.selectionStart ?? current.length;
+    const to = el.selectionEnd ?? from;
+    const before = current.slice(0, from);
+    const after = current.slice(to);
+    const padLeft = before !== "" && !/\s$/.test(before);
+    const padRight = after !== "" && !/^\s/.test(after);
+    const insert = (padLeft ? " " : "") + text + (padRight ? " " : "");
+    const next = before + insert + after;
+    // The caret is restored after the DOM has the new value, otherwise the browser
+    // resets it to the end of the field.
+    queueMicrotask(() => {
+      el.focus();
+      el.setSelectionRange(from + insert.length, from + insert.length);
+    });
+    return next;
   }
 </script>
 
@@ -304,8 +368,15 @@
       <!-- svelte-ignore a11y_autofocus -->
       <input class="pin-title" bind:value={pinnedTitle} placeholder={t("Заголовок...")}
         oninput={() => saved = false} />
-      <textarea class="pin-text" bind:value={pinnedText} placeholder={t("Текст... (Ctrl+Enter — сохранить)")}
-        rows={pinned.kind === "task" ? 3 : 6} autofocus oninput={() => saved = false}></textarea>
+      <div class="field-with-voice">
+        <textarea class="pin-text" bind:this={pinnedTextEl} bind:value={pinnedText} placeholder={t("Текст... (Ctrl+Enter — сохранить)")}
+          rows={pinned.kind === "task" ? 3 : 6} autofocus oninput={() => saved = false}></textarea>
+        <VoiceButton onText={(text) => {
+          if (!pinnedTextEl) return;
+          pinnedText = insertIntoTextarea(pinnedTextEl, pinnedText, text);
+          saved = false;
+        }} />
+      </div>
 
       <!-- The checklist belongs to a task only: notes have no subtasks. Edits here
            reach the DB by themselves (after a typing pause, and also on Escape and
@@ -365,7 +436,13 @@
     </div>
 
     {#if showDescription}
-      <textarea bind:value={description} placeholder={t("Описание...")} rows="2"></textarea>
+      <div class="field-with-voice">
+        <textarea bind:this={descriptionEl} bind:value={description} placeholder={t("Описание...")} rows="2"></textarea>
+        <VoiceButton onText={(text) => {
+          if (!descriptionEl) return;
+          description = insertIntoTextarea(descriptionEl, description, text);
+        }} />
+      </div>
     {/if}
 
     <div class="buttons">
@@ -379,8 +456,15 @@
     <!-- svelte-ignore a11y_autofocus -->
     <input bind:value={noteTitle} placeholder={t("Заголовок заметки...")} autofocus
       oninput={() => fromClipboard = false} />
-    <textarea bind:value={noteContent} placeholder={t("Текст заметки... (Ctrl+Enter — сохранить)")} rows="3"
-      oninput={() => fromClipboard = false}></textarea>
+    <div class="field-with-voice">
+      <textarea bind:this={noteContentEl} bind:value={noteContent} placeholder={t("Текст заметки... (Ctrl+Enter — сохранить)")} rows="3"
+        oninput={() => fromClipboard = false}></textarea>
+      <VoiceButton onText={(text) => {
+        if (!noteContentEl) return;
+        noteContent = insertIntoTextarea(noteContentEl, noteContent, text);
+        fromClipboard = false;
+      }} />
+    </div>
 
     <div class="buttons">
       <button class="btn-ghost" onclick={cancel}>{t("Отмена")}</button>
@@ -428,6 +512,26 @@
   textarea {
     resize: none;
     font-size: 13px;
+  }
+  /* The microphone sits in the field's bottom-right corner rather than beside it:
+     the quick-capture window is narrow, and a button in the row would squeeze the
+     text. The wrapper is a flex item like the textarea it replaces, so the
+     surrounding layout is unchanged. */
+  .field-with-voice {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+  }
+  .field-with-voice :global(.voice-btn) {
+    position: absolute;
+    right: 6px;
+    bottom: 6px;
+    /* Semi-transparent so it does not hide the last line of text under it. */
+    opacity: 0.75;
+  }
+  .field-with-voice :global(.voice-btn:hover),
+  .field-with-voice :global(.voice-btn.recording) {
+    opacity: 1;
   }
   .buttons {
     display: flex;

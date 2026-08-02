@@ -148,4 +148,10 @@ export const api = {
   modelStatus: (kind?: ModelKind) => invoke<{ exists: boolean; size_bytes: number }>("model_status", { kind }),
   modelPath: (kind?: ModelKind) => invoke<string>("model_path", { kind }),
   downloadModel: (url: string, kind?: ModelKind) => invoke<void>("download_model", { url, kind }),
+  // Голосовой ввод (v0.9.65). voiceAvailable — capability detection: и модель,
+  // и бинарник whisper-cli должны существовать, иначе кнопки просто нет.
+  voiceAvailable: () => invoke<boolean>("voice_available"),
+  startVoiceRecording: () => invoke<void>("start_voice_recording"),
+  stopVoiceRecording: () => invoke<string>("stop_voice_recording"),
+  cancelVoiceRecording: () => invoke<void>("cancel_voice_recording"),
 };

@@ -397,6 +397,10 @@ export const EN: Record<string, string> = {
 
   // --- Voice input ---
   "Голосовой ввод": "Voice input",
+  "Надиктовать": "Dictate",
+  "Остановить и распознать": "Stop and transcribe",
+  "Надиктовать (Ctrl+Shift+D)": "Dictate (Ctrl+Shift+D)",
+  "Остановить и распознать (Ctrl+Shift+D)": "Stop and transcribe (Ctrl+Shift+D)",
   "Распознавание речи работает полностью на этом компьютере: запись никуда не отправляется. Нужна отдельная модель — её можно скачать здесь.":
     "Speech recognition runs entirely on this computer: the recording is never sent anywhere. It needs a separate model, which can be downloaded here.",
   "Модель распознавания хранится в": "The recognition model is stored in ",

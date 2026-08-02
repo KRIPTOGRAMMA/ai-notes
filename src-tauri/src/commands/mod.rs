@@ -21,3 +21,4 @@ pub mod notifications;
 pub mod statuses;
 pub mod pinned;
 pub mod hotkeys;
+pub mod voice;

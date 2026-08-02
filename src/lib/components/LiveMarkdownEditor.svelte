@@ -26,6 +26,7 @@
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { isSafeUrl } from "../urlSafety";
   import { api } from "../api/tauri";
+  import { voice } from "../voice.svelte";
   import { IMAGE_RE, imageMarkdown, extImageExt, parseTableAt, serializeTable, emptyTable, type ParsedTable, type TableAlign } from "../markdown";
 
   // `t` is taken here by a local variable, so the translation helper is imported as `tr`.
@@ -962,6 +963,17 @@
         { key: "Mod-b", run: () => { formatBold(); return true; } },
         { key: "Mod-i", run: () => { formatItalic(); return true; } },
         { key: "Mod-Shift-k", run: () => { formatWikiLink(); return true; } },
+        // Dictation (v0.9.66). The handler is async while `run` has to answer
+        // synchronously, so the promise is left running and the key is reported as
+        // handled straight away — otherwise the combination would fall through to
+        // defaultKeymap while the recording starts.
+        {
+          key: "Mod-Shift-d",
+          run: () => {
+            void dictate();
+            return true;
+          },
+        },
         ...historyKeymap,
         ...completionKeymap,
         ...defaultKeymap,
@@ -1042,6 +1054,42 @@
     view.dispatch({
       changes: { from, to, insert: text },
       selection: EditorSelection.cursor(from + text.length),
+      scrollIntoView: true,
+    });
+    view.focus();
+  }
+
+  // Dictation by Ctrl+Shift+D: the same recording the microphone button drives, so
+  // the key and the button never disagree about whether one is running.
+  //
+  // Nothing happens when voice input is unavailable — the key is then simply not
+  // ours, exactly as the button is absent rather than disabled.
+  async function dictate() {
+    if (!(await voice.ensureChecked())) return;
+    const text = await voice.toggle();
+    if (text) insertAtCursor(text);
+  }
+
+  // Inserts text where the cursor is, replacing the selection if there is one —
+  // the same thing typing would do. Used by voice input (v0.9.65): dictation is
+  // just another way of entering text, so it must not care whether the caret sits
+  // mid-word or a paragraph is selected.
+  //
+  // Spaces are added on whichever side abuts a word character: whisper returns a
+  // bare phrase with no padding, so dictating with the caret mid-sentence would
+  // otherwise glue the phrase to the neighbouring word on that side.
+  export function insertAtCursor(text: string) {
+    if (!view || !text) return;
+    const { state } = view;
+    const range = state.selection.main;
+    const charBefore = range.from > 0 ? state.doc.sliceString(range.from - 1, range.from) : "";
+    const charAfter = range.to < state.doc.length ? state.doc.sliceString(range.to, range.to + 1) : "";
+    const padLeft = charBefore !== "" && !/\s/.test(charBefore);
+    const padRight = charAfter !== "" && !/\s/.test(charAfter);
+    const insert = (padLeft ? " " : "") + text + (padRight ? " " : "");
+    view.dispatch({
+      changes: { from: range.from, to: range.to, insert },
+      selection: EditorSelection.cursor(range.from + insert.length),
       scrollIntoView: true,
     });
     view.focus();

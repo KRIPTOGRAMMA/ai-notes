@@ -44,6 +44,8 @@ tauri-plugin-single-instance = "2.4.3"
 wayland-client = "0.31.14"
 wayland-protocols = { version = "0.32.13", features = ["client", "staging"] }
 base64 = "0.22"
+cpal = "0.18.1"
+hound = "3.5.1"
 
 # Buttons in notifications: tauri-plugin-notification accepts them in its builder
 # but ignores them entirely on desktop (verified against 2.3.3, desktop.rs::show()

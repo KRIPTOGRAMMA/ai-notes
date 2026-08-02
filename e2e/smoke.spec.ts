@@ -4111,3 +4111,163 @@ test("ИИ-правила приложений: снятая галочка не
   await expect(patterns).toHaveValue("jetbrains-*");
 });
 
+
+// v0.9.65: голосовой ввод требует и модели, и бинарника whisper-cli. Пока их нет,
+// кнопки не должно быть вовсе — не отключённой, а отсутствующей: это тот же
+// capability detection, что у трекинга окон и кнопок в уведомлениях. Отключённая
+// кнопка задавала бы вопрос, на который из этого места не ответить.
+test("голос: без модели кнопки микрофона нет", async ({ page }) => {
+  await seedDb(page, { tasks: [], notes: [] }); // voiceAvailable не задан
+  await withMock(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.getByRole("button", { name: "+ Новая заметка" }).click();
+
+  await expect(page.locator(".format-toolbar")).toBeVisible();
+  await expect(page.locator(".voice-btn")).toHaveCount(0);
+});
+
+test("голос: надиктованный текст попадает в заметку", async ({ page }) => {
+  await seedDb(page, {
+    tasks: [], notes: [],
+    voiceAvailable: true,
+    voiceText: "купить хлеб и молоко",
+  });
+  await withMock(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.getByRole("button", { name: "+ Новая заметка" }).click();
+
+  const mic = page.locator(".format-toolbar .voice-btn");
+  await expect(mic).toBeVisible();
+
+  // Первый клик — запись пошла: состояние видно по классу, а не только по тексту
+  // подсказки, иначе пользователь не понимает, идёт ли запись.
+  await mic.click();
+  await expect(mic).toHaveClass(/recording/);
+
+  // Второй — распознавание и вставка
+  await mic.click();
+  await expect(mic).not.toHaveClass(/recording/);
+  await expect(page.locator(".cm-content")).toContainText("купить хлеб и молоко");
+});
+
+// Диктовка — это ввод текста, а не замена содержимого: она обязана уважать
+// каретку ровно так же, как печать с клавиатуры.
+test("голос: текст вставляется в позицию каретки, а не затирает заметку", async ({ page }) => {
+  await seedDb(page, {
+    tasks: [], notes: [],
+    voiceAvailable: true,
+    voiceText: "вставка",
+  });
+  await withMock(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.getByRole("button", { name: "+ Новая заметка" }).click();
+  await fillNoteEditor(page, "начало конец");
+
+  // ставим каретку между словами: 7 нажатий влево от конца («конец» + пробел)
+  // каретка между словами: «конец» — 5 символов, ещё шаг через пробел
+  await page.keyboard.press("End");
+  for (let i = 0; i < 6; i++) await page.keyboard.press("ArrowLeft");
+
+  const mic = page.locator(".format-toolbar .voice-btn");
+  await mic.click();
+  await mic.click();
+
+  // существующий текст цел, надиктованное — внутри него
+  await expect(page.locator(".cm-content")).toContainText("начало вставка конец");
+});
+
+// Быстрый слот — второе место, где диктовка нужна: сценарий «сказал и забыл».
+// Механика вставки там другая (обычная textarea, не CodeMirror), поэтому
+// проверяется отдельно.
+test("голос: диктовка в быстрый слот вставляет текст в textarea", async ({ page }) => {
+  await seedDb(page, {
+    tasks: [], notes: [], projects: [],
+    quickMode: "note",
+    voiceAvailable: true,
+    voiceText: "мысль на бегу",
+  });
+  await withMock(page);
+  await page.goto("/quick-task.html");
+
+  const field = page.locator("textarea");
+  await field.fill("было: ");
+
+  const mic = page.locator(".field-with-voice .voice-btn");
+  await mic.click();
+  await mic.click();
+
+  await expect(field).toHaveValue("было: мысль на бегу");
+});
+
+// v0.9.66: диктовка по Ctrl+Shift+D — второй вход в ту же запись, что и кнопка.
+// Состояние общее (lib/voice.svelte.ts), поэтому хоткей и кнопка не могут
+// разойтись в том, идёт запись или нет.
+test("голос: хоткей Ctrl+Shift+D диктует в редактор заметок", async ({ page }) => {
+  await seedDb(page, {
+    tasks: [], notes: [],
+    voiceAvailable: true,
+    voiceText: "надиктовано хоткеем",
+  });
+  await withMock(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.getByRole("button", { name: "+ Новая заметка" }).click();
+  await fillNoteEditor(page, "начало");
+
+  const mic = page.locator(".format-toolbar .voice-btn");
+
+  // первое нажатие — запись пошла, и это видно на кнопке: состояние общее
+  await page.keyboard.press("Control+Shift+D");
+  await expect(mic).toHaveClass(/recording/);
+
+  // второе — распознавание и вставка в каретку. fillNoteEditor оставляет каретку
+  // на новой пустой строке, поэтому пробел слева не добавляется — в начале строки
+  // он не нужен; обе строки целы.
+  await page.keyboard.press("Control+Shift+D");
+  await expect(mic).not.toHaveClass(/recording/);
+  await expect(page.locator(".cm-content")).toContainText("начало");
+  await expect(page.locator(".cm-content")).toContainText("надиктовано хоткеем");
+});
+
+// Без модели хоткей не наш: он не должен ни начинать запись, ни съедать комбинацию.
+test("голос: без модели хоткей не начинает запись", async ({ page }) => {
+  await seedDb(page, { tasks: [], notes: [] }); // voiceAvailable не задан
+  await withMock(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.getByRole("button", { name: "+ Новая заметка" }).click();
+  await fillNoteEditor(page, "текст");
+
+  await page.keyboard.press("Control+Shift+D");
+
+  await expect(page.locator(".voice-btn")).toHaveCount(0);
+  await expect(page.locator(".cm-content")).toContainText("текст");
+});
+
+test("голос: хоткей в быстром слоте вставляет в поле с кареткой", async ({ page }) => {
+  await seedDb(page, {
+    tasks: [], notes: [], projects: [],
+    quickMode: "note",
+    voiceAvailable: true,
+    voiceText: "голосом",
+  });
+  await withMock(page);
+  await page.goto("/quick-task.html");
+
+  const field = page.locator("textarea");
+  await field.fill("было:");
+  await field.focus();
+
+  await page.keyboard.press("Control+Shift+D");
+  await page.keyboard.press("Control+Shift+D");
+
+  await expect(field).toHaveValue("было: голосом");
+});

@@ -5,6 +5,7 @@ mod commands;
 mod notifier;
 mod monitor;
 mod ai;
+mod voice;
 mod status;
 mod i18n;
 
@@ -405,6 +406,10 @@ pub fn run() {
                         commands::model::model_status,
                         commands::model::model_path,
                         commands::model::download_model,
+                        commands::voice::voice_available,
+                        commands::voice::start_voice_recording,
+                        commands::voice::stop_voice_recording,
+                        commands::voice::cancel_voice_recording,
                         commands::subtasks::get_subtasks,
                         commands::subtasks::add_subtask,
                         commands::subtasks::toggle_subtask,
@@ -602,6 +607,7 @@ pub fn run() {
 
             app.manage(pool.clone());
             app.manage(Mutex::new(SidecarState::new()) as SharedSidecar);
+            app.manage(commands::voice::VoiceState::new());
 
             let tracker = Arc::new(monitor::activity::ActivityTracker::new());
             app.manage(tracker.clone());
