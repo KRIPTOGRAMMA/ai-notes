@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Task, Subtask, Blocker, CreateTaskPayload, UpdateTaskPayload, Note, CreateNotePayload, UpdateNotePayload, AppSettings, Project, UpdateProjectPayload, CategoryInfo, StatusInfo, NoteSnippet, TaskSnippet, GoalSnapshot, Routine, RoutineBlock, ActiveSession, NoteRevision, ChecklistTemplate, DayCompletion, ModelOption, SmartList, SmartListFilter, NotificationEntry, QuickMode, BlockIdle, PinnedItem, GlobalAction } from "../types";
+import type { Task, Subtask, Blocker, CreateTaskPayload, UpdateTaskPayload, Note, CreateNotePayload, UpdateNotePayload, AppSettings, Project, UpdateProjectPayload, CategoryInfo, StatusInfo, NoteSnippet, TaskSnippet, GoalSnapshot, Routine, RoutineBlock, ActiveSession, NoteRevision, ChecklistTemplate, DayCompletion, ModelOption, ModelKind, SmartList, SmartListFilter, NotificationEntry, QuickMode, BlockIdle, PinnedItem, GlobalAction } from "../types";
 
 export const api = {
   getTasks: () => invoke<Task[]>("get_tasks"),
@@ -142,8 +142,10 @@ export const api = {
   getActiveSession: () => invoke<ActiveSession | null>("get_active_session"),
   getTaskSeconds: (taskId: string) => invoke<number>("get_task_seconds", { taskId }),
   getProjectSeconds: (projectId: string, from: string) => invoke<number>("get_project_seconds", { projectId, from }),
-  listModelOptions: () => invoke<ModelOption[]>("list_model_options"),
-  modelStatus: () => invoke<{ exists: boolean; size_bytes: number }>("model_status"),
-  modelPath: () => invoke<string>("model_path"),
-  downloadModel: (url: string) => invoke<void>("download_model", { url }),
+  // kind is optional on every model command: omitting it means the chat model,
+  // which is what these calls meant before voice input existed.
+  listModelOptions: (kind?: ModelKind) => invoke<ModelOption[]>("list_model_options", { kind }),
+  modelStatus: (kind?: ModelKind) => invoke<{ exists: boolean; size_bytes: number }>("model_status", { kind }),
+  modelPath: (kind?: ModelKind) => invoke<string>("model_path", { kind }),
+  downloadModel: (url: string, kind?: ModelKind) => invoke<void>("download_model", { url, kind }),
 };

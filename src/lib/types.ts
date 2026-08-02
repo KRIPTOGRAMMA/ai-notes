@@ -307,6 +307,10 @@ export interface ActiveSession {
   elapsed_secs: number;
 }
 
+// Which engine a model feeds. Mirrors ModelKind in commands/model.rs, where the
+// variants are serialized in lowercase.
+export type ModelKind = "llm" | "whisper";
+
 export interface ModelOption {
   id: string;
   name: string;
@@ -315,6 +319,7 @@ export interface ModelOption {
   description: string;
   ram_gb: number;
   recommended: boolean;
+  kind: ModelKind;
 }
 
 // The quick-capture window's mode. "clipboard" is the same note form but

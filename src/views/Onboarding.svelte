@@ -12,8 +12,10 @@
   }
   let { settings, isWayland, onDone }: Props = $props();
 
-  // Step 3 (Wayland) is shown on Wayland only
-  const steps = isWayland ? [1, 2, 3, 4, 5] : [1, 2, 4, 5];
+  // Step 3 (Wayland) is shown on Wayland only. Step 6 (voice input) sits before the
+  // closing one and is entirely optional: nothing here has to be downloaded for the
+  // app to work, the step just makes the feature discoverable at all.
+  const steps = isWayland ? [1, 2, 3, 4, 6, 5] : [1, 2, 4, 6, 5];
   let stepIdx = $state(0);
   let step = $derived(steps[stepIdx]);
 
@@ -119,6 +121,13 @@
           <code>ai-notes --quick-task</code>.
         </p>
       {/if}
+    {:else if step === 6}
+      <h2>{t("Голосовой ввод")}</h2>
+      <p>{t("Заметки и быстрый ввод можно надиктовывать. Речь распознаётся на этом компьютере — запись никуда не отправляется.")}</p>
+      <p class="muted" style="font-size:13px;">{t("Нужна отдельная модель распознавания. Шаг можно пропустить — модель ставится позже в Настройках → ИИ.")}</p>
+      <div style="margin-top:10px;">
+        <ModelDownloader kind="whisper" />
+      </div>
     {:else}
       <h2>{t("Готово!")}</h2>
       <ul>

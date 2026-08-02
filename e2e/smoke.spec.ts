@@ -54,6 +54,9 @@ test("онбординг проходится до конца и больше н
   // шаг 3 (Wayland) пропущен: is_wayland → false
   await expect(page.getByText("Автозагрузка и хоткеи")).toBeVisible();
   await page.getByRole("button", { name: "Далее" }).click();
+  // v0.9.64: шаг голосового ввода — необязательный, проходится насквозь
+  await expect(page.getByText("Голосовой ввод")).toBeVisible();
+  await page.getByRole("button", { name: "Далее" }).click();
   await expect(page.getByText("Готово!")).toBeVisible();
   await page.getByRole("button", { name: "Начать", exact: true }).click();
 
@@ -708,8 +711,49 @@ test("онбординг: последний шаг ведёт в Настрой
   await page.getByRole("button", { name: "Начать настройку" }).click();
   await page.getByRole("button", { name: "Далее" }).click();
   await page.getByRole("button", { name: "Далее" }).click();
+  // v0.9.64: между автозагрузкой и финалом появился шаг голосового ввода.
+  await page.getByRole("button", { name: "Далее" }).click();
   await expect(page.getByText("Готово!")).toBeVisible();
   await expect(page.getByText("Настройках → Справка")).toBeVisible();
+});
+
+// v0.9.64: голосовой ввод требует отдельной модели, поэтому у него свой шаг в
+// онбординге — но приложение обязано работать и без неё, так что шаг проходится
+// насквозь без единого скачивания.
+test("онбординг: шаг голосового ввода пропускается без скачивания", async ({ page }) => {
+  await seedDb(page, { tasks: [], notes: [], settings: { onboarding_complete: false } });
+  await withMock(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Начать настройку" }).click();
+  await page.getByRole("button", { name: "Далее" }).click();
+  await page.getByRole("button", { name: "Далее" }).click();
+
+  await expect(page.getByText("Голосовой ввод")).toBeVisible();
+  // именно whisper-каталог, а не список чат-моделей
+  await expect(page.getByText("Whisper Base")).toBeVisible();
+  await expect(page.getByText("Qwen2.5 1.5B Instruct")).toHaveCount(0);
+
+  // шаг необязателен: «Далее» доводит до финала, ничего не скачав
+  await page.getByRole("button", { name: "Далее" }).click();
+  await expect(page.getByText("Готово!")).toBeVisible();
+});
+
+// v0.9.64: у распознавания свой раздел, не зависящий от ai_provider — модель
+// нужна и тогда, когда чат-модель облачная. Раньше единственный загрузчик жил
+// внутри блока «локальная модель» и при облачном провайдере не существовал.
+test("настройки: раздел голосового ввода есть и при облачном ИИ", async ({ page }) => {
+  await seedDb(page, { tasks: [], notes: [], settings: { onboarding_complete: true, ai_provider: "openai" } });
+  await withMock(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Настройки" }).click();
+  await page.locator(".settings-tab").getByText("ИИ", { exact: true }).click();
+
+  await expect(page.getByText("Голосовой ввод")).toBeVisible();
+  // путь и каталог — whisper'овские, а не от чат-модели
+  await expect(page.getByText("/home/user/.local/share/com.ainotes.app/models/whisper.bin")).toBeVisible();
+  await expect(page.getByText("Whisper Base")).toBeVisible();
 });
 
 // v0.9.28: путь к модели приходит от бэкенда (app_data_dir зависит от ОС),
@@ -2256,25 +2300,39 @@ test("настройки: список локальных моделей — к�
   await page.getByRole("button", { name: "Настройки" }).click();
   await page.getByRole("tab", { name: "ИИ", exact: true }).click();
 
+  // v0.9.64: на вкладке ИИ теперь два загрузчика (чат-модель и распознавание
+  // речи), поэтому проверки привязаны к секции чат-модели. Ослабить их до
+  // .first() значило бы перестать различать пикеры вообще.
+  const llmPicker = page.locator(".model-picker").filter({ hasText: "Qwen2.5" });
+
   // Рекомендованная модель выбрана по умолчанию, у неё бейдж "рекомендуется"
-  const recommendedOption = page.locator("label", { hasText: "Qwen2.5 1.5B Instruct" });
+  const recommendedOption = llmPicker.locator("label", { hasText: "Qwen2.5 1.5B Instruct" });
   await expect(recommendedOption).toBeVisible();
   await expect(recommendedOption.locator("input[type=radio]")).toBeChecked();
-  await expect(page.getByText("рекомендуется")).toBeVisible();
+  await expect(llmPicker.getByText("рекомендуется")).toBeVisible();
 
   // У каждой модели видно размер, требования по ОЗУ и описание
-  await expect(page.getByText(/ГБ · от \d+ ГБ ОЗУ/).first()).toBeVisible();
-  await expect(page.getByText("Самая быстрая и лёгкая")).toBeVisible();
+  await expect(llmPicker.getByText(/ГБ · от \d+ ГБ ОЗУ/).first()).toBeVisible();
+  await expect(llmPicker.getByText("Самая быстрая и лёгкая")).toBeVisible();
 
   // Выбор другой модели переключает, какая скачается
-  const phiOption = page.locator("label", { hasText: "Phi-3.5 Mini Instruct" });
+  const phiOption = llmPicker.locator("label", { hasText: "Phi-3.5 Mini Instruct" });
   await phiOption.click();
   await expect(phiOption.locator("input[type=radio]")).toBeChecked();
   await expect(recommendedOption.locator("input[type=radio]")).not.toBeChecked();
 
   // Свой URL — переключает на custom, поле редактируемое
   await page.getByPlaceholder("https://.../model.gguf").fill("https://example.com/custom.gguf");
-  await expect(page.locator("label", { hasText: "Свой URL" }).locator("input[type=radio]")).toBeChecked();
+  await expect(llmPicker.locator("label", { hasText: "Свой URL" }).locator("input[type=radio]")).toBeChecked();
+
+  // Выбор в одном пикере не трогает другой: у радиогрупп имя зависит от kind.
+  // Проверяется на варианте «Свой URL» — он единственный вне {#each}, и именно
+  // там имя группы легко забыть развести (так и случилось при написании).
+  const whisperPicker = page.locator(".model-picker").filter({ hasText: "Whisper" });
+  await whisperPicker.locator("label", { hasText: "Свой URL" }).locator("input[type=radio]").check();
+  await expect(whisperPicker.locator("label", { hasText: "Свой URL" }).locator("input[type=radio]")).toBeChecked();
+  // Выбор «Свой URL» у распознавания не должен сбрасывать его же у чат-модели.
+  await expect(llmPicker.locator("label", { hasText: "Свой URL" }).locator("input[type=radio]")).toBeChecked();
 });
 
 test("настройки: хоткеи — переназначение применяется, дефолтная комбинация перестаёт работать", async ({ page }) => {
@@ -2348,7 +2406,7 @@ test("настройки: поиск скрывает несовпавшие с�
 
   await page.getByRole("button", { name: "Настройки" }).click();
   const sections = page.locator(".settings section");
-  await expect(sections).toHaveCount(11); // +Справка (v0.9.29)
+  await expect(sections).toHaveCount(12); // +Справка (v0.9.29), +Голосовой ввод (v0.9.64)
 
   // «бэкап» — совпадение в «Авто-бэкап» (вкладка «Данные»), поиск (v0.8.10)
   // сам переключает на неё. Справка (v0.9.29) тоже объясняет бэкапы, и это
@@ -2362,6 +2420,13 @@ test("настройки: поиск скрывает несовпавшие с�
   await page.getByPlaceholder("Поиск по настройкам…").fill("");
   await expect(page.locator(".settings-tab.active")).toHaveText("Данные");
   await expect(page.locator(".settings section:visible")).toHaveCount(2); // Авто-бэкап + Данные
+
+  // v0.9.64: новая секция должна быть не только на своей вкладке, но и находима
+  // поиском — она добавлена последней по индексу, а SECTION_TAB сопоставляется
+  // по позиции, так что рассинхрон вкладки и секции виден именно здесь.
+  await page.getByPlaceholder("Поиск по настройкам…").fill("распознавания");
+  await expect(page.locator(".settings-tab.active")).toHaveText("ИИ");
+  await expect(page.locator(".settings section:visible .section-title")).toHaveText("Голосовой ввод");
 });
 
 test("авто-бэкап: секция в настройках, кнопка «Сделать сейчас» вызывает команду", async ({ page }) => {

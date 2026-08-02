@@ -2,9 +2,15 @@
   import { onMount, onDestroy } from "svelte";
   import { listen } from "@tauri-apps/api/event";
   import { api } from "../api/tauri";
-  import type { ModelOption } from "../types";
+  import type { ModelOption, ModelKind } from "../types";
 
   import { t } from "../i18n.svelte";
+
+  // Which model this picker manages. Defaults to the chat model: the component
+  // existed for it alone before voice input, and both call sites that predate the
+  // prop mean exactly that.
+  let { kind = "llm" as ModelKind }: { kind?: ModelKind } = $props();
+
   let options: ModelOption[] = $state([]);
   let selectedId: string = $state("");
   let customUrl = $state("");
@@ -24,18 +30,21 @@
   );
 
   async function refresh() {
-    const s = await api.modelStatus();
+    const s = await api.modelStatus(kind);
     exists = s.exists;
     sizeBytes = s.size_bytes;
   }
 
   onMount(async () => {
     try {
-      options = await api.listModelOptions();
+      options = await api.listModelOptions(kind);
       const recommended = options.find(o => o.recommended) ?? options[0];
       if (recommended) selectedId = recommended.id;
       await refresh();
-      unlisten = await listen<{ pct: number }>("model-download-progress", ({ payload }) => {
+      // Both pickers hear the same event, so each ignores the other's progress —
+      // otherwise downloading the chat model would animate the voice picker too.
+      unlisten = await listen<{ pct: number; kind: ModelKind }>("model-download-progress", ({ payload }) => {
+        if (payload.kind !== kind) return;
         pct = payload.pct;
       });
     } catch (e) {
@@ -51,7 +60,7 @@
     downloading = true;
     pct = 0;
     try {
-      await api.downloadModel(selectedUrl);
+      await api.downloadModel(selectedUrl, kind);
       await refresh();
     } catch (e) {
       error = String(e);
@@ -73,7 +82,7 @@
       <label class="option" class:active={!usingCustomUrl && selectedId === opt.id}>
         <input
           type="radio"
-          name="model-option"
+          name="model-option-{kind}"
           checked={!usingCustomUrl && selectedId === opt.id}
           disabled={downloading}
           onchange={() => { usingCustomUrl = false; selectedId = opt.id; }}
@@ -98,18 +107,18 @@
     <label class="option" class:active={usingCustomUrl}>
       <input
         type="radio"
-        name="model-option"
+        name="model-option-{kind}"
         checked={usingCustomUrl}
         disabled={downloading}
         onchange={() => { usingCustomUrl = true; }}
       />
       <div class="option-body">
-        <div class="option-title">{t("Свой URL (GGUF)")}</div>
+        <div class="option-title">{kind === "whisper" ? t("Свой URL (ggml)") : t("Свой URL (GGUF)")}</div>
         <input
           type="text"
           bind:value={customUrl}
           disabled={downloading}
-          placeholder="https://.../model.gguf"
+          placeholder={kind === "whisper" ? "https://.../ggml-base.bin" : "https://.../model.gguf"}
           class="custom-url-input"
           onfocus={() => { usingCustomUrl = true; }}
         />

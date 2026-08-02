@@ -102,6 +102,7 @@
   let trackingMode: "extended" | "basic" | null = $state(null);
   let windowTracking: string | null = $state(null);
   let modelPath: string | null = $state(null);
+  let whisperPath: string | null = $state(null);
   // The number of cleared domain records, shown after the click so the action does
   // not look like "nothing happened".
   let domainCleared: number | null = $state(null);
@@ -131,8 +132,9 @@
   // Notifications; Auto-backup(6) and Data(7) -> Data; Hotkeys(8) -> Hotkeys;
   // Statuses(9) -> Tasks (appended last by index so the existing sections did not
   // have to be renumbered, but logically grouped with Categories); Help(10) -> Help
-  // (also appended last by index for the same reason).
-  const SECTION_TAB: TabId[] = ["general", "ai", "general", "tasks", "tasks", "notifications", "data", "data", "hotkeys", "tasks", "help"];
+  // (also appended last by index for the same reason); Voice input(11) -> AI (same
+  // again: appended by index, grouped with the AI provider).
+  const SECTION_TAB: TabId[] = ["general", "ai", "general", "tasks", "tasks", "notifications", "data", "data", "hotkeys", "tasks", "help", "ai"];
   let activeTab = $state<TabId>("general");
 
   // --- Settings search: a plain substring match over the whole text of a section,
@@ -276,6 +278,7 @@
     // frontend: the directory depends on the OS (app_data_dir) and on the
     // application's identifier.
     modelPath = await api.modelPath().catch(() => null);
+    whisperPath = await api.modelPath("whisper").catch(() => null);
     categoryStore.load();
     statusStore.load();
   });
@@ -1116,6 +1119,17 @@
         </dl>
       </details>
     {/each}
+  </section>
+
+  <!-- Voice input. A separate section rather than a block inside the AI one because
+       it does not depend on ai_provider at all: recognition always runs locally, so
+       the model is needed even when the chat model is a cloud one. -->
+  <section class="card panel" class:hidden-by-search={sectionMatches[11] === false} class:hidden-by-tab={SECTION_TAB[11] !== activeTab} bind:this={sectionEls[11]}>
+    <h3 class="section-title">{t("Голосовой ввод")}</h3>
+    <p class="hint" style="margin-top:0;">{t("Распознавание речи работает полностью на этом компьютере: запись никуда не отправляется. Нужна отдельная модель — её можно скачать здесь.")}</p>
+    <p class="muted" style="font-size:12px;margin:0 0 10px 0;">{t("Модель распознавания хранится в")}<code>{whisperPath ?? "…"}</code>
+    </p>
+    <ModelDownloader kind="whisper" />
   </section>
 
   <button class="btn-primary" onclick={save} disabled={saving}>

@@ -742,17 +742,36 @@
         error: null,
       }), 0);
     },
-    model_status: () => ({ exists: false, size_bytes: 0 }),
+    model_status: ({ kind }) => db.models?.[kind ?? "llm"] ?? { exists: false, size_bytes: 0 },
     // v0.9.28: путь приходит от бэкенда (app_data_dir зависит от ОС), в моке
     // отдаём линуксовый вид — тест проверяет, что показан ответ команды, а не
     // зашитая в UI строка.
-    model_path: () => "/home/user/.local/share/com.ainotes.app/models/model.gguf",
-    list_model_options: () => ([
-      { id: "qwen2.5-0.5b", name: "Qwen2.5 0.5B Instruct", url: "https://example.com/qwen2.5-0.5b.gguf", size_bytes: 491000000, description: "Самая быстрая и лёгкая — базовое качество.", ram_gb: 2, recommended: false },
-      { id: "qwen2.5-1.5b", name: "Qwen2.5 1.5B Instruct", url: "https://example.com/qwen2.5-1.5b.gguf", size_bytes: 1120000000, description: "Баланс скорости и качества.", ram_gb: 3, recommended: true },
-      { id: "phi-3.5-mini", name: "Phi-3.5 Mini Instruct", url: "https://example.com/phi-3.5-mini.gguf", size_bytes: 2390000000, description: "Лучшее качество, но медленнее.", ram_gb: 5, recommended: false },
-    ]),
-    download_model: () => {},
+    // v0.9.64: путь зависит от типа модели.
+    model_path: ({ kind }) =>
+      kind === "whisper"
+        ? "/home/user/.local/share/com.ainotes.app/models/whisper.bin"
+        : "/home/user/.local/share/com.ainotes.app/models/model.gguf",
+    // v0.9.64: каталог зависит от kind, и мок различает его нарочно — иначе тест
+    // не заметил бы, что фронтенд перестал передавать тип и оба загрузчика
+    // показывают один и тот же список.
+    list_model_options: ({ kind }) =>
+      kind === "whisper"
+        ? [
+            // Описания — дословно из model.rs: тест на полноту перевода читает
+            // именно то, что видно на экране, а сокращённая выдумка прошла бы мимо
+            // словаря и «нашла» кириллицу, которой в приложении нет.
+            { id: "whisper-tiny", name: "Whisper Tiny", url: "https://example.com/ggml-tiny.bin", size_bytes: 77700000, description: "Самая лёгкая и быстрая — распознаёт почти мгновенно даже на слабой машине, но заметно путает слова, особенно в русской речи.", ram_gb: 1, recommended: false, kind: "whisper" },
+            { id: "whisper-base", name: "Whisper Base", url: "https://example.com/ggml-base.bin", size_bytes: 148000000, description: "Разумный баланс — держит русскую речь заметно лучше Tiny и всё ещё быстрая на обычном процессоре.", ram_gb: 1, recommended: true, kind: "whisper" },
+          ]
+        : [
+            { id: "qwen2.5-0.5b", name: "Qwen2.5 0.5B Instruct", url: "https://example.com/qwen2.5-0.5b.gguf", size_bytes: 491000000, description: "Самая быстрая и лёгкая — базовое качество.", ram_gb: 2, recommended: false, kind: "llm" },
+            { id: "qwen2.5-1.5b", name: "Qwen2.5 1.5B Instruct", url: "https://example.com/qwen2.5-1.5b.gguf", size_bytes: 1120000000, description: "Баланс скорости и качества.", ram_gb: 3, recommended: true, kind: "llm" },
+            { id: "phi-3.5-mini", name: "Phi-3.5 Mini Instruct", url: "https://example.com/phi-3.5-mini.gguf", size_bytes: 2390000000, description: "Лучшее качество, но медленнее.", ram_gb: 5, recommended: false, kind: "llm" },
+          ],
+    download_model: ({ kind }) => {
+      db.models = { ...(db.models ?? {}), [kind ?? "llm"]: { exists: true, size_bytes: 1024 } };
+      persist();
+    },
     export: () => {},
     import: () => {},
     do_auto_backup: () => "ai-notes-backup-2026-07-17-1600.zip",

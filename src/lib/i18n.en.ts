@@ -392,7 +392,27 @@ export const EN: Record<string, string> = {
   "Очистить": "Clear",
   "Модель не найдена": "Model not found",
   "Свой URL (GGUF)": "Custom URL (GGUF)",
+  "Свой URL (ggml)": "Custom URL (ggml)",
   "рекомендуется": "recommended",
+
+  // --- Voice input ---
+  "Голосовой ввод": "Voice input",
+  "Распознавание речи работает полностью на этом компьютере: запись никуда не отправляется. Нужна отдельная модель — её можно скачать здесь.":
+    "Speech recognition runs entirely on this computer: the recording is never sent anywhere. It needs a separate model, which can be downloaded here.",
+  "Модель распознавания хранится в": "The recognition model is stored in ",
+  "Заметки и быстрый ввод можно надиктовывать. Речь распознаётся на этом компьютере — запись никуда не отправляется.":
+    "Notes and quick capture can be dictated. Speech is recognised on this computer — the recording is never sent anywhere.",
+  "Нужна отдельная модель распознавания. Шаг можно пропустить — модель ставится позже в Настройках → ИИ.":
+    "It needs a separate recognition model. You can skip this step — the model can be installed later in Settings → AI.",
+  // Whisper model descriptions (commands/model.rs), translated at render time like
+  // the chat-model ones; covered by the "model descriptions are in the EN
+  // dictionary" test.
+  "Самая лёгкая и быстрая — распознаёт почти мгновенно даже на слабой машине, но заметно путает слова, особенно в русской речи.":
+    "The lightest and fastest — recognises almost instantly even on a weak machine, but noticeably garbles words, especially in Russian.",
+  "Разумный баланс — держит русскую речь заметно лучше Tiny и всё ещё быстрая на обычном процессоре.":
+    "A sensible balance — handles Russian noticeably better than Tiny and is still fast on an ordinary CPU.",
+  "Самая точная из трёх — уверенно разбирает длинные фразы и имена, но расшифровка занимает в разы больше времени.":
+    "The most accurate of the three — confidently handles long phrases and names, but transcription takes several times longer.",
 
   // --- Notes graph and the history card ---
   "Перетаскивайте узлы, двойной клик — открыть заметку. Приглушённые узлы без связей.":
