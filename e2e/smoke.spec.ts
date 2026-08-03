@@ -2093,6 +2093,29 @@ test("панель форматирования: кнопки оборачива
   expect(saved).toContain("[[другая заметка]]");
 });
 
+// v0.9.72: свой keymap подключён ДО defaultKeymap, и порядок обязателен — иначе
+// комбинация уходит в стандартный обработчик, а свой не вызывается вовсе. Ctrl+B
+// это уже проверяет выше; Ctrl+Shift+K не был закреплён ничем, а после выноса
+// тел команд в lib/editor/ он идёт через делегат.
+test("Ctrl+Shift+K доходит до своего keymap, а не до defaultKeymap", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.getByRole("button", { name: "+ Новая заметка" }).click();
+  await fillNoteEditor(page, "цель");
+
+  await page.keyboard.press("ControlOrMeta+Home");
+  await page.keyboard.press("Shift+End");
+  await page.keyboard.press("ControlOrMeta+Shift+KeyK");
+
+  await page.waitForTimeout(1000);
+  const saved = await page.evaluate(() => {
+    const db = JSON.parse(localStorage.getItem("__mock_db") || "{}");
+    return db.notes?.[0]?.content ?? "";
+  });
+  expect(saved).toContain("[[цель]]");
+});
+
 test("таблицы в заметках: рендерится <table>, ячейка редактируется кликом, +строка/+столбец, курсор внутри блока показывает сырой markdown", async ({ page }) => {
   await seedDb(page, {
     tasks: [],

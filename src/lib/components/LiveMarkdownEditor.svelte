@@ -10,7 +10,7 @@
   // (rather than paste/insertText) triggers the same logic in e2e and duplicates the
   // marker — accounted for in the fillNoteEditor e2e helper, which uses insertText.
   import { onMount, onDestroy } from "svelte";
-  import { EditorState, EditorSelection, StateField, type Extension } from "@codemirror/state";
+  import { EditorState, StateField, type Extension } from "@codemirror/state";
   import {
     EditorView, Decoration, type DecorationSet, WidgetType, keymap, ViewPlugin, type ViewUpdate,
     drawSelection, dropCursor, placeholder as cmPlaceholder,
@@ -31,6 +31,7 @@
 
   // `t` is taken here by a local variable, so the translation helper is imported as `tr`.
   import { t as tr } from "../i18n.svelte";
+  import * as cmd from "../editor/commands";
   let {
     value = $bindable(""),
     placeholder: placeholderText = "",
@@ -1049,16 +1050,6 @@
   // If the range no longer matches the current selection (the user clicked or
   // typed), the edit is still applied at the same numeric positions — safe, since
   // this is a final confirmed user action rather than a background operation.
-  export function replaceRange(from: number, to: number, text: string) {
-    if (!view) return;
-    view.dispatch({
-      changes: { from, to, insert: text },
-      selection: EditorSelection.cursor(from + text.length),
-      scrollIntoView: true,
-    });
-    view.focus();
-  }
-
   // Dictation by Ctrl+Shift+D: the same recording the microphone button drives, so
   // the key and the button never disagree about whether one is running.
   //
@@ -1070,183 +1061,29 @@
     if (text) insertAtCursor(text);
   }
 
-  // Inserts text where the cursor is, replacing the selection if there is one —
-  // the same thing typing would do. Used by voice input (v0.9.65): dictation is
-  // just another way of entering text, so it must not care whether the caret sits
-  // mid-word or a paragraph is selected.
-  //
-  // Spaces are added on whichever side abuts a word character: whisper returns a
-  // bare phrase with no padding, so dictating with the caret mid-sentence would
-  // otherwise glue the phrase to the neighbouring word on that side.
+  // The public surface is unchanged: same names, same signatures, so EditorExports
+  // in Notes.svelte and every caller keep working. Only the bodies moved — into
+  // lib/editor/commands.ts, where vitest can reach them.
+  export function replaceRange(from: number, to: number, text: string) {
+    if (view) cmd.replaceRange(view, from, to, text);
+  }
+
   export function insertAtCursor(text: string) {
-    if (!view || !text) return;
-    const { state } = view;
-    const range = state.selection.main;
-    const charBefore = range.from > 0 ? state.doc.sliceString(range.from - 1, range.from) : "";
-    const charAfter = range.to < state.doc.length ? state.doc.sliceString(range.to, range.to + 1) : "";
-    const padLeft = charBefore !== "" && !/\s/.test(charBefore);
-    const padRight = charAfter !== "" && !/\s/.test(charAfter);
-    const insert = (padLeft ? " " : "") + text + (padRight ? " " : "");
-    view.dispatch({
-      changes: { from: range.from, to: range.to, insert },
-      selection: EditorSelection.cursor(range.from + insert.length),
-      scrollIntoView: true,
-    });
-    view.focus();
+    if (view) cmd.insertAtCursor(view, text);
   }
 
-  // Formatting from the external toolbar: wraps the selection in markers (bold,
-  // italics, code) or toggles a line prefix (heading, checklist). It works without
-  // a selection too, inserting an empty pair of markers with the cursor inside
-  // (bold, italics, code) or simply adding the prefix on the current line
-  // (heading, checklist, wiki link).
-  // Pressing again on already-wrapped text unwraps it: otherwise Ctrl+B on **bold**
-  // text would keep piling extra ** on the outside (the standard toggle-formatting
-  // behaviour of any text editor).
-  function wrapSelection(before: string, after: string) {
-    if (!view) return;
-    const { state } = view;
-    const changes = state.changeByRange(range => {
-      const selected = state.sliceDoc(range.from, range.to);
-      const alreadyWrapped = !range.empty
-        && selected.startsWith(before) && selected.endsWith(after)
-        && selected.length >= before.length + after.length;
-      if (alreadyWrapped) {
-        const inner = selected.slice(before.length, selected.length - after.length);
-        return {
-          changes: [{ from: range.from, to: range.to, insert: inner }],
-          range: EditorSelection.range(range.from, range.from + inner.length),
-        };
-      }
-      const insertBefore = { from: range.from, insert: before };
-      const insertAfter = { from: range.to, insert: after };
-      return {
-        changes: [insertBefore, insertAfter],
-        range: range.empty
-          ? EditorSelection.cursor(range.from + before.length)
-          : EditorSelection.range(range.from + before.length, range.to + before.length),
-      };
-    });
-    view.dispatch(state.update(changes, { scrollIntoView: true }));
-    view.focus();
-  }
-
-  function toggleLinePrefix(prefix: string) {
-    if (!view) return;
-    const { state } = view;
-    const changes = state.changeByRange(range => {
-      const line = state.doc.lineAt(range.from);
-      const has = line.text.startsWith(prefix);
-      const change = has
-        ? { from: line.from, to: line.from + prefix.length, insert: "" }
-        : { from: line.from, insert: prefix };
-      const delta = has ? -prefix.length : prefix.length;
-      return {
-        changes: [change],
-        range: EditorSelection.range(range.from + delta, range.to + delta),
-      };
-    });
-    view.dispatch(state.update(changes, { scrollIntoView: true }));
-    view.focus();
-  }
-
-  export function formatBold() { wrapSelection("**", "**"); }
-  export function formatItalic() { wrapSelection("*", "*"); }
-  export function formatCode() { wrapSelection("`", "`"); }
-  export function formatHeading() { toggleLinePrefix("## "); }
-  export function formatChecklist() { toggleLinePrefix("- [ ] "); }
-  export function formatWikiLink() { wrapSelection("[[", "]]"); }
-  export function formatQuote() { toggleLinePrefix("> "); }
-
-  // An ordered list cannot go through toggleLinePrefix: that takes a static prefix,
-  // while here every line has its own number. We number the selected lines from 1;
-  // if the list already exists, we remove it.
-  export function formatOrderedList() {
-    if (!view) return;
-    const { state } = view;
-    const range = state.selection.main;
-    const first = state.doc.lineAt(range.from).number;
-    const last = state.doc.lineAt(range.to).number;
-
-    const NUM_RE = /^(\s*)\d+\.\s+/;
-    // The numbering is removed only if EVERY non-empty line has it, or a click on a
-    // partially formatted block would silently lose the numbers.
-    let allNumbered = true;
-    for (let n = first; n <= last; n++) {
-      const t = state.doc.line(n).text;
-      if (t.trim() && !NUM_RE.test(t)) { allNumbered = false; break; }
-    }
-
-    const changes: { from: number; to: number; insert: string }[] = [];
-    let counter = 1;
-    for (let n = first; n <= last; n++) {
-      const line = state.doc.line(n);
-      if (!line.text.trim()) continue; // blank lines are not numbered
-      if (allNumbered) {
-        const m = NUM_RE.exec(line.text)!;
-        changes.push({ from: line.from, to: line.from + m[0].length, insert: m[1] });
-      } else {
-        const m = NUM_RE.exec(line.text);
-        // An already-numbered line is renumbered rather than prefixed again
-        const from = line.from;
-        const to = m ? line.from + m[0].length : line.from;
-        changes.push({ from, to, insert: `${counter}. ` });
-      }
-      counter++;
-    }
-    if (changes.length === 0) return;
-    view.dispatch({ changes, scrollIntoView: true });
-    view.focus();
-  }
-
-  // An ordinary link [text](url): the selection becomes the label and the cursor
-  // lands inside the empty parentheses, so the url is typed at once without a
-  // second click. With no selection a template is inserted with the cursor on the
-  // word "text".
-  export function formatLink() {
-    if (!view) return;
-    const { state } = view;
-    const range = state.selection.main;
-    const label = state.sliceDoc(range.from, range.to);
-
-    if (label) {
-      const insert = `[${label}]()`;
-      view.dispatch({
-        changes: { from: range.from, to: range.to, insert },
-        selection: EditorSelection.cursor(range.from + insert.length - 1),
-        scrollIntoView: true,
-      });
-    } else {
-      const insert = tr("[текст](url)");
-      view.dispatch({
-        changes: { from: range.from, insert },
-        selection: EditorSelection.range(range.from + 1, range.from + 6),
-        scrollIntoView: true,
-      });
-    }
-    view.focus();
-  }
-
-  // Inserting a table: a starter 2x2 table on a new line below the cursor. The blank
-  // lines before and after are not because parseTableAt requires them (it does not,
-  // a table parses even flush against neighbouring text) but so the insertion does
-  // not merge with the current line's text when the cursor was not at its start or
-  // end.
-  export function insertTable() {
-    if (!view) return;
-    const { state } = view;
-    const pos = state.selection.main.head;
-    const line = state.doc.lineAt(pos);
-    const needsLeadingBlank = line.text.trim() !== "";
-    const table = serializeTable(emptyTable(2, 2));
-    const insert = (needsLeadingBlank ? "\n\n" : "\n") + table + "\n\n";
-    view.dispatch({
-      changes: { from: line.to, insert },
-      selection: EditorSelection.cursor(line.to + insert.length),
-      scrollIntoView: true,
-    });
-    view.focus();
-  }
+  export function formatBold() { if (view) cmd.wrapSelection(view, "**", "**"); }
+  export function formatItalic() { if (view) cmd.wrapSelection(view, "*", "*"); }
+  export function formatCode() { if (view) cmd.wrapSelection(view, "`", "`"); }
+  export function formatHeading() { if (view) cmd.toggleLinePrefix(view, "## "); }
+  export function formatChecklist() { if (view) cmd.toggleLinePrefix(view, "- [ ] "); }
+  export function formatWikiLink() { if (view) cmd.wrapSelection(view, "[[", "]]"); }
+  export function formatQuote() { if (view) cmd.toggleLinePrefix(view, "> "); }
+  export function formatOrderedList() { if (view) cmd.toggleOrderedList(view); }
+  // The template is the only translated string here, so it stays in the component
+  // and is passed in — commands.ts has no i18n dependency.
+  export function formatLink() { if (view) cmd.insertLink(view, tr("[текст](url)")); }
+  export function insertTable() { if (view) cmd.insertTable(view); }
 </script>
 
 <div class="cm-host" bind:this={hostEl}></div>
