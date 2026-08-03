@@ -60,9 +60,17 @@ fn en(key: &str) -> Option<&'static str> {
     Some(match key {
         // --- Notifications: deadlines ---
         "Дедлайн наступил!" => "Deadline reached!",
-        // Buttons on a deadline notification (Linux only, see notifier/actions.rs)
+        // Buttons on notifications (Linux only, see notifier/actions.rs)
         "Выполнено" => "Done",
         "Отложить на час" => "Snooze for an hour",
+        // …on a note reminder: "Done" drops the reminder rather than completing
+        // anything, hence a different word from the deadline's "Выполнено".
+        "Готово" => "Done",
+        "Напоминание о заметке" => "Note reminder",
+        // …on pomodoro
+        "Пропустить" => "Skip",
+        "Ещё 5 минут" => "Five more minutes",
+        "Остановить" => "Stop",
         "Дедлайн через {n} ч" => "Deadline in {n} h",
         "Дедлайн через {n} мин" => "Deadline in {n} min",
         // --- Notifications: time blocks ---

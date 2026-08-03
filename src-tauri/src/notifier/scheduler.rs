@@ -201,12 +201,47 @@ async fn check_note_reminders(app: &tauri::AppHandle, pool: &SqlitePool, muted: 
     let now = Utc::now();
     for reminder in note_reminders_due(pool, now).await {
         if !muted {
-            send_notification_for(
-                app, pool, "note_reminder", &reminder.title, "Напоминание о заметке",
-                Some("note"), Some(&reminder.note_id),
-            ).await;
+            send_note_reminder(app, pool, &reminder.note_id, &reminder.title).await;
         }
         mark_reminder_notified(pool, &reminder.note_id).await;
+    }
+}
+
+// A note reminder carrying buttons: "Done" drops the reminder, "Snooze" moves it
+// an hour ahead. Same shape as send_deadline_notification — the direct path on
+// Linux, the plugin everywhere else and whenever the direct one fails.
+pub async fn send_note_reminder(
+    app: &tauri::AppHandle,
+    pool: &SqlitePool,
+    note_id: &str,
+    title: &str,
+) {
+    let lang = crate::i18n::current_lang(pool).await;
+    let body_owned = crate::i18n::tr("Напоминание о заметке", lang);
+    let body = body_owned.as_str();
+
+    #[cfg(target_os = "linux")]
+    let shown = {
+        use crate::notifier::actions::{ActionTarget, NotificationAction};
+        crate::notifier::actions::show_with_actions(
+            app.clone(),
+            pool.clone(),
+            ActionTarget::Note(note_id.to_string()),
+            title,
+            body,
+            &[
+                (NotificationAction::NoteDone, crate::i18n::tr("Готово", lang).to_string()),
+                (NotificationAction::NoteSnoozeHour, crate::i18n::tr("Отложить на час", lang).to_string()),
+            ],
+        )
+    };
+    #[cfg(not(target_os = "linux"))]
+    let shown = false;
+
+    if shown {
+        log_notification(pool, "note_reminder", title, body, Some("note"), Some(note_id)).await;
+    } else {
+        send_notification_for(app, pool, "note_reminder", title, body, Some("note"), Some(note_id)).await;
     }
 }
 
@@ -488,6 +523,63 @@ pub async fn send_notification(app: &tauri::AppHandle, pool: &SqlitePool, kind: 
     send_notification_for(app, pool, kind, title, body, None, None).await;
 }
 
+/// Which pomodoro moment is being announced. It decides the buttons, and only the
+/// caller knows it: the notification text alone would have to be parsed back.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PomodoroMoment {
+    /// A work stretch has started (the cycle began, or a break just ended).
+    WorkStarted,
+    /// A break has started.
+    BreakStarted,
+}
+
+/// A pomodoro push carrying buttons. "Stop" is on every one of them; the other
+/// button depends on the moment — skipping a break makes sense, extending a work
+/// stretch does not.
+pub async fn send_pomodoro_notification(
+    app: &tauri::AppHandle,
+    pool: &SqlitePool,
+    title: &str,
+    body: &str,
+    moment: PomodoroMoment,
+) {
+    let lang = crate::i18n::current_lang(pool).await;
+
+    #[cfg(target_os = "linux")]
+    let shown = {
+        use crate::notifier::actions::{ActionTarget, NotificationAction};
+        let mut buttons = Vec::new();
+        match moment {
+            // A break is running: it can be skipped to get back to work.
+            PomodoroMoment::BreakStarted => buttons.push((
+                NotificationAction::PomodoroSkip,
+                crate::i18n::tr("Пропустить", lang).to_string(),
+            )),
+            // Work has just started after a break: the useful offer is more rest,
+            // which sends the cycle back into a break.
+            PomodoroMoment::WorkStarted => buttons.push((
+                NotificationAction::PomodoroExtendBreak,
+                crate::i18n::tr("Ещё 5 минут", lang).to_string(),
+            )),
+        }
+        buttons.push((
+            NotificationAction::PomodoroStop,
+            crate::i18n::tr("Остановить", lang).to_string(),
+        ));
+        crate::notifier::actions::show_with_actions(
+            app.clone(), pool.clone(), ActionTarget::Pomodoro, title, body, &buttons,
+        )
+    };
+    #[cfg(not(target_os = "linux"))]
+    let shown = false;
+
+    if shown {
+        log_notification(pool, "pomodoro", title, body, None, None).await;
+    } else {
+        send_notification_for(app, pool, "pomodoro", title, body, None, None).await;
+    }
+}
+
 // A deadline push carrying "Done" and "Snooze for an hour" buttons.
 //
 // On Linux it goes through notify_rust directly, because the notification plugin
@@ -508,15 +600,20 @@ pub async fn send_deadline_notification(
     let lang = crate::i18n::current_lang(pool).await;
 
     #[cfg(target_os = "linux")]
-    let shown = crate::notifier::actions::show_with_actions(
-        app.clone(),
-        pool.clone(),
-        task_id.to_string(),
-        title,
-        body,
-        &crate::i18n::tr("Выполнено", lang),
-        &crate::i18n::tr("Отложить на час", lang),
-    );
+    let shown = {
+        use crate::notifier::actions::{ActionTarget, NotificationAction};
+        crate::notifier::actions::show_with_actions(
+            app.clone(),
+            pool.clone(),
+            ActionTarget::Task(task_id.to_string()),
+            title,
+            body,
+            &[
+                (NotificationAction::TaskDone, crate::i18n::tr("Выполнено", lang).to_string()),
+                (NotificationAction::TaskSnoozeHour, crate::i18n::tr("Отложить на час", lang).to_string()),
+            ],
+        )
+    };
     #[cfg(not(target_os = "linux"))]
     let shown = false;
 

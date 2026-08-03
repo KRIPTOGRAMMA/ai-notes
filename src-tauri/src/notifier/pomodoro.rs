@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 use sqlx::SqlitePool;
 use tokio::time::{sleep, Duration};
 use crate::commands::settings::{WorkMode, get_u64_setting, get_bool_setting, set_setting};
-use crate::notifier::scheduler::send_notification;
+use crate::notifier::scheduler::{send_pomodoro_notification, PomodoroMoment};
 
 // A user command controlling the cycle (pause/resume/skip phase/manual
 // start-stop outside Study).
@@ -12,6 +12,10 @@ pub enum PomodoroCmd {
     Skip,
     Start,
     Stop,
+    /// Adds minutes to the current break ("five more minutes" on the notification
+    /// that says the break is over). Only meaningful during a break: extending a
+    /// work phase has no purpose, so the loop ignores it while working.
+    ExtendBreak(u64),
 }
 
 // A row is written to pomodoro_log every time a work phase finishes (the
@@ -100,6 +104,18 @@ pub fn start_pomodoro(
                             let until = chrono::Utc::now() + chrono::Duration::seconds(remaining as i64);
                             persist_state(&pool, if paused { "paused" } else if working { "work" } else { "break" }, until).await;
                         }
+                        PomodoroCmd::ExtendBreak(mins) => {
+                            if !in_study && !manual { continue; }
+                            // The "break is over" notification arrives when the loop
+                            // has already switched to work, so "five more minutes"
+                            // has to go back into a break rather than extend the
+                            // current phase. Pressed during a break, it simply adds
+                            // to what is left.
+                            remaining = if working { mins * 60 } else { remaining + mins * 60 };
+                            working = false;
+                            let until = chrono::Utc::now() + chrono::Duration::seconds(remaining as i64);
+                            persist_state(&pool, "break", until).await;
+                        }
                         PomodoroCmd::Skip => {
                             if !in_study && !manual { continue; }
                             if working {
@@ -147,7 +163,7 @@ pub fn start_pomodoro(
                     {
                         let lang = crate::i18n::current_lang(&pool).await;
                         let body = crate::i18n::tr_args("Помодоро запущено: {n} минут работы", lang, &[("n", (work_secs / 60).to_string())]);
-                        send_notification(&app, &pool, "pomodoro", "Study", &body).await;
+                        send_pomodoro_notification(&app, &pool, "Study", &body, PomodoroMoment::WorkStarted).await;
                     }
                 }
                 continue;
@@ -172,7 +188,7 @@ pub fn start_pomodoro(
                     if !muted {
                         let lang = crate::i18n::current_lang(&pool).await;
                         let body = crate::i18n::tr_args("Перерыв {n} минут — отдохни", lang, &[("n", (break_secs / 60).to_string())]);
-                        send_notification(&app, &pool, "pomodoro", "Study", &body).await;
+                        send_pomodoro_notification(&app, &pool, "Study", &body, PomodoroMoment::BreakStarted).await;
                     }
                 } else {
                     working = true;
@@ -180,7 +196,7 @@ pub fn start_pomodoro(
                     if !muted {
                         let lang = crate::i18n::current_lang(&pool).await;
                         let body = crate::i18n::tr_args("Перерыв окончен: {n} минут работы", lang, &[("n", (work_secs / 60).to_string())]);
-                        send_notification(&app, &pool, "pomodoro", "Study", &body).await;
+                        send_pomodoro_notification(&app, &pool, "Study", &body, PomodoroMoment::WorkStarted).await;
                     }
                 }
                 let until = chrono::Utc::now() + chrono::Duration::seconds(remaining as i64);
