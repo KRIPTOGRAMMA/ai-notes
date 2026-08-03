@@ -264,8 +264,11 @@ mod tests {
     let b = task(&pool, "стены").await;
     add_task_dependency_impl(&pool, &b, &a).await.unwrap();
 
-    let err = complete_task_impl(&pool, b.clone()).await.unwrap_err();
+    // complete_task_impl returns AppError since v0.9.71; the message still has to
+    // name the blocker, and carry no technical prefix — it is a domain error.
+    let err = complete_task_impl(&pool, b.clone()).await.unwrap_err().to_string();
     assert!(err.contains("фундамент"), "в ошибке должно быть имя блокера: {err}");
+    assert!(!err.starts_with("Ошибка"), "доменная ошибка не должна иметь технический префикс: {err}");
 
     // The blocker is closed, so the task is free
     complete_task_impl(&pool, a).await.unwrap();

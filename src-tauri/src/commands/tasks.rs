@@ -3,18 +3,19 @@ use sqlx::{SqlitePool, Row};
 use serde::Serialize;
 use chrono::{DateTime, Utc};
 use crate::core::task::{CreateTask, Task, TaskRow, UpdateTask};
+use crate::error::{AppError, AppResult};
 
 #[tauri::command]
 pub async fn create_task(
   pool: State<'_, SqlitePool>,
   task: CreateTask,
-) -> Result<Task, String> {
+) -> AppResult<Task> {
   create_task_impl(pool.inner(), task).await
 }
 
-pub async fn create_task_impl(pool: &SqlitePool, task: CreateTask) -> Result<Task, String> {
+pub async fn create_task_impl(pool: &SqlitePool, task: CreateTask) -> AppResult<Task> {
   if task.title.trim().is_empty() {
-    return Err("Название задачи не может быть пустым".into());
+    return Err(AppError::Other("Название задачи не может быть пустым".into()));
   }
 
   let mut new_task = task.into_task();
@@ -24,8 +25,7 @@ pub async fn create_task_impl(pool: &SqlitePool, task: CreateTask) -> Result<Tas
   // A new task goes to the end of the list
   new_task.sort_order = sqlx::query_scalar::<_, i64>("SELECT COALESCE(MAX(sort_order), 0) + 1 FROM tasks")
     .fetch_one(pool)
-    .await
-    .map_err(|e| e.to_string())?;
+    .await?;
 
   sqlx::query(
     "INSERT INTO tasks (id, title, description, status, priority, category, deadline, tags, recurrence, hidden, created_at, updated_at, project_id, sort_order)
@@ -46,8 +46,7 @@ pub async fn create_task_impl(pool: &SqlitePool, task: CreateTask) -> Result<Tas
   .bind(&new_task.project_id)
   .bind(new_task.sort_order)
   .execute(pool)
-  .await
-  .map_err(|e| e.to_string())?;
+  .await?;
 
   Ok(new_task)
 }
@@ -55,15 +54,14 @@ pub async fn create_task_impl(pool: &SqlitePool, task: CreateTask) -> Result<Tas
 #[tauri::command]
 pub async fn get_tasks(
     pool: State<'_, SqlitePool>,
-) -> Result<Vec<Task>, String> {
+) -> AppResult<Vec<Task>> {
     get_tasks_impl(pool.inner()).await
 }
 
-pub async fn get_tasks_impl(pool: &SqlitePool) -> Result<Vec<Task>, String> {
+pub async fn get_tasks_impl(pool: &SqlitePool) -> AppResult<Vec<Task>> {
     let rows = sqlx::query_as::<_, TaskRow>("SELECT * FROM tasks WHERE deleted_at IS NULL ORDER BY sort_order")
         .fetch_all(pool)
-        .await
-        .map_err(|e| e.to_string())?;
+        .await?;
 
     let mut tasks: Vec<Task> = rows.into_iter().map(|r| r.into_task()).collect();
     crate::commands::subtasks::attach_subtasks(pool, &mut tasks).await?;
@@ -75,7 +73,7 @@ pub async fn get_tasks_impl(pool: &SqlitePool) -> Result<Vec<Task>, String> {
 pub async fn delete_task(
   pool: State<'_, SqlitePool>,
   id: String,
-) -> Result<(), String> {
+) -> AppResult<()> {
   delete_task_impl(pool.inner(), id).await
 }
 
@@ -83,27 +81,25 @@ pub async fn delete_task(
 // note links untouched, it just stops showing up in the active list/history —
 // it is filtered out in get_tasks_impl. Real deletion goes through
 // purge_deleted_task.
-pub async fn delete_task_impl(pool: &SqlitePool, id: String) -> Result<(), String> {
+pub async fn delete_task_impl(pool: &SqlitePool, id: String) -> AppResult<()> {
   sqlx::query("UPDATE tasks SET deleted_at = ? WHERE id = ?")
     .bind(Utc::now().to_rfc3339())
     .bind(id)
     .execute(pool)
-    .await
-    .map_err(|e| e.to_string())?;
+    .await?;
 
   Ok(())
 }
 
 #[tauri::command]
-pub async fn get_deleted_tasks(pool: State<'_, SqlitePool>) -> Result<Vec<Task>, String> {
+pub async fn get_deleted_tasks(pool: State<'_, SqlitePool>) -> AppResult<Vec<Task>> {
   get_deleted_tasks_impl(pool.inner()).await
 }
 
-pub async fn get_deleted_tasks_impl(pool: &SqlitePool) -> Result<Vec<Task>, String> {
+pub async fn get_deleted_tasks_impl(pool: &SqlitePool) -> AppResult<Vec<Task>> {
   let rows = sqlx::query_as::<_, TaskRow>("SELECT * FROM tasks WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC")
     .fetch_all(pool)
-    .await
-    .map_err(|e| e.to_string())?;
+    .await?;
 
   let mut tasks: Vec<Task> = rows.into_iter().map(|r| r.into_task()).collect();
   crate::commands::subtasks::attach_subtasks(pool, &mut tasks).await?;
@@ -111,16 +107,15 @@ pub async fn get_deleted_tasks_impl(pool: &SqlitePool) -> Result<Vec<Task>, Stri
 }
 
 #[tauri::command]
-pub async fn restore_task(pool: State<'_, SqlitePool>, id: String) -> Result<(), String> {
+pub async fn restore_task(pool: State<'_, SqlitePool>, id: String) -> AppResult<()> {
   restore_task_impl(pool.inner(), id).await
 }
 
-pub async fn restore_task_impl(pool: &SqlitePool, id: String) -> Result<(), String> {
+pub async fn restore_task_impl(pool: &SqlitePool, id: String) -> AppResult<()> {
   sqlx::query("UPDATE tasks SET deleted_at = NULL WHERE id = ?")
     .bind(id)
     .execute(pool)
-    .await
-    .map_err(|e| e.to_string())?;
+    .await?;
 
   Ok(())
 }
@@ -148,7 +143,7 @@ pub async fn history_cleanup_due(pool: &SqlitePool) -> bool {
 // left alone, so dashboard streaks and the heatmap (which read
 // tasks.completed_at directly, with no separate log) are not distorted after
 // the fact. Returns how many tasks were moved (for the journal and tests).
-pub async fn cleanup_old_history_impl(pool: &SqlitePool, cutoff: DateTime<Utc>) -> Result<u64, String> {
+pub async fn cleanup_old_history_impl(pool: &SqlitePool, cutoff: DateTime<Utc>) -> AppResult<u64> {
     let result = sqlx::query(
         "UPDATE tasks SET deleted_at = ?
          WHERE hidden = 1 AND deleted_at IS NULL AND completed_at IS NOT NULL AND completed_at < ?"
@@ -156,37 +151,33 @@ pub async fn cleanup_old_history_impl(pool: &SqlitePool, cutoff: DateTime<Utc>) 
     .bind(Utc::now().to_rfc3339())
     .bind(cutoff.to_rfc3339())
     .execute(pool)
-    .await
-    .map_err(|e| e.to_string())?;
+    .await?;
 
     Ok(result.rows_affected())
 }
 
 #[tauri::command]
-pub async fn purge_deleted_task(pool: State<'_, SqlitePool>, id: String) -> Result<(), String> {
+pub async fn purge_deleted_task(pool: State<'_, SqlitePool>, id: String) -> AppResult<()> {
   purge_deleted_task_impl(pool.inner(), id).await
 }
 
 // Real removal of a row from the Trash — the same cleanup of subtasks and note
 // links that delete_task_impl used to do back when deletion was hard.
-pub async fn purge_deleted_task_impl(pool: &SqlitePool, id: String) -> Result<(), String> {
+pub async fn purge_deleted_task_impl(pool: &SqlitePool, id: String) -> AppResult<()> {
   sqlx::query("DELETE FROM subtasks WHERE task_id = ?")
     .bind(&id)
     .execute(pool)
-    .await
-    .map_err(|e| e.to_string())?;
+    .await?;
 
   sqlx::query("UPDATE notes SET linked_task_id = NULL WHERE linked_task_id = ?")
     .bind(&id)
     .execute(pool)
-    .await
-    .map_err(|e| e.to_string())?;
+    .await?;
 
   sqlx::query("DELETE FROM tasks WHERE id = ?")
     .bind(id)
     .execute(pool)
-    .await
-    .map_err(|e| e.to_string())?;
+    .await?;
 
   Ok(())
 }
@@ -196,23 +187,22 @@ pub async fn update_task(
     pool: State<'_, SqlitePool>,
     id: String,
     patch: UpdateTask,
-) -> Result<Task, String> {
+) -> AppResult<Task> {
     update_task_impl(pool.inner(), id, patch).await
 }
 
-pub async fn update_task_impl(pool: &SqlitePool, id: String, patch: UpdateTask) -> Result<Task, String> {
+pub async fn update_task_impl(pool: &SqlitePool, id: String, patch: UpdateTask) -> AppResult<Task> {
     let row = sqlx::query_as::<_, TaskRow>("SELECT * FROM tasks WHERE id = ?")
         .bind(&id)
         .fetch_one(pool)
-        .await
-        .map_err(|e| e.to_string())?;
+        .await?;
 
     let mut task = row.into_task();
     let old_deadline = task.deadline;
 
     if let Some(title) = patch.title {
         if title.trim().is_empty() {
-            return Err("Название задачи не может быть пустым".into());
+            return Err(AppError::Other("Название задачи не может быть пустым".into()));
         }
         task.title = title;
     }
@@ -295,8 +285,7 @@ pub async fn update_task_impl(pool: &SqlitePool, id: String, patch: UpdateTask) 
     .bind(block_changed)
     .bind(&id)
     .execute(pool)
-    .await
-    .map_err(|e| e.to_string())?;
+    .await?;
 
     Ok(task)
 }
@@ -305,11 +294,11 @@ pub async fn update_task_impl(pool: &SqlitePool, id: String, patch: UpdateTask) 
 pub async fn complete_task(
   pool: State<'_, SqlitePool>,
   id: String,
-) -> Result<Task, String> {
+) -> AppResult<Task> {
   complete_task_impl(pool.inner(), id).await
 }
 
-pub async fn complete_task_impl(pool: &SqlitePool, id: String) -> Result<Task, String> {
+pub async fn complete_task_impl(pool: &SqlitePool, id: String) -> AppResult<Task> {
   // A blocked task cannot be completed. The check lives here rather than in the
   // UI alone: a task can also be completed from the tray, the quick slot and the
   // command palette, and every one of those paths would otherwise bypass it.
@@ -317,14 +306,13 @@ pub async fn complete_task_impl(pool: &SqlitePool, id: String) -> Result<Task, S
   if !blockers.is_empty() {
     let names = blockers.iter().map(|b| b.title.clone()).collect::<Vec<_>>().join(", ");
     let lang = crate::i18n::current_lang(pool).await;
-    return Err(crate::i18n::tr_args("Сначала выполните: {tasks}.", lang, &[("tasks", names)]));
+    return Err(AppError::Other(crate::i18n::tr_args("Сначала выполните: {tasks}.", lang, &[("tasks", names)])));
   }
 
   let row = sqlx::query_as::<_, TaskRow>("SELECT * FROM tasks WHERE id = ?")
         .bind(&id)
         .fetch_one(pool)
-        .await
-        .map_err(|e| e.to_string())?;
+        .await?;
 
   let mut task = row.into_task();
   let now = Utc::now();
@@ -373,8 +361,7 @@ pub async fn complete_task_impl(pool: &SqlitePool, id: String) -> Result<Task, S
     .bind(subtasks_done)
     .bind(&id)
     .execute(pool)
-    .await
-    .map_err(|e| e.to_string())?;
+    .await?;
   // into_task() does not load subtasks, so we read them after the update: the
   // returned task must reflect the new checklist state, not an empty list.
   task.subtasks = crate::commands::subtasks::get_subtasks_impl(pool, &id).await?;
@@ -399,8 +386,7 @@ pub async fn complete_task_impl(pool: &SqlitePool, id: String) -> Result<Task, S
   .bind(reset_notifications)
   .bind(&id)
   .execute(pool)
-  .await
-  .map_err(|e| e.to_string())?;
+  .await?;
 
   // The notification is only sent if the task actually closed. A recurring task
   // keeps completed_at empty — it moved to its next deadline and still blocks,
@@ -413,7 +399,7 @@ pub async fn complete_task_impl(pool: &SqlitePool, id: String) -> Result<Task, S
 }
 
 #[tauri::command]
-pub async fn reorder_tasks(pool: State<'_, SqlitePool>, ids: Vec<String>) -> Result<(), String> {
+pub async fn reorder_tasks(pool: State<'_, SqlitePool>, ids: Vec<String>) -> AppResult<()> {
     reorder_tasks_impl(pool.inner(), ids).await
 }
 
@@ -421,7 +407,7 @@ pub async fn reorder_tasks(pool: State<'_, SqlitePool>, ids: Vec<String>) -> Res
 // order. We reuse the very sort_order values those tasks already had and hand
 // them out in the new order, so tasks outside the list do not shift and no
 // collisions with other values arise.
-pub async fn reorder_tasks_impl(pool: &SqlitePool, ids: Vec<String>) -> Result<(), String> {
+pub async fn reorder_tasks_impl(pool: &SqlitePool, ids: Vec<String>) -> AppResult<()> {
     if ids.len() < 2 {
         return Ok(());
     }
@@ -431,7 +417,7 @@ pub async fn reorder_tasks_impl(pool: &SqlitePool, ids: Vec<String>) -> Result<(
     for id in &ids {
         q = q.bind(id);
     }
-    let rows = q.fetch_all(pool).await.map_err(|e| e.to_string())?;
+    let rows = q.fetch_all(pool).await?;
     let existing: std::collections::HashSet<&str> = rows.iter().map(|(id, _)| id.as_str()).collect();
     let mut orders: Vec<i64> = rows.iter().map(|(_, o)| *o).collect();
     orders.sort_unstable();
@@ -444,8 +430,7 @@ pub async fn reorder_tasks_impl(pool: &SqlitePool, ids: Vec<String>) -> Result<(
             .bind(ord)
             .bind(id)
             .execute(pool)
-            .await
-            .map_err(|e| e.to_string())?;
+            .await?;
     }
     Ok(())
 }
@@ -454,11 +439,11 @@ pub async fn reorder_tasks_impl(pool: &SqlitePool, ids: Vec<String>) -> Result<(
 pub async fn search_tasks(
   pool: State<'_, SqlitePool>,
   query: String,
-) -> Result<Vec<Task>, String> {
+) -> AppResult<Vec<Task>> {
   search_tasks_impl(pool.inner(), query).await
 }
 
-pub async fn search_tasks_impl(pool: &SqlitePool, query: String) -> Result<Vec<Task>, String> {
+pub async fn search_tasks_impl(pool: &SqlitePool, query: String) -> AppResult<Vec<Task>> {
   let trimmed = query.trim();
   if trimmed.is_empty() {
     return Ok(vec![]);
@@ -481,8 +466,7 @@ pub async fn search_tasks_impl(pool: &SqlitePool, query: String) -> Result<Vec<T
   )
   .bind(fts_query)
   .fetch_all(pool)
-  .await
-  .map_err(|e| e.to_string())?;
+  .await?;
 
   let mut tasks: Vec<Task> = rows.into_iter().map(|r| r.into_task()).collect();
   crate::commands::subtasks::attach_subtasks(pool, &mut tasks).await?;
@@ -496,11 +480,11 @@ pub struct TaskSnippet {
 }
 
 #[tauri::command]
-pub async fn search_tasks_snippet(pool: State<'_, SqlitePool>, query: String) -> Result<Vec<TaskSnippet>, String> {
+pub async fn search_tasks_snippet(pool: State<'_, SqlitePool>, query: String) -> AppResult<Vec<TaskSnippet>> {
   search_tasks_snippet_impl(pool.inner(), query).await
 }
 
-pub async fn search_tasks_snippet_impl(pool: &SqlitePool, query: String) -> Result<Vec<TaskSnippet>, String> {
+pub async fn search_tasks_snippet_impl(pool: &SqlitePool, query: String) -> AppResult<Vec<TaskSnippet>> {
   let trimmed = query.trim();
   if trimmed.is_empty() {
     return Ok(vec![]);
@@ -521,8 +505,7 @@ pub async fn search_tasks_snippet_impl(pool: &SqlitePool, query: String) -> Resu
   )
   .bind(fts_query)
   .fetch_all(pool)
-  .await
-  .map_err(|e| e.to_string())?;
+  .await?;
 
   let mut snippets: Vec<TaskSnippet> = Vec::with_capacity(rows.len());
   for row in rows {
@@ -1018,6 +1001,37 @@ mod tests {
         let long_ago = (Utc::now() - chrono::Duration::hours(25)).to_rfc3339();
         set_setting(&pool, "last_history_cleanup", &long_ago).await.unwrap();
         assert!(history_cleanup_due(&pool).await, "прошло больше 24ч — пора снова");
+    }
+
+    // v0.9.71: the point of the migration. A DB failure used to arrive as bare
+    // sqlx text ("no such table: tasks"), which says nothing to the user about
+    // what class of problem it is. AppError::Db adds a prefix the frontend then
+    // translates (src/lib/errorText.ts).
+    #[tokio::test]
+    async fn db_error_carries_a_prefix() {
+        let pool = test_pool().await;
+        sqlx::query("DROP TABLE tasks").execute(&pool).await.unwrap();
+
+        let err = get_tasks_impl(&pool).await.unwrap_err().to_string();
+        assert!(
+            err.starts_with("Ошибка базы данных: "),
+            "сбой БД должен нести технический префикс, получено: {err}"
+        );
+        // The sqlx detail must survive: without it the message says nothing.
+        assert!(err.contains("tasks"), "детали от sqlx потерялись: {err}");
+    }
+
+    // The other side of the same coin: a domain error is the message the code
+    // wrote, verbatim. Wrapping it into AppError::Db would prepend a technical
+    // prefix and the frontend would then translate a head that is not its own.
+    #[tokio::test]
+    async fn domain_errors_are_not_wrapped() {
+        let pool = test_pool().await;
+        let mut blank = new_task("");
+        blank.title = "   ".into();
+
+        let err = create_task_impl(&pool, blank).await.unwrap_err().to_string();
+        assert_eq!(err, "Название задачи не может быть пустым");
     }
 }
 

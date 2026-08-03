@@ -65,9 +65,12 @@ pub async fn apply_deadline_action(
 ) -> Result<(), String> {
     match action {
         NotificationAction::TaskDone => {
+            // tasks.rs returns AppError; this module keeps its String contract, so
+            // the error is flattened here rather than migrating the notifier too.
             crate::commands::tasks::complete_task_impl(pool, task_id.to_string())
                 .await
                 .map(|_| ())
+                .map_err(|e| e.to_string())
         }
         NotificationAction::TaskSnoozeHour => {
             let next = chrono::Utc::now() + chrono::Duration::hours(1);
