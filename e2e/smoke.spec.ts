@@ -244,6 +244,53 @@ test("ошибку задач можно закрыть крестиком", asy
   await expect(page.locator(".task-error")).toHaveCount(0);
 });
 
+// v0.9.70: AppError отдаёт «<русский префикс>: <детали>», и до этой версии
+// префикс уезжал в интерфейс мимо словаря — англоязычный пользователь видел
+// русский текст. Переводится только префикс: детали приходят из sqlx/io и
+// остаются как есть.
+test("технический префикс ошибки переводится, детали остаются", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Настройки" }).click();
+  await page.locator("label", { hasText: "Язык" }).locator("select").selectOption("en");
+  await page.getByRole("button", { name: /Tasks/ }).first().click();
+
+  await page.evaluate(() => {
+    (window as any).__mockFailNext = {
+      cmd: "create_task",
+      msg: "Ошибка базы данных: no such table: tasks",
+    };
+  });
+  await page.getByRole("button", { name: /New|Новая/ }).first().click();
+  await page.getByPlaceholder(/Task title|Название задачи/).fill("упадёт");
+  await page.getByRole("button", { name: /^(Create|Создать)$/ }).click();
+
+  const banner = page.locator(".task-error");
+  await expect(banner).toContainText("Database error");
+  // детали от sqlx не переводятся и не теряются
+  await expect(banner).toContainText("no such table: tasks");
+  await expect(banner).not.toContainText("Ошибка базы данных");
+});
+
+// Доменное сообщение — не технический префикс, даже если в нём есть двоеточие.
+// Наивный перевод «головы до двоеточия» изуродовал бы его.
+test("доменная ошибка не расчленяется по двоеточию", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Настройки" }).click();
+  await page.locator("label", { hasText: "Язык" }).locator("select").selectOption("en");
+  await page.getByRole("button", { name: /Tasks/ }).first().click();
+
+  await page.evaluate(() => {
+    (window as any).__mockFailNext = { cmd: "create_task", msg: "Задача не найдена: abc" };
+  });
+  await page.getByRole("button", { name: /New|Новая/ }).first().click();
+  await page.getByPlaceholder(/Task title|Название задачи/).fill("вторая");
+  await page.getByRole("button", { name: /^(Create|Создать)$/ }).click();
+
+  await expect(page.locator(".task-error")).toContainText("Задача не найдена: abc");
+});
+
 // v0.9.69: часовая шкала собирается через pad2 из общего datetime.ts. Юнит-тесты
 // проверяют саму функцию, но не то, что она доехала до разметки — а сломанный
 // паддинг здесь выглядит как «0:00, 1:00» и портит вёрстку колонки.

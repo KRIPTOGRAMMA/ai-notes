@@ -8,7 +8,7 @@
   import { listen } from "@tauri-apps/api/event";
   import type { AppSettings } from "./lib/types";
   import { applyCachedTheme, applyTheme } from "./lib/theme";
-  import { i18n, t } from "./lib/i18n.svelte";
+  import { i18n, t, tErr } from "./lib/i18n.svelte";
   import { parseKeybinds, comboFor, comboMatches, formatCombo, type Keybinds } from "./lib/keybinds";
   import Onboarding from "./views/Onboarding.svelte";
   import Tasks from "./views/Tasks.svelte";
@@ -248,14 +248,14 @@
   <main class="content">
     {#if taskStore.error}
       <div class="banner">
-        <span>{t(taskStore.error)}</span>
+        <span>{tErr(taskStore.error)}</span>
         <button class="btn-icon" onclick={() => taskStore.clearError()} style="color:white;">✕</button>
       </div>
     {/if}
 
     {#if noteStore.error}
       <div class="banner">
-        <span>{t(noteStore.error)}</span>
+        <span>{tErr(noteStore.error)}</span>
         <button class="btn-icon" onclick={() => noteStore.clearError()} style="color:white;">✕</button>
       </div>
     {/if}
@@ -264,7 +264,7 @@
          so its failure belongs in the global banner rather than on one screen. -->
     {#if pinnedStore.error}
       <div class="banner pinned-error">
-        <span>{t(pinnedStore.error)}</span>
+        <span>{tErr(pinnedStore.error)}</span>
         <button class="btn-icon" onclick={() => pinnedStore.clearError()} style="color:white;">✕</button>
       </div>
     {/if}

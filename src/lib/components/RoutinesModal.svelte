@@ -4,7 +4,7 @@
   import Icon from "./Icon.svelte";
 
   // `t` is taken here by a local variable, so the translation helper is imported as `tr`.
-  import { t as tr } from "../i18n.svelte";
+  import { t as tr, tErr as trErr } from "../i18n.svelte";
   import { hhmmFromMins } from "../datetime";
   let { onClose }: { onClose: () => void } = $props();
 
@@ -77,7 +77,7 @@
          failures can reach the user. -->
     {#if routineStore.error}
       <div class="alert routine-error">
-        <span>{tr(routineStore.error)}</span>
+        <span>{trErr(routineStore.error)}</span>
         <button class="btn-icon" onclick={() => routineStore.clearError()}>✕</button>
       </div>
     {/if}

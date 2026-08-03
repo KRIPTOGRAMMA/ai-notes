@@ -11,7 +11,7 @@
   import Icon from "../lib/components/Icon.svelte";
   import { HELP_TOPICS } from "../lib/help";
   import { LANGS, SEEDED_CATEGORY_IDS, type Lang } from "../lib/i18n";
-  import { i18n, t } from "../lib/i18n.svelte";
+  import { i18n, t, tErr } from "../lib/i18n.svelte";
   import {
     KEYBIND_ACTIONS, type Keybinds,
     parseKeybinds, comboFor, comboFromEvent, formatCombo, findConflicts,
@@ -887,7 +887,7 @@
       <button class="btn-sm" onclick={addCategory} disabled={!newCatName.trim()}>{t("Добавить")}</button>
     </div>
     {#if categoryStore.error}
-      <p class="hint" style="color:var(--danger, #d33);">{t(categoryStore.error)}</p>
+      <p class="hint" style="color:var(--danger, #d33);">{tErr(categoryStore.error)}</p>
     {/if}
     <p class="hint">{t("Изменения сохраняются сразу. При удалении категории её задачи переходят в «Другое».")}</p>
   </section>
@@ -1094,7 +1094,7 @@
       <button class="btn-sm" onclick={addStatus} disabled={!newStatusName.trim()}>{t("Добавить")}</button>
     </div>
     {#if statusStore.error}
-      <p class="hint" style="color:var(--danger, #d33);">{t(statusStore.error)}</p>
+      <p class="hint" style="color:var(--danger, #d33);">{tErr(statusStore.error)}</p>
     {/if}
  <p class="hint">{t("Изменения сохраняются сразу. Todo/В работе/Готово/Архив — встроенные (с ними связаны трекинг времени и завершение задач), их можно только перекрасить. Свои статусы удобны как промежуточные колонки канбан-доски; при удалении такого статуса задачи переходят в «Todo».")}</p>
   </section>

@@ -401,6 +401,14 @@ export const EN: Record<string, string> = {
   // stays pure and unit-testable.
   "Неизвестная ошибка": "Unknown error",
 
+  // Technical prefixes of AppError (src-tauri/src/error.rs). Only the prefix is
+  // translated — the detail after ": " is raw sqlx/io/zip/reqwest text. Handled by
+  // localizeBackendError (errorText.ts); the list of prefixes lives there too.
+  "Ошибка базы данных": "Database error",
+  "Ошибка файловой системы": "Filesystem error",
+  "Ошибка архива": "Archive error",
+  "Ошибка запроса к ИИ": "AI request error",
+
   // --- Voice input ---
   "Голосовой ввод": "Voice input",
   "Надиктовать": "Dictate",

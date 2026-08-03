@@ -9,7 +9,7 @@
   import { pinnedStore } from "../lib/stores/pinned.svelte";
   import { api } from "../lib/api/tauri";
   import { parseComposer, parseTaskText, matchCategoryQuery, SUBTASK_PREFIX } from "../lib/composer";
-  import { t } from "../lib/i18n.svelte";
+  import { t, tErr } from "../lib/i18n.svelte";
   import TaskModal from "../lib/components/TaskModal.svelte";
   import ChecklistEditor from "../lib/components/ChecklistEditor.svelte";
   import { parseChecklist, formatChecklist } from "../lib/checklistText";
@@ -971,7 +971,7 @@
       <h2 class="dialog-title">{t("Проекты")}</h2>
 
       {#if projectStore.error}
-        <div class="alert" style="margin:0;">{t(projectStore.error)}</div>
+        <div class="alert" style="margin:0;">{tErr(projectStore.error)}</div>
       {/if}
 
       {#each projectStore.projects as p (p.id)}
@@ -1061,7 +1061,7 @@
       <h2 class="dialog-title">{t("Новый умный список")}</h2>
 
       {#if smartListStore.error}
-        <div class="alert" style="margin:0;">{t(smartListStore.error)}</div>
+        <div class="alert" style="margin:0;">{tErr(smartListStore.error)}</div>
       {/if}
 
       <label class="field">
@@ -1166,7 +1166,7 @@
        Notes and Settings. -->
   {#if taskStore.error}
     <div class="alert task-error" role="alert">
-      <span>{taskStore.error}</span>
+      <span>{tErr(taskStore.error)}</span>
       <button class="btn-sm" onclick={() => taskStore.clearError()} title={t("Скрыть")}>✕</button>
     </div>
   {/if}

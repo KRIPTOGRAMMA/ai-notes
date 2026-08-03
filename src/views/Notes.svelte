@@ -7,7 +7,7 @@
   import { pinnedStore } from "../lib/stores/pinned.svelte";
   import { api } from "../lib/api/tauri";
   import { extractWikiLinks, renderMarkdown } from "../lib/markdown";
-  import { t, i18n } from "../lib/i18n.svelte";
+  import { t, tErr, i18n } from "../lib/i18n.svelte";
   import { convertFileSrc } from "@tauri-apps/api/core";
   import { save as saveDialog } from "@tauri-apps/plugin-dialog";
   import Icon from "../lib/components/Icon.svelte";
@@ -842,7 +842,7 @@ ${bodyHtml}
       {#if !zenMode && linkSuggestions && linkSuggestions.noteId === selectedId}
         <div class="link-suggest">
           {#if linkSuggestions.error}
-            <span class="alert" style="margin:0;">{linkSuggestions.error}</span>
+            <span class="alert" style="margin:0;">{tErr(linkSuggestions.error)}</span>
           {:else if linkSuggestions.titles.length === 0}
             <span class="muted">{t("Связей не найдено")}</span>
           {:else}
@@ -864,7 +864,7 @@ ${bodyHtml}
       {#if !zenMode && extractedTasks}
         <div class="extracted">
           {#if extractedTasks.error}
-            <span class="alert" style="margin:0;">{extractedTasks.error}</span>
+            <span class="alert" style="margin:0;">{tErr(extractedTasks.error)}</span>
             <button class="btn-icon" title={t("Закрыть")} onclick={closeExtractedTasks}>✕</button>
           {:else if extractedTasks.items.length === 0}
             <span class="muted">{t("Задач в заметке не найдено")}</span>
@@ -1013,7 +1013,7 @@ ${bodyHtml}
               <span class="muted" style="padding:4px 8px;">{t("Думаю…")}</span>
             {:else if selectionResult}
               {#if selectionResult.error}
-                <span class="alert" style="margin:0; padding:4px 8px;">{selectionResult.error}</span>
+                <span class="alert" style="margin:0; padding:4px 8px;">{tErr(selectionResult.error)}</span>
                 <button class="btn-icon" title={t("Закрыть")} onclick={dismissSelectionResult}>✕</button>
               {:else}
                 <div class="selection-preview">{selectionResult.text}</div>
@@ -1091,7 +1091,7 @@ ${bodyHtml}
       {#if summarizing}
         <p class="muted">{t("Сжимаю заметку…")}</p>
       {:else if summaryResult?.error}
-        <p class="alert">{summaryResult.error}</p>
+        <p class="alert">{tErr(summaryResult.error)}</p>
         <div class="actions">
           <button class="btn-ghost" onclick={closeSummary}>{t("Закрыть")}</button>
         </div>
