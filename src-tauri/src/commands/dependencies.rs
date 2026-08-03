@@ -329,7 +329,7 @@ mod tests {
     add_task_dependency_impl(&pool, &b, &a).await.unwrap();
     assert!(add_task_dependency_impl(&pool, &a, &b).await.is_err(), "прямой цикл");
 
-    // A chain longer than one link: в waits for б, б waits for а => а cannot wait for в
+    // A chain longer than one link: в waits for б, б waits for а => а cannot wait for в /* ru-ok: test data names */
     add_task_dependency_impl(&pool, &c, &b).await.unwrap();
     assert!(add_task_dependency_impl(&pool, &a, &c).await.is_err(), "цикл через цепочку");
   }

@@ -306,4 +306,52 @@ mod tests {
             assert!(!tr(k, Lang::En).trim().is_empty(), "пустой перевод для «{k}»");
         }
     }
+
+    // The CSS half of the "all comments in English" guard.
+    //
+    // Its twin lives in src/lib/comments.test.ts and covers .ts/.svelte/.rs plus
+    // the root configs. Stylesheets could not join it: Vite runs .css through its
+    // own pipeline, so import.meta.glob returns an EMPTY string for them under
+    // every form of ?raw — the glob lists the path, and the guard then scans
+    // nothing. That is the very failure mode this whole task exists to prevent, so
+    // the check moved to the side that can actually read the file: include_str!,
+    // the same bridge error.rs already uses to reach the frontend.
+    #[test]
+    fn no_russian_comments_in_css() {
+        let css = include_str!("../../src/app.css");
+        let mut offenders: Vec<String> = Vec::new();
+        let mut in_comment = false;
+        for (n, line) in css.lines().enumerate() {
+            let body = if in_comment {
+                line
+            } else if let Some(i) = line.find("/*") {
+                &line[i..]
+            } else {
+                ""
+            };
+            if body.contains("/*") && !body.contains("*/") {
+                in_comment = true;
+            } else if body.contains("*/") {
+                in_comment = false;
+            }
+            // Quoted spans are cut out: a comment may legitimately quote a Russian
+            // example without being written in Russian.
+            let stripped: String = {
+                let mut out = String::new();
+                let mut quoted = false;
+                for c in body.chars() {
+                    match c {
+                        '"' | '\'' | '«' | '»' => quoted = !quoted,
+                        _ if !quoted => out.push(c),
+                        _ => {}
+                    }
+                }
+                out
+            };
+            if stripped.chars().any(|c| ('а'..='я').contains(&c) || ('А'..='Я').contains(&c) || c == 'ё' || c == 'Ё') {
+                offenders.push(format!("src/app.css:{}  {}", n + 1, body.trim()));
+            }
+        }
+        assert!(offenders.is_empty(), "русские комментарии в CSS:\n{}", offenders.join("\n"));
+    }
 }

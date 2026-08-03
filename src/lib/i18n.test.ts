@@ -205,7 +205,8 @@ describe("покрытие словаря по размеченным файла
   // marked-up files no Cyrillic may remain outside t()/tr().
   //
   // What deliberately does NOT count as a violation:
-  // - comments (the whole project is commented in Russian);
+  // - comments: this test is about interface strings, not about the language the
+  //   code is explained in. Comments have their own guard — comments.test.ts;
   // - <style> (Cyrillic appears there only in comments);
   // - the keys inside t("...") themselves — those are the dictionary keys;
   // - blocks marked `/* i18n-ok */`, which are translated where they are rendered

@@ -592,11 +592,11 @@ mod tests {
         let c = create_task_impl(&pool, new_task("в")).await.unwrap();
         let d = create_task_impl(&pool, new_task("г")).await.unwrap();
 
-        // New tasks go to the end: а, б, в, г
+        // New tasks go to the end: а, б, в, г /* ru-ok: test data names */
         let titles = |tasks: &[Task]| tasks.iter().map(|t| t.title.clone()).collect::<Vec<_>>();
         assert_eq!(titles(&get_tasks_impl(&pool).await.unwrap()), ["а", "б", "в", "г"]);
 
-        // Reorder the first three: в, а, б — "г" is left alone
+        // Reorder the first three: в, а, б — "г" is left alone /* ru-ok: test data names */
         reorder_tasks_impl(&pool, vec![c.id.clone(), a.id.clone(), b.id.clone()]).await.unwrap();
         assert_eq!(titles(&get_tasks_impl(&pool).await.unwrap()), ["в", "а", "б", "г"]);
 

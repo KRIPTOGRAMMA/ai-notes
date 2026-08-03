@@ -1,7 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
-// E2E против vite dev с моком Tauri-бэкенда (e2e/tauri-mock.js).
-// Rust-слой не участвует — он покрыт интеграционными тестами (cargo test).
+// E2E against vite dev with a mocked Tauri backend (e2e/tauri-mock.js).
+// The Rust layer takes no part here — it is covered by cargo test.
 export default defineConfig({
   testDir: "e2e",
   timeout: 30_000,

@@ -7,6 +7,32 @@ async function withMock(page: Page) {
   await page.addInitScript({ path: "./e2e/tauri-mock.js" });
 }
 
+// Ждёт, пока симуляция графа остынет. Координаты узлов пишутся напрямую через
+// setAttribute мимо реактивности Svelte, поэтому «остыл» видно только по тому,
+// что transform перестал меняться от кадра к кадру. Явного признака в DOM нет
+// (rafId — переменная модуля), и заводить его ради тестов не нужно.
+// Заменяет waitForTimeout(1500), который был просто НЕДОСТАТОЧЕН: замер показал,
+// что граф из 2 узлов остывает за ~2.5с, из 3 — за ~6.3с. Тесты драга проходили
+// на движущемся графе — их спасало только то, что сдвиг от драга (>80px)
+// заведомо больше остаточного дрейфа.
+async function waitForGraphSettled(page: Page, timeout = 12000) {
+  const snapshot = () => page.evaluate(() =>
+    [...document.querySelectorAll(".node")].map(n => n.getAttribute("transform") ?? "").join("|")
+  );
+  const deadline = Date.now() + timeout;
+  let prev = await snapshot();
+  let stableFrames = 0;
+  while (Date.now() < deadline) {
+    await page.waitForTimeout(50);
+    const next = await snapshot();
+    // Двух совпавших подряд замеров мало: симуляция может «проползать» медленно.
+    stableFrames = next === prev ? stableFrames + 1 : 0;
+    prev = next;
+    if (stableFrames >= 2) return;
+  }
+  throw new Error("граф не остыл за отведённое время");
+}
+
 // Сид состояния мока: кладётся в localStorage ДО tauri-mock.js,
 // который подхватывает существующий __mock_db.
 async function seedDb(page: Page, db: object) {
@@ -1843,6 +1869,75 @@ test("граф заметок: связанные заметки дают узл
 });
 
 
+// v0.9.73: пустое состояние графа. Экран без заметок не должен показывать
+// пустой холст — там объяснение, что граф появится вместе со связями.
+test("граф заметок: без заметок вместо пустого холста объяснение", async ({ page }) => {
+  await seedDb(page, { tasks: [], notes: [], settings: { onboarding_complete: true } });
+  await withMock(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Граф" }).click();
+
+  await expect(page.getByText("Пока нет заметок")).toBeVisible();
+  await expect(page.locator(".node")).toHaveCount(0);
+  // Холста нет вовсе (не пустой svg): .canvas живёт в {:else} ветке.
+  // Проверять `svg` глобально нельзя — в навигации 14 иконок-svg.
+  await expect(page.locator(".canvas")).toHaveCount(0);
+});
+
+// v0.9.73: наведение приглушает всё, что не связано с узлом под курсором —
+// на большом графе это единственный способ увидеть окрестность одной заметки.
+test("граф заметок: наведение приглушает несвязанные узлы", async ({ page }) => {
+  const now = new Date().toISOString();
+  await seedDb(page, {
+    tasks: [],
+    notes: [
+      { id: "n1", title: "Первая", content: "см. [[Вторая]]", tags: [], linked_task_id: null, project_id: null, created_at: now, updated_at: now },
+      { id: "n2", title: "Вторая", content: "без ссылок", tags: [], linked_task_id: null, project_id: null, created_at: now, updated_at: now },
+      { id: "n3", title: "Третья", content: "сама по себе", tags: [], linked_task_id: null, project_id: null, created_at: now, updated_at: now },
+    ],
+    settings: { onboarding_complete: true },
+  });
+  await withMock(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Граф" }).click();
+  await waitForGraphSettled(page);
+
+  await expect(page.locator(".node.dim")).toHaveCount(0);
+
+  // Наводим на «Первая»: связанная «Вторая» остаётся яркой, «Третья» гаснет.
+  await page.locator(".node", { hasText: "Первая" }).hover();
+  await expect(page.locator(".node.dim")).toHaveCount(1);
+  await expect(page.locator(".node.dim", { hasText: "Третья" })).toBeVisible();
+  await expect(page.locator(".node.dim", { hasText: "Вторая" })).toHaveCount(0);
+});
+
+// v0.9.73: симуляция обязана останавливаться сама. Пока она крутится, узел
+// нельзя надёжно кликнуть — он уезжает из-под курсора; плюс это впустую
+// потраченный CPU на экране, который просто открыли.
+test("граф заметок: симуляция останавливается сама", async ({ page }) => {
+  const now = new Date().toISOString();
+  await seedDb(page, {
+    tasks: [],
+    notes: [
+      { id: "n1", title: "Первая", content: "см. [[Вторая]]", tags: [], linked_task_id: null, project_id: null, created_at: now, updated_at: now },
+      { id: "n2", title: "Вторая", content: "см. [[Первая]]", tags: [], linked_task_id: null, project_id: null, created_at: now, updated_at: now },
+    ],
+    settings: { onboarding_complete: true },
+  });
+  await withMock(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Граф" }).click();
+
+  // Бросит исключение, если координаты продолжают меняться.
+  await waitForGraphSettled(page);
+
+  // И остаётся стоять: без остановки цикла узлы продолжали бы ползти.
+  const at = () => page.locator(".node").first().getAttribute("transform");
+  const settled = await at();
+  await page.waitForTimeout(400);
+  expect(await at()).toBe(settled);
+});
+
 // Перетаскивание узла: позиция указателя применяется раз в кадр, а рект
 // контейнера кэшируется на время драга (иначе getBoundingClientRect на
 // каждый pointermove — синхронный layout flush; WebKitGTK шлёт их ~170/сек).
@@ -1859,7 +1954,7 @@ test("граф заметок: узел следует за курсором п�
   await withMock(page);
   await page.goto("/");
   await page.getByRole("button", { name: "Граф" }).click();
-  await page.waitForTimeout(1500); // симуляция должна остыть, иначе узел уедет сам
+  await waitForGraphSettled(page); // иначе узел уедет сам, пока мы его меряем
 
   const node = page.locator(".node").first();
   const before = (await node.boundingBox())!;
@@ -1897,7 +1992,7 @@ test("граф заметок: узел двигается во время пе�
   await withMock(page);
   await page.goto("/");
   await page.getByRole("button", { name: "Граф" }).click();
-  await page.waitForTimeout(1500); // симуляция должна остыть, иначе узел уедет сам
+  await waitForGraphSettled(page); // иначе узел уедет сам, пока мы его меряем
 
   const node = page.locator(".node").first();
   const before = (await node.boundingBox())!;

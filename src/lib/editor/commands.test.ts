@@ -28,9 +28,10 @@ describe("insertAtCursor", () => {
     v.destroy();
   });
 
-  // Каретка стоит за пробелом, но вплотную к слову справа: слева отступ не нужен,
-  // справа нужен. Стороны считаются независимо — в v0.9.65 padding был сделан
-  // только слева, и получалось «начало вставкаконец».
+  // The caret sits after a space but flush against the word on the right: no
+  // padding is needed on the left, one is needed on the right. The sides are
+  // decided independently — padding used to be applied on the left only, which
+  // glued the phrase to the following word.
   it("после пробела слева не добавляется, справа добавляется", () => {
     const v = editor("начало конец", 7);
     insertAtCursor(v, "вставка");
@@ -85,7 +86,7 @@ describe("insertAtCursor", () => {
   it("каретка встаёт после вставки, а не в начале", () => {
     const v = editor("началоконец", 6);
     insertAtCursor(v, "вставка");
-    // "начало вставка конец" — каретка сразу за вставленным куском с отступами
+    // the caret lands right after the inserted chunk, padding included
     expect(v.state.selection.main.head).toBe(6 + " вставка ".length);
     v.destroy();
   });

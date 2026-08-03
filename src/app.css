@@ -1,4 +1,4 @@
-/* ===== Дизайн-токены ===== */
+/* ===== Design tokens ===== */
 :root {
     --bg-primary: #ffffff;
     --bg-secondary: #f5f5f5;
@@ -15,20 +15,20 @@
     --radius: 6px;
     --radius-lg: 10px;
 
-    /* Ширина блока кнопок окна (v0.9.40): три кнопки 28px + зазоры 2px +
-       отступ 6px от края. Токен, а не число: .content резервирует под них
-       место справа, и при правке размера кнопок сдвиг не должен разъехаться
-       с реальностью. */
+    /* Width of the window-button block: three 28px buttons + 2px gaps + a 6px
+       edge margin. A token rather than a number because .content reserves the
+       space for them on the right, and resizing the buttons must not leave that
+       offset out of step with reality. */
     --wincontrols-w: 98px;
 
-    /* Категории — валидированная палитра (фиксированный порядок слотов) */
+    /* Categories — a validated palette (the slot order is fixed) */
     --cat-work: #2a78d6;
     --cat-study: #1baf7a;
     --cat-home: #eda100;
     --cat-health: #008300;
     --cat-other: #4a3aa7;
 
-    /* Приоритеты */
+    /* Priorities */
     --prio-low: #94a3b8;
     --prio-medium: #2a78d6;
     --prio-high: #d97706;
@@ -80,7 +80,7 @@ body {
     overflow: hidden;
 }
 
-/* ===== Базовые элементы ===== */
+/* ===== Base elements ===== */
 button {
     cursor: pointer;
     padding: 5px 12px;
@@ -122,7 +122,7 @@ input:focus, select:focus, textarea:focus {
     border-color: transparent;
 }
 
-/* ===== Кнопки-варианты ===== */
+/* ===== Button variants ===== */
 .btn-primary {
     background: linear-gradient(135deg, var(--accent), var(--accent-secondary));
     color: #fff;
@@ -151,7 +151,7 @@ input:focus, select:focus, textarea:focus {
 .btn-danger { color: var(--danger); }
 .btn-danger:hover { background: color-mix(in srgb, var(--danger) 10%, transparent); }
 
-/* ===== Карточки, секции, чипы ===== */
+/* ===== Cards, sections, chips ===== */
 .card {
     background: var(--bg-card);
     border: 1px solid var(--border);
@@ -186,7 +186,7 @@ input:focus, select:focus, textarea:focus {
     background: var(--bg-secondary);
 }
 
-/* Чип категории: цвет слота + лёгкая подложка того же цвета */
+/* Category chip: the slot colour plus a light backing of the same hue */
 .chip-cat { color: var(--cat, var(--text-secondary)); background: color-mix(in srgb, var(--cat, #888) 12%, transparent); }
 .chip-cat.cat-work   { --cat: var(--cat-work); }
 .chip-cat.cat-study  { --cat: var(--cat-study); }
@@ -217,7 +217,7 @@ input:focus, select:focus, textarea:focus {
     margin-bottom: 12px;
 }
 
-/* ===== Поля форм ===== */
+/* ===== Form fields ===== */
 .field {
     display: flex;
     flex-direction: column;
@@ -233,16 +233,17 @@ input:focus, select:focus, textarea:focus {
     color: var(--text-secondary);
 }
 
-/* ===== Сегмент-контрол (вкладки-переключатели) =====
-   v0.9.54: единственная реализация переключателя в приложении. До неё их было
-   три: заливка здесь, подчёркивание в Настройках, мягкая подсветка в Календаре
-   и Дашборде. Метафору выбрали по позиции, а не по вкусу: переключатели тут
-   чаще стоят в шапке рядом с поиском и кнопками, чем над собственной панелью,
-   а подчёркивание в такой позиции подчёркивает край шапки, а не свой блок.
-   Общая рамка же сама говорит «один выбор из нескольких» в любом окружении.
+/* ===== Segmented control (toggle tabs) =====
+   The single toggle implementation in the app. There used to be three: a filled
+   one here, an underline in Settings, a soft highlight in Calendar and Dashboard.
+   The metaphor was chosen by position rather than taste: these toggles more often
+   sit in a header next to search and buttons than above a panel of their own, and
+   an underline in that position underlines the edge of the header rather than its
+   own block. A shared frame, by contrast, says "one choice out of several" in any
+   surrounding.
 
-   NB: .active-toggle в Tasks.svelte — НЕ этот элемент. Там тот же класс висит
-   на чипах смарт-списков и красит их в --bg-hover, а не в акцент. */
+   NB: .active-toggle in Tasks.svelte is NOT this element. The same class name sits
+   there on the smart-list chips and paints them --bg-hover rather than the accent. */
 .seg {
     display: inline-flex;
     border: 1px solid var(--border);
@@ -259,13 +260,14 @@ input:focus, select:focus, textarea:focus {
     color: var(--text-secondary);
 }
 
-/* Разделители, а не рамки: иначе на стыке сегментов границы удваиваются. */
+/* Separators rather than borders: otherwise the edges double up where two
+   segments meet. */
 .seg button + button {
     border-left: 1px solid var(--border);
 }
 
-/* Наведение только на невыбранных: у активного оно перекрасило бы заливку
-   в --bg-hover и на миг гасило акцент. */
+/* Hover only on the unselected ones: on the active segment it would repaint the
+   fill with --bg-hover and briefly kill the accent. */
 .seg button:not(.active):hover {
     background: var(--bg-hover);
     color: var(--text-primary);
@@ -277,21 +279,21 @@ input:focus, select:focus, textarea:focus {
     font-weight: 500;
 }
 
-/* Активный сегмент граничит с акцентной заливкой — разделитель на этом стыке
-   лишний и читается как щербина в ней. */
+/* The active segment borders the accent fill, so a separator at that joint is
+   redundant and reads as a notch in it. */
 .seg button.active + button,
 .seg button:has(+ .active) {
     border-left-color: transparent;
 }
 
-/* Просторный вариант — там, где вкладки несут заголовок раздела, а не режим
-   отображения: в Настройках их семь и они занимают всю строку. */
+/* The roomy variant, for tabs that carry a section title rather than a display
+   mode: Settings has seven of them and they fill the whole line. */
 .seg--tabs button {
     font-size: 13px;
     padding: 7px 13px;
 }
 
-/* ===== Оверлеи и модалки ===== */
+/* ===== Overlays and modals ===== */
 .overlay {
     position: fixed;
     inset: 0;

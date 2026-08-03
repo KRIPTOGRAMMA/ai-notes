@@ -49,7 +49,7 @@ describe("localizeBackendError", () => {
     expect(localizeBackendError("Помодоро: 4 из 5", en)).toBe("Помодоро: 4 из 5");
     expect(localizeBackendError("Уведомления: 3 новых", en)).toBe("Уведомления: 3 новых");
     expect(localizeBackendError("В работе: две задачи", en)).toBe("В работе: две задачи");
-    // проверка самой предпосылки: эти ключи в словаре действительно есть
+    // the premise itself: these keys really are in the dictionary
     expect(en("Помодоро")).not.toBe("Помодоро");
     expect(en("Уведомления")).not.toBe("Уведомления");
   });
@@ -71,9 +71,9 @@ describe("localizeBackendError", () => {
   });
 });
 
-// Оборачивать место отрисовки приходится вручную, и один раз это уже забыли:
-// в v0.9.68 греп искал `Store.error)}` со скобкой и не увидел голое
-// `{taskStore.error}` в Tasks.svelte — там ошибка так и рисовалась без перевода.
+// Wrapping a render site is a manual step, and it has already been forgotten once:
+// a grep looked for `Store.error)}` with the closing paren and missed the bare
+// `{taskStore.error}` in Tasks.svelte, where the error rendered untranslated.
 describe("места отрисовки ошибок обёрнуты", () => {
   const VIEWS = import.meta.glob("/src/**/*.svelte", {
     query: "?raw",
@@ -84,7 +84,7 @@ describe("места отрисовки ошибок обёрнуты", () => {
   it("ни одно .error не попадает в разметку без tErr", () => {
     const offenders: string[] = [];
     for (const [path, src] of Object.entries(VIEWS)) {
-      // {что-нибудь.error} без вызова-обёртки вокруг
+      // {something.error} with no wrapper call around it
       for (const m of src.matchAll(/\{([A-Za-z.]*\.error)\}/g)) {
         offenders.push(`${path}: {${m[1]}}`);
       }
