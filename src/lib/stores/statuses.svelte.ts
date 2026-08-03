@@ -1,4 +1,5 @@
 import { api } from "../api/tauri";
+import { runGuarded } from "../guard";
 import { seededName } from "../i18n";
 import { i18n } from "../i18n.svelte";
 import type { StatusInfo } from "../types";
@@ -6,10 +7,16 @@ import type { StatusInfo } from "../types";
 let statuses: StatusInfo[] = $state([]);
 let error: string | null = $state(null);
 
-function describeError(e: unknown): string {
-  if (typeof e === "string") return e;
-  if (e instanceof Error) return e.message;
-  return "Неизвестная ошибка";
+// See tasks.svelte.ts for why this wrapper stays local instead of moving into
+// guard.ts: it closes over the store's own `error` rune.
+async function guard<T>(op: () => Promise<T>, fallback: T): Promise<T> {
+  const r = await runGuarded(op);
+  if (r.ok) {
+    error = null;
+    return r.value;
+  }
+  error = r.error;
+  return fallback;
 }
 
 export const statusStore = {
@@ -32,37 +39,21 @@ export const statusStore = {
   },
 
   async load() {
-    try {
-      statuses = await api.getStatuses();
-    } catch (e) {
-      error = describeError(e);
-    }
+    statuses = await guard(() => api.getStatuses(), statuses);
   },
 
   async create(name: string, color: string) {
-    try {
-      await api.createStatus(name, color);
-      await statusStore.load();
-    } catch (e) {
-      error = describeError(e);
-    }
+    const ok = await guard(async () => { await api.createStatus(name, color); return true; }, false);
+    if (ok) await statusStore.load();
   },
 
   async update(id: string, patch: { name?: string; color?: string }) {
-    try {
-      await api.updateStatus(id, patch);
-      await statusStore.load();
-    } catch (e) {
-      error = describeError(e);
-    }
+    const ok = await guard(async () => { await api.updateStatus(id, patch); return true; }, false);
+    if (ok) await statusStore.load();
   },
 
   async remove(id: string) {
-    try {
-      await api.deleteStatus(id);
-      await statusStore.load();
-    } catch (e) {
-      error = describeError(e);
-    }
+    const ok = await guard(async () => { await api.deleteStatus(id); return true; }, false);
+    if (ok) await statusStore.load();
   },
 };

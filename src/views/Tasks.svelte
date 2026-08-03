@@ -971,7 +971,7 @@
       <h2 class="dialog-title">{t("Проекты")}</h2>
 
       {#if projectStore.error}
-        <div class="alert" style="margin:0;">{projectStore.error}</div>
+        <div class="alert" style="margin:0;">{t(projectStore.error)}</div>
       {/if}
 
       {#each projectStore.projects as p (p.id)}
@@ -1061,7 +1061,7 @@
       <h2 class="dialog-title">{t("Новый умный список")}</h2>
 
       {#if smartListStore.error}
-        <div class="alert" style="margin:0;">{smartListStore.error}</div>
+        <div class="alert" style="margin:0;">{t(smartListStore.error)}</div>
       {/if}
 
       <label class="field">

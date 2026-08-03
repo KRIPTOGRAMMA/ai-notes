@@ -1,13 +1,20 @@
 import { api } from "../api/tauri";
+import { runGuarded } from "../guard";
 import type { Project, UpdateProjectPayload } from "../types";
 
 let projects: Project[] = $state([]);
 let error: string | null = $state(null);
 
-function describeError(e: unknown): string {
-  if (typeof e === "string") return e;
-  if (e instanceof Error) return e.message;
-  return "Неизвестная ошибка";
+// See tasks.svelte.ts for why this wrapper stays local instead of moving into
+// guard.ts: it closes over the store's own `error` rune.
+async function guard<T>(op: () => Promise<T>, fallback: T): Promise<T> {
+  const r = await runGuarded(op);
+  if (r.ok) {
+    error = null;
+    return r.value;
+  }
+  error = r.error;
+  return fallback;
 }
 
 export const projectStore = {
@@ -17,39 +24,22 @@ export const projectStore = {
   clearError() { error = null; },
 
   async load() {
-    try {
-      projects = await api.getProjects();
-    } catch (e) {
-      error = describeError(e);
-    }
+    projects = await guard(() => api.getProjects(), projects);
   },
 
   async create(name: string, color = ""): Promise<Project | null> {
-    try {
-      const p = await api.createProject({ name, color });
-      await projectStore.load();
-      return p;
-    } catch (e) {
-      error = describeError(e);
-      return null;
-    }
+    const p = await guard(() => api.createProject({ name, color }), null);
+    if (p) await projectStore.load();
+    return p;
   },
 
   async update(id: string, patch: UpdateProjectPayload) {
-    try {
-      await api.updateProject(id, patch);
-      await projectStore.load();
-    } catch (e) {
-      error = describeError(e);
-    }
+    const ok = await guard(async () => { await api.updateProject(id, patch); return true; }, false);
+    if (ok) await projectStore.load();
   },
 
   async remove(id: string) {
-    try {
-      await api.deleteProject(id);
-      await projectStore.load();
-    } catch (e) {
-      error = describeError(e);
-    }
+    const ok = await guard(async () => { await api.deleteProject(id); return true; }, false);
+    if (ok) await projectStore.load();
   },
 };

@@ -46,3 +46,42 @@ describe("runGuarded", () => {
     expect(await runGuarded(async () => false)).toEqual({ ok: true, value: false });
   });
 });
+
+// Six stores each carried a private copy of describeError, and five of those never
+// cleared error on success — so the first failure pinned the banner until a reload.
+// The sources are scanned the same way i18n.test.ts scans for untranslated strings.
+describe("сторы пользуются общим guard", () => {
+  const STORES = import.meta.glob("/src/lib/stores/*.svelte.ts", {
+    query: "?raw",
+    import: "default",
+    eager: true,
+  }) as Record<string, string>;
+
+  it("ни один стор не заводит свой describeError", () => {
+    const offenders = Object.entries(STORES)
+      .filter(([, src]) => /function\s+describeError/.test(src))
+      .map(([path]) => path);
+    expect(offenders).toEqual([]);
+  });
+
+  it("каждый стор с error импортирует runGuarded", () => {
+    const offenders = Object.entries(STORES)
+      .filter(([, src]) => /let error: string \| null = \$state/.test(src))
+      .filter(([, src]) => !/from "\.\.\/guard"/.test(src))
+      .map(([path]) => path);
+    expect(offenders).toEqual([]);
+  });
+
+  // The actual bug: error was only ever assigned. Every store that owns an error
+  // rune must also clear it somewhere other than clearError().
+  it("каждый стор сбрасывает error при успехе", () => {
+    const offenders = Object.entries(STORES)
+      .filter(([, src]) => /let error: string \| null = \$state/.test(src))
+      .filter(([, src]) => {
+        const clears = src.match(/error = null/g)?.length ?? 0;
+        return clears < 2; // one of them is always clearError()
+      })
+      .map(([path]) => path);
+    expect(offenders).toEqual([]);
+  });
+});

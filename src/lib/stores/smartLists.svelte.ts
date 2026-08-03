@@ -1,13 +1,20 @@
 import { api } from "../api/tauri";
+import { runGuarded } from "../guard";
 import type { SmartList, SmartListFilter } from "../types";
 
 let lists: SmartList[] = $state([]);
 let error: string | null = $state(null);
 
-function describeError(e: unknown): string {
-  if (typeof e === "string") return e;
-  if (e instanceof Error) return e.message;
-  return "Неизвестная ошибка";
+// See tasks.svelte.ts for why this wrapper stays local instead of moving into
+// guard.ts: it closes over the store's own `error` rune.
+async function guard<T>(op: () => Promise<T>, fallback: T): Promise<T> {
+  const r = await runGuarded(op);
+  if (r.ok) {
+    error = null;
+    return r.value;
+  }
+  error = r.error;
+  return fallback;
 }
 
 export const smartListStore = {
@@ -16,28 +23,16 @@ export const smartListStore = {
   clearError() { error = null; },
 
   async load() {
-    try {
-      lists = await api.getSmartLists();
-    } catch (e) {
-      error = describeError(e);
-    }
+    lists = await guard(() => api.getSmartLists(), lists);
   },
 
   async create(name: string, filter: SmartListFilter) {
-    try {
-      await api.createSmartList(name, filter);
-      await smartListStore.load();
-    } catch (e) {
-      error = describeError(e);
-    }
+    const ok = await guard(async () => { await api.createSmartList(name, filter); return true; }, false);
+    if (ok) await smartListStore.load();
   },
 
   async remove(id: string) {
-    try {
-      await api.deleteSmartList(id);
-      await smartListStore.load();
-    } catch (e) {
-      error = describeError(e);
-    }
+    const ok = await guard(async () => { await api.deleteSmartList(id); return true; }, false);
+    if (ok) await smartListStore.load();
   },
 };

@@ -1,4 +1,5 @@
 import { api } from "../api/tauri";
+import { runGuarded } from "../guard";
 import type { Note, CreateNotePayload, UpdateNotePayload } from "../types";
 
 let notes: Note[] = $state([]);
@@ -8,10 +9,16 @@ let error: string | null = $state(null);
 let focusNoteId: string | null = $state(null);
 let dailyRequested: number = $state(0); // an increment acts as the signal
 
-function describeError(e: unknown): string {
-  if (typeof e === "string") return e;
-  if (e instanceof Error) return e.message;
-  return "Неизвестная ошибка";
+// See tasks.svelte.ts for why this wrapper stays local instead of moving into
+// guard.ts: it closes over the store's own `error` rune.
+async function guard<T>(op: () => Promise<T>, fallback: T): Promise<T> {
+  const r = await runGuarded(op);
+  if (r.ok) {
+    error = null;
+    return r.value;
+  }
+  error = r.error;
+  return fallback;
 }
 
 export const noteStore = {
@@ -25,43 +32,33 @@ export const noteStore = {
   requestDaily() { dailyRequested++; },
 
   async load() {
-    try {
-      notes = await api.getNotes();
-    } catch (e) {
-      error = describeError(e);
-    }
+    notes = await guard(() => api.getNotes(), notes);
   },
 
   async create(payload: CreateNotePayload): Promise<Note | null> {
-    try {
-      const note = await api.createNote(payload);
-      await noteStore.load();
-      return note;
-    } catch (e) {
-      error = describeError(e);
-      return null;
-    }
+    const note = await guard(() => api.createNote(payload), null);
+    if (note) await noteStore.load();
+    return note;
   },
 
+  // Not routed through guard(): the sentinel below must be told apart from a real
+  // failure before the error reaches the banner.
   async update(id: string, patch: UpdateNotePayload) {
-    try {
-      await api.updateNote(id, patch);
-      await noteStore.load();
-    } catch (e) {
+    const r = await runGuarded(() => api.updateNote(id, patch));
+    if (!r.ok) {
       // Autosave racing deletion: the note was deleted while this save was still in
       // flight (an 800ms debounce). The backend sends a sentinel — we ignore it
       // quietly, the list is already up to date thanks to a parallel load().
-      if (typeof e === "string" && e.includes("__NOTE_DELETED__")) return;
-      error = describeError(e);
+      if (r.error.includes("__NOTE_DELETED__")) return;
+      error = r.error;
+      return;
     }
+    error = null;
+    await noteStore.load();
   },
 
   async remove(id: string) {
-    try {
-      await api.deleteNote(id);
-      await noteStore.load();
-    } catch (e) {
-      error = describeError(e);
-    }
+    const ok = await guard(async () => { await api.deleteNote(id); return true; }, false);
+    if (ok) await noteStore.load();
   },
 };

@@ -1,4 +1,5 @@
 import { api } from "../api/tauri";
+import { runGuarded } from "../guard";
 import { seededName } from "../i18n";
 import { i18n } from "../i18n.svelte";
 import type { CategoryInfo } from "../types";
@@ -6,10 +7,16 @@ import type { CategoryInfo } from "../types";
 let categories: CategoryInfo[] = $state([]);
 let error: string | null = $state(null);
 
-function describeError(e: unknown): string {
-  if (typeof e === "string") return e;
-  if (e instanceof Error) return e.message;
-  return "Неизвестная ошибка";
+// See tasks.svelte.ts for why this wrapper stays local instead of moving into
+// guard.ts: it closes over the store's own `error` rune.
+async function guard<T>(op: () => Promise<T>, fallback: T): Promise<T> {
+  const r = await runGuarded(op);
+  if (r.ok) {
+    error = null;
+    return r.value;
+  }
+  error = r.error;
+  return fallback;
 }
 
 export const categoryStore = {
@@ -31,37 +38,21 @@ export const categoryStore = {
   },
 
   async load() {
-    try {
-      categories = await api.getCategories();
-    } catch (e) {
-      error = describeError(e);
-    }
+    categories = await guard(() => api.getCategories(), categories);
   },
 
   async create(name: string, color: string) {
-    try {
-      await api.createCategory(name, color);
-      await categoryStore.load();
-    } catch (e) {
-      error = describeError(e);
-    }
+    const ok = await guard(async () => { await api.createCategory(name, color); return true; }, false);
+    if (ok) await categoryStore.load();
   },
 
   async update(id: string, patch: { name?: string; color?: string }) {
-    try {
-      await api.updateCategory(id, patch);
-      await categoryStore.load();
-    } catch (e) {
-      error = describeError(e);
-    }
+    const ok = await guard(async () => { await api.updateCategory(id, patch); return true; }, false);
+    if (ok) await categoryStore.load();
   },
 
   async remove(id: string) {
-    try {
-      await api.deleteCategory(id);
-      await categoryStore.load();
-    } catch (e) {
-      error = describeError(e);
-    }
+    const ok = await guard(async () => { await api.deleteCategory(id); return true; }, false);
+    if (ok) await categoryStore.load();
   },
 };

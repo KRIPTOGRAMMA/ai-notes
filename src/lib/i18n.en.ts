@@ -395,6 +395,12 @@ export const EN: Record<string, string> = {
   "Свой URL (ggml)": "Custom URL (ggml)",
   "рекомендуется": "recommended",
 
+  // --- Errors ---
+  // The fallback from describeError (guard.ts) for a throw that is neither an
+  // Error nor a string. Translated here rather than in guard.ts so that module
+  // stays pure and unit-testable.
+  "Неизвестная ошибка": "Unknown error",
+
   // --- Voice input ---
   "Голосовой ввод": "Voice input",
   "Надиктовать": "Dictate",

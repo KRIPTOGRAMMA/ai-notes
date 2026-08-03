@@ -74,6 +74,15 @@
   <div class="dialog card" role="dialog" onclick={(e) => e.stopPropagation()}>
     <h3 class="dialog-title">{tr("Рутины")}</h3>
 
+    <!-- Routines are only created and edited here, so this is the one place their
+         failures can reach the user. -->
+    {#if routineStore.error}
+      <div class="alert routine-error">
+        <span>{tr(routineStore.error)}</span>
+        <button class="btn-icon" onclick={() => routineStore.clearError()}>✕</button>
+      </div>
+    {/if}
+
     <div class="list">
       {#each routineStore.routines as r (r.id)}
         <div class="row">
@@ -124,6 +133,14 @@
 </div>
 
 <style>
+  /* .alert is a plain block globally; the dismiss button needs it to be a row. */
+  .routine-error {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
   .backdrop {
     position: fixed;
     inset: 0;

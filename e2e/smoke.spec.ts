@@ -244,6 +244,84 @@ test("ошибку задач можно закрыть крестиком", asy
   await expect(page.locator(".task-error")).toHaveCount(0);
 });
 
+// v0.9.68: тот же дефект, что чинили в v0.9.25 для задач, оставался ещё в двух
+// сторах. routineStore и pinnedStore выставляли error, но его никто не рисовал —
+// упавшая операция снова выглядела как «кнопка не работает».
+test("ошибка рутин видна в модалке и снимается после успеха", async ({ page }) => {
+  await seedDb(page, {
+    tasks: [], projects: [], notes: [],
+    routines: [{
+      id: "r1", title: "Планёрка", days_mask: 3,
+      start_mins: 540, duration_mins: 45, active: true,
+    }],
+    settings: { onboarding_complete: true },
+  });
+  await withMock(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Календарь" }).click();
+  await page.getByRole("button", { name: "Неделя" }).click();
+  await page.getByRole("button", { name: "Рутины" }).click();
+  await expect(page.locator(".routine-error")).toHaveCount(0);
+
+  await page.evaluate(() => {
+    (window as any).__mockFailNext = { cmd: "delete_routine", msg: "Рутина не найдена: r1" };
+  });
+  await page.getByRole("dialog").getByTitle("Удалить").click();
+  await expect(page.locator(".routine-error")).toContainText("Рутина не найдена: r1");
+
+  // успешная операция снимает баннер
+  await page.getByRole("dialog").getByTitle("Выключить").click();
+  await expect(page.locator(".routine-error")).toHaveCount(0);
+});
+
+test("ошибка быстрого слота видна в баннере", async ({ page }) => {
+  await seedDb(page, {
+    tasks: [], projects: [],
+    notes: [{
+      id: "n1", title: "заметка", content: "текст",
+      tags: [], linked_task_id: null, project_id: null, pinned: false,
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    }],
+    settings: { onboarding_complete: true },
+  });
+  await withMock(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Заметки" }).click();
+
+  await page.evaluate(() => {
+    (window as any).__mockFailNext = { cmd: "set_pinned_item", msg: "Слот занят другим окном" };
+  });
+  await page.locator(".note-row").first().getByTitle("В быстрый слот (Ctrl+Shift+J)").click();
+
+  await expect(page.locator(".pinned-error")).toContainText("Слот занят другим окном");
+  await page.locator(".pinned-error button").click();
+  await expect(page.locator(".pinned-error")).toHaveCount(0);
+});
+
+// Пять сторов выставляли error и никогда не сбрасывали его при успехе: единственный
+// `error = null` сидел внутри clearError(). Первая же неудача прибивала баннер
+// до перезагрузки окна, даже когда всё уже снова работало.
+test("ошибка проектов снимается после успешной операции", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Проекты" }).click();
+  await page.waitForSelector(".overlay");
+
+  await page.evaluate(() => {
+    (window as any).__mockFailNext = { cmd: "create_project", msg: "Проект уже существует" };
+  });
+  await page.locator("input[placeholder='Название нового проекта']").fill("Первый");
+  await page.getByRole("button", { name: "Создать" }).click();
+  await expect(page.locator(".alert", { hasText: "Проект уже существует" })).toBeVisible();
+
+  // тот же путь, но без сбоя — баннер обязан исчезнуть
+  await page.locator("input[placeholder='Название нового проекта']").fill("Второй");
+  await page.getByRole("button", { name: "Создать" }).click();
+  await expect(page.locator(".alert", { hasText: "Проект уже существует" })).toHaveCount(0);
+});
+
 // v0.9.24: баг из боевой БД — повторяющаяся задача в статусе InProgress
 // после клика по ✓ оставалась InProgress на том же месте: визуально ничего
 // не происходило, закрыть прогон было невозможно.

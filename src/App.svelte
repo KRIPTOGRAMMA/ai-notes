@@ -2,6 +2,7 @@
   import { taskStore } from "./lib/stores/tasks.svelte";
   import { noteStore } from "./lib/stores/notes.svelte";
   import { projectStore } from "./lib/stores/projects.svelte";
+  import { pinnedStore } from "./lib/stores/pinned.svelte";
   import { api } from "./lib/api/tauri";
   import { onMount } from "svelte";
   import { listen } from "@tauri-apps/api/event";
@@ -247,15 +248,24 @@
   <main class="content">
     {#if taskStore.error}
       <div class="banner">
-        <span>{taskStore.error}</span>
+        <span>{t(taskStore.error)}</span>
         <button class="btn-icon" onclick={() => taskStore.clearError()} style="color:white;">✕</button>
       </div>
     {/if}
 
     {#if noteStore.error}
       <div class="banner">
-        <span>{noteStore.error}</span>
+        <span>{t(noteStore.error)}</span>
         <button class="btn-icon" onclick={() => noteStore.clearError()} style="color:white;">✕</button>
+      </div>
+    {/if}
+
+    <!-- The quick slot is driven from Tasks, from Notes and from a global hotkey,
+         so its failure belongs in the global banner rather than on one screen. -->
+    {#if pinnedStore.error}
+      <div class="banner pinned-error">
+        <span>{t(pinnedStore.error)}</span>
+        <button class="btn-icon" onclick={() => pinnedStore.clearError()} style="color:white;">✕</button>
       </div>
     {/if}
 
