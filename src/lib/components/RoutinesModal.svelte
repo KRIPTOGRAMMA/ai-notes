@@ -5,6 +5,7 @@
 
   // `t` is taken here by a local variable, so the translation helper is imported as `tr`.
   import { t as tr } from "../i18n.svelte";
+  import { hhmmFromMins } from "../datetime";
   let { onClose }: { onClose: () => void } = $props();
 
   const DAYS = $derived([tr("Пн"), tr("Вт"), tr("Ср"), tr("Чт"), tr("Пт"), tr("Сб"), tr("Вс")]);
@@ -29,9 +30,7 @@
     editingId = r.id;
     editTitle = r.title;
     editDays = DAYS.map((_, i) => (r.days_mask & (1 << i)) !== 0);
-    const h = Math.floor(r.start_mins / 60);
-    const m = r.start_mins % 60;
-    editStart = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+    editStart = hhmmFromMins(r.start_mins);
     editDuration = String(r.duration_mins);
     editActive = r.active;
   }
@@ -89,7 +88,7 @@
           <div class="row-info">
             <span class="row-title" class:inactive={!r.active}>{r.title}</span>
             <span class="row-meta">
-              {Math.floor(r.start_mins / 60)}:{String(r.start_mins % 60).padStart(2, "0")} – {Math.floor((r.start_mins + r.duration_mins) / 60)}:{String((r.start_mins + r.duration_mins) % 60).padStart(2, "0")}
+              {hhmmFromMins(r.start_mins)} – {hhmmFromMins(r.start_mins + r.duration_mins)}
               · {DAYS.filter((_, i) => r.days_mask & (1 << i)).join(" ")}
             </span>
           </div>

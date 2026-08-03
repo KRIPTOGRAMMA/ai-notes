@@ -8,6 +8,7 @@
   import { statusStore } from "../stores/statuses.svelte";
   import { taskStore } from "../stores/tasks.svelte";
   import { t } from "../i18n.svelte";
+  import { toLocalInput } from "../datetime";
 
   type Props = {
     task?: Task | null;
@@ -74,14 +75,6 @@
   }
   // "" means no project; in a patch an empty string detaches it
   let projectId = $state(task?.project_id ?? "");
-
-  // datetime-local works in local time. toISOString() would give UTC, and then every
-  // open-and-save would shift the deadline by the timezone offset.
-  function toLocalInput(iso: string): string {
-    const d = new Date(iso);
-    const p = (n: number) => String(n).padStart(2, "0");
-    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
-  }
 
   let deadline = $state(task?.deadline ? toLocalInput(task.deadline) : (initialDeadline ?? ""));
 

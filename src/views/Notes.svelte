@@ -13,6 +13,7 @@
   import Icon from "../lib/components/Icon.svelte";
   import VoiceButton from "../lib/components/VoiceButton.svelte";
   import type { Note, NoteRevision } from "../lib/types";
+  import { localDateKey, toLocalInput, localeTag } from "../lib/datetime";
   type EditorExports = { focus: () => void; formatBold: () => void; formatItalic: () => void; formatCode: () => void; formatHeading: () => void; formatChecklist: () => void; formatWikiLink: () => void; formatQuote: () => void; formatOrderedList: () => void; formatLink: () => void; insertTable: () => void; replaceRange: (from: number, to: number, text: string) => void; insertAtCursor: (text: string) => void };
   let editorRef: EditorExports | undefined = $state();
 
@@ -176,14 +177,6 @@
     saving = false;
   }
 
-  // datetime-local works in local time — the same approach as TaskModal.svelte,
-  // otherwise every open-and-save would shift the reminder by the timezone offset.
-  function toLocalInput(iso: string): string {
-    const d = new Date(iso);
-    const p = (n: number) => String(n).padStart(2, "0");
-    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
-  }
-
   async function selectNote(note: Note) {
     await flushPendingSave();
     suppressNextContentSave = true;
@@ -223,19 +216,13 @@
 
   async function openDailyNote() {
     const today = new Date();
-    const yyyy = today.getFullYear();
-    const mm = String(today.getMonth() + 1).padStart(2, "0");
-    const dd = String(today.getDate()).padStart(2, "0");
-    const title = `${yyyy}-${mm}-${dd}`;
+    const title = localDateKey(today);
     const existing = findByTitle(title);
     if (existing) { selectNote(existing); return; }
     // Yesterday's date
     const yesterday = new Date(today);
     yesterday.setDate(yesterday.getDate() - 1);
-    const yy = yesterday.getFullYear();
-    const ym = String(yesterday.getMonth() + 1).padStart(2, "0");
-    const yd = String(yesterday.getDate()).padStart(2, "0");
-    const created = await noteStore.create({ title, content: `[[${yy}-${ym}-${yd}]]\n\n` });
+    const created = await noteStore.create({ title, content: `[[${localDateKey(yesterday)}]]\n\n` });
     if (created) selectNote(created);
   }
 
@@ -345,7 +332,7 @@
   // the project formats through `[]`, i.e. the system locale; here the chosen
   // language is what matters, because it may have been switched by hand.
   function formatDate(iso: string) {
-    return new Date(iso).toLocaleDateString(i18n.lang === "en" ? "en-US" : "ru-RU",
+    return new Date(iso).toLocaleDateString(localeTag(i18n.lang),
       { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
   }
 

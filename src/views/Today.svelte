@@ -9,6 +9,7 @@
 
   // `t` is taken here by a local variable, so the translation helper is imported as `tr`.
   import { t as tr, i18n } from "../lib/i18n.svelte";
+  import { hhmm, pad2, localeTag } from "../lib/datetime";
   // A task opens right here, without leaving for the Tasks screen
   let openTaskId = $state<string | null>(null);
 
@@ -52,8 +53,7 @@
   function blockRange(t: Task): string {
     const start = new Date(t.scheduled_at!);
     const end = new Date(start.getTime() + (t.scheduled_mins ?? 60) * 60_000);
-    const fmt = (d: Date) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-    return `${fmt(start)}–${fmt(end)}`;
+    return `${hhmm(start)}–${hhmm(end)}`;
   }
 
   const nowLineTop = $derived.by(() => {
@@ -114,7 +114,7 @@
   <header class="today-header">
     <h2>
       {tr("Сегодня")}
-      <span class="muted today-date">{now.toLocaleDateString(i18n.lang === "en" ? "en-US" : "ru-RU", { weekday: "long", day: "numeric", month: "long" })}</span>
+      <span class="muted today-date">{now.toLocaleDateString(localeTag(i18n.lang), { weekday: "long", day: "numeric", month: "long" })}</span>
     </h2>
     {#if dayProgress.total > 0}
       <div class="day-progress" title={tr("{done} из {total} выполнено", { done: dayProgress.done, total: dayProgress.total })}>
@@ -133,7 +133,7 @@
         <div class="timeline" style="height:{(DAY_END_H - DAY_START_H) * HOUR_H}px">
           {#each hours as h}
             <div class="hour-line" style="top:{(h - DAY_START_H) * HOUR_H}px">
-              <span class="hour-label">{String(h).padStart(2, "0")}:00</span>
+              <span class="hour-label">{pad2(h)}:00</span>
             </div>
           {/each}
           {#if showNowLine}

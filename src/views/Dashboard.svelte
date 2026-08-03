@@ -7,6 +7,7 @@
   import type { AppSettings, DayCompletion } from "../lib/types";
   import TaskOpener from "../lib/components/TaskOpener.svelte";
   import { t, i18n } from "../lib/i18n.svelte";
+  import { localDateKey, pad2, localeTag } from "../lib/datetime";
 
   // A task opens right on the dashboard, without leaving for the Tasks screen
   let openTaskId = $state<string | null>(null);
@@ -147,10 +148,6 @@
   // --- The year in squares: completed tasks by local day ---
   const YEAR_DAYS = 365;
 
-  function localKey(d: Date): string {
-    const p = (n: number) => String(n).padStart(2, "0");
-    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-  }
 
   const calendar = $derived.by(() => {
     const byDate = new Map(taskCompletions.map(c => [c.date, c.completed]));
@@ -158,7 +155,7 @@
     const days: { date: string; count: number }[] = [];
     for (let i = YEAR_DAYS - 1; i >= 0; i--) {
       const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i);
-      const key = localKey(d);
+      const key = localDateKey(d);
       days.push({ date: key, count: byDate.get(key) ?? 0 });
     }
     // Empty cells at the start so the week columns begin on Monday
@@ -181,7 +178,7 @@
   // Notes.svelte.
   function fmtDay(date: string): string {
     return new Date(date + "T00:00:00")
-      .toLocaleDateString(i18n.lang === "en" ? "en-US" : "ru-RU", { day: "numeric", month: "short" });
+      .toLocaleDateString(localeTag(i18n.lang), { day: "numeric", month: "short" });
   }
 
   // The tooltip (hover, a quick preview) and the popup (click, with navigation to a
@@ -688,7 +685,7 @@
               <span
                 class="heat-cell"
                 style={heatStyle(mins)}
-                title="{label} {String(h).padStart(2, '0')}:00 — {t('{n} мин', { n: mins })}"
+                title="{label} {pad2(h)}:00 — {t('{n} мин', { n: mins })}"
               ></span>
             {/each}
           {/each}

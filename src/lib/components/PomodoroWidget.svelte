@@ -4,6 +4,7 @@
   import Icon from "./Icon.svelte";
 
   import { t } from "../i18n.svelte";
+  import { duration } from "../datetime";
   // Polled once a second: the state lives in the DB (settings) and is written by a
   // loop on the backend at every phase change; here we merely reflect it.
   let phase = $state<"work" | "break" | "paused" | "off">("off");
@@ -37,9 +38,7 @@
   const remainingLabel = $derived.by(() => {
     if (!until) return "";
     const secs = Math.max(0, Math.round((until.getTime() - now.getTime()) / 1000));
-    const m = Math.floor(secs / 60);
-    const s = secs % 60;
-    return `${m}:${String(s).padStart(2, "0")}`;
+    return duration(secs, true);
   });
 
   // The phase icon is an SVG: timer for work and pauses, coffee for a break

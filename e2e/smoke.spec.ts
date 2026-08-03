@@ -244,6 +244,22 @@ test("ошибку задач можно закрыть крестиком", asy
   await expect(page.locator(".task-error")).toHaveCount(0);
 });
 
+// v0.9.69: часовая шкала собирается через pad2 из общего datetime.ts. Юнит-тесты
+// проверяют саму функцию, но не то, что она доехала до разметки — а сломанный
+// паддинг здесь выглядит как «0:00, 1:00» и портит вёрстку колонки.
+test("часовая шкала календаря пронумерована с ведущим нулём", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Календарь" }).click();
+  await page.getByRole("button", { name: "Неделя" }).click();
+
+  await expect(page.locator(".hour-mark", { hasText: "00:00" })).toBeVisible();
+  await expect(page.locator(".hour-mark", { hasText: "09:00" })).toBeVisible();
+  await expect(page.locator(".hour-mark", { hasText: "23:00" })).toBeVisible();
+  // без паддинга получилось бы "9:00"
+  await expect(page.locator(".hour-mark", { hasText: /^9:00$/ })).toHaveCount(0);
+});
+
 // v0.9.68: тот же дефект, что чинили в v0.9.25 для задач, оставался ещё в двух
 // сторах. routineStore и pinnedStore выставляли error, но его никто не рисовал —
 // упавшая операция снова выглядела как «кнопка не работает».

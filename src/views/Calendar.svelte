@@ -12,6 +12,7 @@
   // `t` is taken in this file by the task variable in {#each}, so the translation
   // helper is imported as `tr` — renaming the loops for a function's sake is worse.
   import { t as tr, i18n } from "../lib/i18n.svelte";
+  import { localDateKey, hhmm, hhmmFromMins, pad2, localeTag } from "../lib/datetime";
 
   // A task opens right here rather than by switching to the Tasks screen: in the
   // calendar one looks at the week as a whole, and leaving for another section over
@@ -97,8 +98,7 @@
   function ghostLabel(b: PlannedBlock): string {
     const start = new Date(b.scheduled_at);
     const end = new Date(start.getTime() + b.mins * 60_000);
-    const fmt = (d: Date) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-    return `${fmt(start)}–${fmt(end)}`;
+    return `${hhmm(start)}–${hhmm(end)}`;
   }
 
   // Month and weekday names come from Intl rather than from the dictionary. These
@@ -106,7 +106,7 @@
   // would mean maintaining by hand what the platform already knows for both
   // languages (and would know for a third one, should it appear). A $derived so the
   // list is rebuilt when the language changes, without a reload.
-  const locale = $derived(i18n.lang === "en" ? "en-US" : "ru-RU");
+  const locale = $derived(localeTag(i18n.lang));
   const MONTHS = $derived(
     Array.from({ length: 12 }, (_, m) => {
       const name = new Intl.DateTimeFormat(locale, { month: "long" }).format(new Date(2021, m, 1));
@@ -122,10 +122,6 @@
       return name.charAt(0).toUpperCase() + name.slice(1).replace(/\.$/, "");
     })
   );
-
-  function localDateKey(d: Date): string {
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  }
 
   // Tasks by the local date of their deadline (hidden history items are not shown).
   const tasksByDay = $derived.by(() => {
@@ -292,8 +288,7 @@
   function blockLabel(t: Task): string {
     const start = new Date(t.scheduled_at!);
     const end = new Date(start.getTime() + blockMins(t) * 60_000);
-    const fmt = (d: Date) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-    return `${fmt(start)}–${fmt(end)}`;
+    return `${hhmm(start)}–${hhmm(end)}`;
   }
 
   function snap(mins: number): number {
@@ -415,7 +410,7 @@
         <div class="week-grid" style="height:{24 * HOUR_H}px;">
           <div class="hour-gutter">
             {#each Array(24) as _, h}
-              <div class="hour-mark" style="height:{HOUR_H}px;">{String(h).padStart(2, "0")}:00</div>
+              <div class="hour-mark" style="height:{HOUR_H}px;">{pad2(h)}:00</div>
             {/each}
           </div>
 
@@ -462,7 +457,7 @@
                   title="{rb.title}"
                 >
                   <div class="block-body">
-                    <span class="block-time">{String(Math.floor(rb.start_mins / 60)).padStart(2, "0")}:{String(rb.start_mins % 60).padStart(2, "0")}–{String(Math.floor((rb.start_mins + rb.duration_mins) / 60)).padStart(2, "0")}:{String((rb.start_mins + rb.duration_mins) % 60).padStart(2, "0")}</span>
+                    <span class="block-time">{hhmmFromMins(rb.start_mins)}–{hhmmFromMins(rb.start_mins + rb.duration_mins)}</span>
                     <span class="block-title">{rb.title}</span>
                   </div>
                 </div>

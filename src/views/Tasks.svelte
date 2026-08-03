@@ -16,6 +16,7 @@
   import TaskHistoryDetail from "../lib/components/TaskHistoryDetail.svelte";
   import Icon from "../lib/components/Icon.svelte";
   import type { Task, Subtask, Category, CreateTaskPayload, UpdateTaskPayload, Project, GoalSnapshot, ActiveSession, SmartListFilter } from "../lib/types";
+  import { hhmm } from "../lib/datetime";
 
   type AiResult = { task_id: string; type: string; result?: string; error?: string };
 
@@ -236,8 +237,7 @@
   function blockTime(t: Task): string {
     const start = new Date(t.scheduled_at!);
     const end = new Date(start.getTime() + (t.scheduled_mins ?? 60) * 60_000);
-    const fmt = (d: Date) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-    return `${fmt(start)}–${fmt(end)}`;
+    return `${hhmm(start)}–${hhmm(end)}`;
   }
 
   let searchQuery = $state("");
