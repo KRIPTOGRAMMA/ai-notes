@@ -4761,3 +4761,82 @@ test("клавиатура: в заметках j/k двигают курсор,
   await page.keyboard.press("Enter");
   await expect(page.locator(".title-input")).toHaveValue("бета");
 });
+
+// --- v0.9.78: заблокированные задачи — смарт-список и «разблокирует N» ---
+
+test("смарт-список «Заблокированные» отбирает только задачи с блокерами", async ({ page }) => {
+  await seedDb(page, navTasksDb({
+    taskDeps: [{ task_id: "t2", blocker_id: "t1" }],
+  }));
+  await withMock(page);
+  await page.goto("/");
+
+  await expect(page.locator(".task-row")).toHaveCount(3);
+
+  const chip = page.locator(".smart-list-chip", { hasText: "Заблокированные" });
+  await chip.click();
+  await expect(chip).toHaveClass(/active-toggle/);
+
+  await expect(page.locator(".task-row")).toHaveCount(1);
+  await expect(page.locator(".task-row", { hasText: "вторая" })).toBeVisible();
+
+  // Повторный клик по чипу снимает фильтр — как у остальных смарт-списков.
+  await chip.click();
+  await expect(page.locator(".task-row")).toHaveCount(3);
+});
+
+test("бейдж «разблокирует N» появляется у блокера и исчезает после его выполнения", async ({ page }) => {
+  // t1 держит и t2, и t3 — счётчик должен быть 2, а не «есть/нет».
+  await seedDb(page, navTasksDb({
+    taskDeps: [
+      { task_id: "t2", blocker_id: "t1" },
+      { task_id: "t3", blocker_id: "t1" },
+    ],
+  }));
+  await withMock(page);
+  await page.goto("/");
+
+  // Фильтр по .task-title, а не по тексту всей строки: у зависимых в строке есть
+  // «Заблокирована: первая», и hasText поймал бы все три.
+  const blocker = page.locator(".task-row").filter({ has: page.locator(".task-title", { hasText: "первая" }) });
+  await expect(blocker.locator(".task-unblocks")).toHaveText("разблокирует 2");
+
+  // Бейдж только у блокера: у тех, кто никого не держит, его нет.
+  await expect(page.locator(".task-unblocks")).toHaveCount(1);
+
+  await blocker.locator(".task-check").click();
+
+  // Блокер ушёл в Историю, зависимые разблокированы, бейджа больше нет.
+  await expect(page.locator(".task-unblocks")).toHaveCount(0);
+  await expect(page.locator(".task-row.blocked")).toHaveCount(0);
+});
+
+test("счётчик «разблокирует N» не зависит от фильтра по проекту", async ({ page }) => {
+  // t1 держит t2 и t3, но t1 лежит в проекте, а зависимые — нет. При фильтре
+  // «по проекту» на экране виден только блокер, и счётчик обязан остаться 2:
+  // он говорит о самой задаче, а не о том, что сейчас показано.
+  await seedDb(page, navTasksDb({
+    projects: [{ id: "p1", name: "Проект", color: "#888", target_date: null,
+      archived: false, sort_order: 0, task_total: 1, task_done: 0,
+      goal_tasks: null, goal_mins: null, goal_period: null,
+      goal_done_tasks: 0, goal_done_mins: 0,
+      created_at: "2026-01-01T10:00:00Z", updated_at: "2026-01-01T10:00:00Z" }],
+    taskDeps: [
+      { task_id: "t2", blocker_id: "t1" },
+      { task_id: "t3", blocker_id: "t1" },
+    ],
+  }));
+  await withMock(page);
+  await page.goto("/");
+
+  // Кладём блокер в проект через карточку задачи.
+  await page.locator(".task-row")
+    .filter({ has: page.locator(".task-title", { hasText: "первая" }) })
+    .locator(".task-main").click();
+  await page.locator(".modal").getByLabel("Проект").selectOption({ label: "Проект" });
+  await page.locator(".modal").getByRole("button", { name: "Сохранить", exact: true }).click();
+
+  await page.locator(".project-filter").selectOption({ label: "Проект" });
+  await expect(page.locator(".task-row")).toHaveCount(1);
+  await expect(page.locator(".task-unblocks")).toHaveText("разблокирует 2");
+});

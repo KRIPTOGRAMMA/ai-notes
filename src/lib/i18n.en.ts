@@ -125,6 +125,9 @@ export const EN: Record<string, string> = {
   "Выполнить": "Complete",
   // Task dependencies
   "Заблокирована: {tasks}": "Blocked by: {tasks}",
+  "Заблокированные": "Blocked",
+  "разблокирует {count}": "unblocks {count}",
+  "Эту задачу ждут другие — выполните её, чтобы снять блокировку": "Other tasks are waiting on this one — complete it to unblock them",
   "Блокируется задачами": "Blocked by",
   "Добавить блокер...": "Add blocker...",
   "Убрать зависимость": "Remove dependency",

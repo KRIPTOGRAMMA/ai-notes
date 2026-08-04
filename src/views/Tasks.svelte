@@ -18,6 +18,7 @@
   import type { Task, Subtask, Category, CreateTaskPayload, UpdateTaskPayload, Project, GoalSnapshot, ActiveSession, SmartListFilter } from "../lib/types";
   import { hhmm } from "../lib/datetime";
   import { isTypingTarget, actionForKey, nextIndex, reconcileIndex } from "../lib/listnav";
+  import { unblockCounts } from "../lib/blockers";
 
   type AiResult = { task_id: string; type: string; result?: string; error?: string };
 
@@ -115,9 +116,24 @@
         return d >= now && d <= now + 7 * 864e5;
       },
     },
+    {
+      // No date involved, unlike the two above, but built-in for the same reason:
+      // blocked_by is computed per request rather than stored, so a saved
+      // SmartListFilter (category/priority/tag/deadline) cannot express it.
+      id: "__blocked",
+      name: t("Заблокированные"),
+      test: (t) => t.blocked_by.length > 0,
+    },
   ]);
 
   let activeSmartListId: string | null = $state(null);
+
+  // "Unblocks N" — the reverse of blocked_by (v0.9.78). Counted over activeTasks
+  // rather than over the visible list on purpose: filtering by project or by a
+  // smart list must not shrink the number. The badge answers "how many tasks does
+  // finishing this free up", and that is a property of the task, not of the
+  // current filter — a count that changed with the filter would be misleading.
+  const unblocks = $derived(unblockCounts(taskStore.activeTasks));
 
   function matchesSmartFilter(t: Task, f: SmartListFilter): boolean {
     if (f.category && t.category !== f.category) return false;
@@ -906,6 +922,7 @@
        in: the snippet is rendered from three different branches (search, grouped,
        flat), and only the flat one has an index that matches the screen order. -->
   {@const kbIndex = visibleTasks.findIndex(v => v.id === task.id)}
+  {@const unblocksCount = unblocks.get(task.id) ?? 0}
   <li
     class="task-row"
     style="--prio: var(--prio-{task.priority.toLowerCase()});"
@@ -952,6 +969,13 @@
            unclear why the task's checkmark will not click. -->
       {#if blocked}
         <div class="task-blocked-by">{t("Заблокирована: {tasks}", { tasks: blockerNames })}</div>
+      {/if}
+      <!-- The other direction: what finishing this task frees up. It is the answer
+           to "which one do I take first", so it sits on the blocker's own row. -->
+      {#if unblocksCount > 0}
+        <div class="task-unblocks" title={t("Эту задачу ждут другие — выполните её, чтобы снять блокировку")}>
+          {t("разблокирует {count}", { count: unblocksCount })}
+        </div>
       {/if}
     </div>
 
@@ -2081,6 +2105,14 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  /* Deliberately louder than .task-blocked-by: being blocked is a passive state to
+     read, while blocking others is a call to act — this is the row to pick up. */
+  .task-unblocks {
+    font-size: 11px;
+    color: var(--accent);
+    margin-top: 2px;
   }
 
   .task-desc {
