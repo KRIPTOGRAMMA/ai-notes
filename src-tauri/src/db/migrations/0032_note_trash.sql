@@ -1,0 +1,11 @@
+-- Trash for notes, mirroring 0023_task_trash.sql for tasks.
+--
+-- Until now a note was deleted for good (DELETE FROM notes), while a task went to
+-- the Trash and could be restored. Revisions did not help: they are snapshots of
+-- the content, and deletion removed the whole record along with them.
+--
+-- The FTS index is NOT affected by this column. notes_fts is kept in sync by
+-- triggers on INSERT/UPDATE/DELETE, and a soft delete is an UPDATE — so a trashed
+-- note stays in the index and search has to exclude it in SQL, the same way
+-- search_tasks does with `t.deleted_at IS NULL`.
+ALTER TABLE notes ADD COLUMN deleted_at TEXT NULL;

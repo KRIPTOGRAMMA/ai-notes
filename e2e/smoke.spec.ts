@@ -1869,6 +1869,65 @@ test("граф заметок: связанные заметки дают узл
 });
 
 
+// v0.9.76: до этой версии заметка удалялась НАВСЕГДА, хотя у задач Корзина была.
+// Несимметрия, которая рано или поздно стоит потерянного текста.
+test("корзина заметок: удалённая восстанавливается с текстом", async ({ page }) => {
+  const now = new Date().toISOString();
+  await seedDb(page, {
+    tasks: [], projects: [],
+    notes: [
+      { id: "n1", title: "Черновик", content: "важный текст", tags: [], linked_task_id: null, project_id: null, pinned: false, created_at: now, updated_at: now },
+      { id: "n2", title: "Вторая", content: "другое", tags: [], linked_task_id: null, project_id: null, pinned: false, created_at: now, updated_at: now },
+    ],
+    settings: { onboarding_complete: true },
+  });
+  await withMock(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Заметки" }).click();
+
+  await page.locator(".note-item", { hasText: "Черновик" }).click();
+  await page.getByTitle("Удалить заметку").click();
+  await expect(page.locator(".note-row", { hasText: "Черновик" })).toHaveCount(0);
+
+  // В Корзине — с сохранённым содержимым
+  await page.getByRole("button", { name: "Корзина" }).click();
+  await expect(page.locator(".note-row.trashed", { hasText: "Черновик" })).toBeVisible();
+
+  await page.locator(".note-row.trashed", { hasText: "Черновик" }).getByTitle("Восстановить").click();
+  await expect(page.locator(".note-row.trashed")).toHaveCount(0);
+
+  // Кнопка «Заметки» есть и в навигации, и в переключателе списка — берём вторую.
+  await page.locator(".seg").getByRole("button", { name: "Заметки" }).click();
+  await page.locator(".note-item", { hasText: "Черновик" }).click();
+  await expect(page.locator(".cm-content")).toContainText("важный текст");
+});
+
+// notes_fts синхронизируется триггерами на INSERT/UPDATE/DELETE, а мягкое удаление —
+// это UPDATE. Значит строка остаётся в индексе, и отсеивать её обязан сам запрос.
+//
+// NB: при жёстком удалении этот тест тоже зелёный — он не отличает старое
+// поведение от нового, а страхует от регрессии в фильтре. Настоящую проверку
+// «фильтр в SQL действительно есть» держит Rust-тест
+// notes::tests::trashed_note_is_not_found_by_search, который на живой FTS падает,
+// если убрать `AND n.deleted_at IS NULL`.
+test("корзина заметок: удалённая не находится поиском", async ({ page }) => {
+  const now = new Date().toISOString();
+  await seedDb(page, {
+    tasks: [], projects: [],
+    notes: [{ id: "n1", title: "уникальноеслово", content: "текст", tags: [], linked_task_id: null, project_id: null, pinned: false, created_at: now, updated_at: now }],
+    settings: { onboarding_complete: true },
+  });
+  await withMock(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.locator(".note-item", { hasText: "уникальноеслово" }).click();
+  await page.getByTitle("Удалить заметку").click();
+
+  await page.keyboard.press("ControlOrMeta+KeyK");
+  await page.locator(".overlay input").first().fill("уникальноеслово");
+  await expect(page.locator(".overlay").getByText("уникальноеслово")).toHaveCount(0);
+});
+
 // v0.9.73: пустое состояние графа. Экран без заметок не должен показывать
 // пустой холст — там объяснение, что граф появится вместе со связями.
 test("граф заметок: без заметок вместо пустого холста объяснение", async ({ page }) => {

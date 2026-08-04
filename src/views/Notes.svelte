@@ -32,6 +32,8 @@
   let renameToast: string | null = $state(null);
   let renameToastTimeout: ReturnType<typeof setTimeout> | null = null;
   let zenMode = $state(false);
+  // The list and the Trash are mutually exclusive, like the segmented toggle in Tasks.
+  let listSubView: "notes" | "trash" = $state("notes");
 
   const selected = $derived(noteStore.notes.find(n => n.id === selectedId) ?? null);
   const otherTitles = $derived(noteStore.notes.filter(n => n.id !== selectedId).map(n => n.title));
@@ -294,9 +296,9 @@
     // A deferred save of a note being deleted is pointless — we just clear the timer.
     if (saveTimeout) { clearTimeout(saveTimeout); saveTimeout = null; }
     saving = false;
-    // The revisions panel may have been open on this very note, and its revisions
-    // are cascade-deleted on the backend. We close the panel, or clicking a revision
-    // that no longer exists ("Restore", or viewing it again) would return an error.
+    // The revisions panel may have been open on this very note. Its revisions now
+    // survive the Trash (they are only dropped by purge), but the note itself
+    // leaves the list, so the panel has nothing left to point at — close it.
     revisionsOpen = false;
     viewingRevisionId = null;
     await noteStore.remove(selectedId);
@@ -724,6 +726,10 @@ ${bodyHtml}
     <div class="list-head">
       <button class="btn-primary btn-sm" style="width:100%;" onclick={newNote}>{t("+ Новая заметка")}</button>
       <button class="btn-ghost btn-sm" style="width:100%;" onclick={openDailyNote}><Icon name="calendar" size={12} /> {t("Сегодня")}</button>
+      <div class="seg">
+        <button class:active={listSubView === "notes"} onclick={() => listSubView = "notes"}>{t("Заметки")}</button>
+        <button class:active={listSubView === "trash"} onclick={() => { listSubView = "trash"; noteStore.loadDeleted(); }}>{t("Корзина")}</button>
+      </div>
       <input class="filter-input" bind:value={noteFilter} placeholder={t("Поиск...")} />
       <div class="filter-row">
         <select bind:value={filterTag} class="filter-select">
@@ -760,7 +766,27 @@ ${bodyHtml}
       </div>
     {/if}
 
-    {#if noteStore.notes.length === 0}
+    {#if listSubView === "trash"}
+      <div class="empty-hint trash-hint">
+        {t("🗑 Удалённые заметки. Восстановить можно в любой момент, пока не нажато «Удалить навсегда».")}
+      </div>
+      {#if noteStore.deletedNotes.length === 0}
+        <div class="empty">{t("Корзина пуста")}</div>
+      {:else}
+        <ul class="note-list">
+          {#each noteStore.deletedNotes as note (note.id)}
+            <li class="note-row trashed">
+              <div class="note-item">
+                <div class="note-title">{note.title}</div>
+                <div class="note-date">{formatDate(note.updated_at)}</div>
+              </div>
+              <button class="btn-icon" title={t("Восстановить")} onclick={() => noteStore.restore(note.id)}>↩</button>
+              <button class="btn-icon btn-danger" title={t("Удалить навсегда")} onclick={() => noteStore.purge(note.id)}>✕</button>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    {:else if noteStore.notes.length === 0}
       <div class="empty">{t("Нет заметок")}</div>
     {:else if filteredNotes.length === 0}
       <div class="empty">{t("Нет заметок по фильтру")}</div>
@@ -1156,6 +1182,25 @@ ${bodyHtml}
     border-radius: var(--radius);
     background: var(--bg-primary);
     color: var(--text-primary);
+  }
+
+  .empty-hint {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    padding: 8px 4px;
+  }
+
+  /* A trashed row is not clickable — it has no editor to open, only restore
+     and purge. So .note-item here is a plain div, not a button. */
+  .note-row.trashed .note-item {
+    flex: 1;
+    min-width: 0;
+    text-align: left;
+    opacity: 0.75;
+    padding: 6px 8px;
   }
 
   .note-list {

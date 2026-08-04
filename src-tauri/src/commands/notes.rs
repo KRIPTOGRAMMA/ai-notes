@@ -82,7 +82,7 @@ pub async fn get_notes(pool: State<'_, SqlitePool>) -> AppResult<Vec<Note>> {
 }
 
 pub async fn get_notes_impl(pool: &SqlitePool) -> AppResult<Vec<Note>> {
-    let rows = sqlx::query(&format!("SELECT {NOTE_COLUMNS} FROM notes ORDER BY updated_at DESC"))
+    let rows = sqlx::query(&format!("SELECT {NOTE_COLUMNS} FROM notes WHERE deleted_at IS NULL ORDER BY updated_at DESC"))
         .fetch_all(pool)
         .await?;
 
@@ -140,6 +140,19 @@ pub async fn update_note(
 pub async fn update_note_impl(pool: &SqlitePool, id: String, patch: UpdateNote) -> AppResult<Note> {
     let now = Utc::now().to_rfc3339();
 
+    // Checked BEFORE any write, not after. A debounced autosave (800ms) can arrive
+    // once the note is already in the Trash; before the Trash existed the row was
+    // gone and every UPDATE was a harmless no-op. Now the row survives, so writing
+    // first and noticing afterwards would overwrite the text sitting in the Trash —
+    // and a restore would hand back content the user never meant to keep.
+    let alive: Option<i64> = sqlx::query_scalar("SELECT 1 FROM notes WHERE id = ? AND deleted_at IS NULL")
+        .bind(&id)
+        .fetch_optional(pool)
+        .await?;
+    if alive.is_none() {
+        return Err(AppError::Other("__NOTE_DELETED__".into()));
+    }
+
     if let Some(ref title) = patch.title {
         sqlx::query("UPDATE notes SET title = ?, updated_at = ? WHERE id = ?")
             .bind(title).bind(&now).bind(&id)
@@ -186,7 +199,11 @@ pub async fn update_note_impl(pool: &SqlitePool, id: String, patch: UpdateNote) 
     // parallel (autosave is debounced by 800ms, so the user can press "Delete"
     // before the pending save timer fires). This is not a save failure — the
     // note is gone, the update became a no-op, and there is nothing to roll back.
-    let row = sqlx::query(&format!("SELECT {NOTE_COLUMNS} FROM notes WHERE id = ?"))
+    //
+    // `deleted_at IS NULL` is load-bearing here since the Trash arrived: the row
+    // now survives deletion, so without it the late save would find the note,
+    // report success and quietly write new content into a trashed note.
+    let row = sqlx::query(&format!("SELECT {NOTE_COLUMNS} FROM notes WHERE id = ? AND deleted_at IS NULL"))
         .bind(&id)
         .fetch_optional(pool)
         .await?
@@ -416,7 +433,7 @@ pub async fn rename_note_links_impl(pool: &SqlitePool, old_title: String, new_ti
         return Ok(0);
     }
 
-    let rows = sqlx::query("SELECT id, content FROM notes")
+    let rows = sqlx::query("SELECT id, content FROM notes WHERE deleted_at IS NULL")
         .fetch_all(pool)
         .await?;
 
@@ -460,6 +477,7 @@ pub async fn search_notes_impl(pool: &SqlitePool, query: String) -> AppResult<Ve
          FROM notes n
          INNER JOIN notes_fts ON notes_fts.rowid = n.rowid
          WHERE notes_fts MATCH ?
+           AND n.deleted_at IS NULL
          ORDER BY rank"
     )
     .bind(fts_query)
@@ -495,6 +513,7 @@ pub async fn search_notes_snippet_impl(pool: &SqlitePool, query: String) -> AppR
          FROM notes n
          INNER JOIN notes_fts ON notes_fts.rowid = n.rowid
          WHERE notes_fts MATCH ?
+           AND n.deleted_at IS NULL
          ORDER BY rank"
     )
     .bind(fts_query)
@@ -512,7 +531,55 @@ pub async fn delete_note(pool: State<'_, SqlitePool>, id: String) -> AppResult<(
     delete_note_impl(pool.inner(), id).await
 }
 
+// Soft delete ("Trash"), mirroring delete_task_impl. The row stays in place with
+// its revisions intact — it simply stops being returned by get_notes_impl and by
+// search. Real deletion goes through purge_deleted_note.
+//
+// Revisions are deliberately NOT dropped here: they are the note's history, and
+// restoring a note without it would be a silent loss.
 pub async fn delete_note_impl(pool: &SqlitePool, id: String) -> AppResult<()> {
+    sqlx::query("UPDATE notes SET deleted_at = ? WHERE id = ?")
+        .bind(chrono::Utc::now().to_rfc3339())
+        .bind(&id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_deleted_notes(pool: State<'_, SqlitePool>) -> AppResult<Vec<Note>> {
+    get_deleted_notes_impl(pool.inner()).await
+}
+
+pub async fn get_deleted_notes_impl(pool: &SqlitePool) -> AppResult<Vec<Note>> {
+    let rows = sqlx::query(&format!(
+        "SELECT {NOTE_COLUMNS} FROM notes WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC"
+    ))
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(row_to_note).collect())
+}
+
+#[tauri::command]
+pub async fn restore_note(pool: State<'_, SqlitePool>, id: String) -> AppResult<()> {
+    restore_note_impl(pool.inner(), id).await
+}
+
+pub async fn restore_note_impl(pool: &SqlitePool, id: String) -> AppResult<()> {
+    sqlx::query("UPDATE notes SET deleted_at = NULL WHERE id = ?")
+        .bind(&id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn purge_deleted_note(pool: State<'_, SqlitePool>, id: String) -> AppResult<()> {
+    purge_deleted_note_impl(pool.inner(), id).await
+}
+
+// Real deletion, now the only place that removes the row and its revisions.
+pub async fn purge_deleted_note_impl(pool: &SqlitePool, id: String) -> AppResult<()> {
     sqlx::query("DELETE FROM note_revisions WHERE note_id = ?")
         .bind(&id)
         .execute(pool)
@@ -650,6 +717,84 @@ mod tests {
         assert!(get_notes_impl(&pool).await.unwrap().is_empty());
     }
 
+    // The Trash, mirroring tasks. Until v0.9.76 a note was deleted outright and
+    // there was nothing to restore.
+    #[tokio::test]
+    async fn delete_is_soft_and_restore_brings_the_note_back() {
+        let pool = test_pool().await;
+        let note = create_note_impl(&pool, CreateNote {
+            title: "удаляемая".into(),
+            content: "важный текст".into(),
+            tags: vec![],
+            linked_task_id: None,
+            project_id: None,
+        }).await.unwrap();
+
+        delete_note_impl(&pool, note.id.clone()).await.unwrap();
+        assert!(get_notes_impl(&pool).await.unwrap().is_empty(), "удалённая не в списке");
+
+        let trashed = get_deleted_notes_impl(&pool).await.unwrap();
+        assert_eq!(trashed.len(), 1, "удалённая должна быть в Корзине");
+        assert_eq!(trashed[0].content, "важный текст", "текст пережил удаление");
+
+        restore_note_impl(&pool, note.id.clone()).await.unwrap();
+        let back = get_notes_impl(&pool).await.unwrap();
+        assert_eq!(back.len(), 1);
+        assert_eq!(back[0].content, "важный текст");
+        assert!(get_deleted_notes_impl(&pool).await.unwrap().is_empty());
+    }
+
+    // Revisions are the note's history; dropping them on a soft delete would make
+    // a restore a silent loss. Only purge removes them.
+    #[tokio::test]
+    async fn revisions_survive_the_trash_and_die_with_purge() {
+        let pool = test_pool().await;
+        let note = create_note_impl(&pool, CreateNote {
+            title: "с историей".into(),
+            content: "версия 1".into(),
+            tags: vec![],
+            linked_task_id: None,
+            project_id: None,
+        }).await.unwrap();
+        update_note_impl(&pool, note.id.clone(), UpdateNote {
+            title: None, content: Some("версия 2".into()), tags: None,
+            linked_task_id: None, project_id: None, pinned: None, reminder_at: None,
+        }).await.unwrap();
+
+        let before = revision_count(&pool, &note.id).await;
+        assert!(before > 0, "ревизия должна была появиться");
+
+        delete_note_impl(&pool, note.id.clone()).await.unwrap();
+        assert_eq!(revision_count(&pool, &note.id).await, before, "Корзина не трогает ревизии");
+
+        purge_deleted_note_impl(&pool, note.id.clone()).await.unwrap();
+        assert_eq!(revision_count(&pool, &note.id).await, 0, "очистка убирает ревизии");
+        assert!(get_deleted_notes_impl(&pool).await.unwrap().is_empty());
+    }
+
+    // notes_fts is kept in sync by triggers on INSERT/UPDATE/DELETE, and a soft
+    // delete is an UPDATE — so the row stays in the index and the query itself has
+    // to exclude it. Without the filter a trashed note is still found by search
+    // and by the command palette.
+    #[tokio::test]
+    async fn trashed_note_is_not_found_by_search() {
+        let pool = test_pool().await;
+        let note = create_note_impl(&pool, CreateNote {
+            title: "уникальноеслово".into(),
+            content: "текст".into(),
+            tags: vec![],
+            linked_task_id: None,
+            project_id: None,
+        }).await.unwrap();
+
+        assert_eq!(search_notes_impl(&pool, "уникальноеслово".into()).await.unwrap().len(), 1);
+        delete_note_impl(&pool, note.id).await.unwrap();
+        assert!(
+            search_notes_impl(&pool, "уникальноеслово".into()).await.unwrap().is_empty(),
+            "заметка из Корзины не должна находиться поиском"
+        );
+    }
+
     #[tokio::test]
     async fn pinned_defaults_false_and_toggles_via_update() {
         let pool = test_pool().await;
@@ -735,6 +880,13 @@ mod tests {
         assert!(r.is_err());
         // The note stays deleted: the UPDATE race neither revives nor duplicates it.
         assert!(get_notes_impl(&pool).await.unwrap().is_empty());
+
+        // And, since the Trash arrived, the row still exists — so the late save
+        // must not have overwritten what is sitting in it. Otherwise restoring
+        // would return the note with content the user never meant to save.
+        let trashed = get_deleted_notes_impl(&pool).await.unwrap();
+        assert_eq!(trashed.len(), 1);
+        assert_eq!(trashed[0].content, "v1", "опоздавшее автосохранение затёрло текст в Корзине");
     }
 
     #[tokio::test]
@@ -1041,7 +1193,12 @@ mod tests {
         update_note_impl(&pool, note.id.clone(), content_patch("v2")).await.unwrap();
         assert_eq!(revision_count(&pool, &note.id).await, 1);
 
+        // Since v0.9.76 delete is soft, so the cascade moved to purge: the Trash
+        // must keep the history, or restoring a note would silently lose it.
         delete_note_impl(&pool, note.id.clone()).await.unwrap();
+        assert_eq!(revision_count(&pool, &note.id).await, 1, "Корзина не трогает ревизии");
+
+        purge_deleted_note_impl(&pool, note.id.clone()).await.unwrap();
         assert_eq!(revision_count(&pool, &note.id).await, 0);
     }
 

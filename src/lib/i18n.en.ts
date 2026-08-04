@@ -395,6 +395,10 @@ export const EN: Record<string, string> = {
   "Свой URL (ggml)": "Custom URL (ggml)",
   "рекомендуется": "recommended",
 
+  // --- Notes trash ---
+  "🗑 Удалённые заметки. Восстановить можно в любой момент, пока не нажато «Удалить навсегда».":
+    "🗑 Deleted notes. They can be restored at any time, until \"Delete permanently\" is pressed.",
+
   // --- Errors ---
   // The fallback from describeError (guard.ts) for a throw that is neither an
   // Error nor a string. Translated here rather than in guard.ts so that module

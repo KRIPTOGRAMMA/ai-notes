@@ -66,7 +66,7 @@ pub async fn get_pinned_impl(pool: &SqlitePool) -> AppResult<Option<PinnedItem>>
             .fetch_optional(pool)
             .await?
     } else {
-        sqlx::query_as("SELECT title, content FROM notes WHERE id = ?")
+        sqlx::query_as("SELECT title, content FROM notes WHERE id = ? AND deleted_at IS NULL")
             .bind(&id)
             .fetch_optional(pool)
             .await?

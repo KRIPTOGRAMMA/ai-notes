@@ -3,6 +3,7 @@ import { runGuarded } from "../guard";
 import type { Note, CreateNotePayload, UpdateNotePayload } from "../types";
 
 let notes: Note[] = $state([]);
+let deletedNotes: Note[] = $state([]);
 let error: string | null = $state(null);
 // The "open this note" signal, set from global search; Notes.svelte reacts through
 // an $effect and selects the note in the editor.
@@ -23,6 +24,7 @@ async function guard<T>(op: () => Promise<T>, fallback: T): Promise<T> {
 
 export const noteStore = {
   get notes() { return notes; },
+  get deletedNotes() { return deletedNotes; },
   get error() { return error; },
   clearError() { error = null; },
   get focusNoteId() { return focusNoteId; },
@@ -60,5 +62,22 @@ export const noteStore = {
   async remove(id: string) {
     const ok = await guard(async () => { await api.deleteNote(id); return true; }, false);
     if (ok) await noteStore.load();
+  },
+
+  async loadDeleted() {
+    deletedNotes = await guard(() => api.getDeletedNotes(), deletedNotes);
+  },
+
+  async restore(id: string) {
+    if (await guard(async () => { await api.restoreNote(id); return true; }, false)) {
+      await noteStore.loadDeleted();
+      await noteStore.load();
+    }
+  },
+
+  async purge(id: string) {
+    if (await guard(async () => { await api.purgeDeletedNote(id); return true; }, false)) {
+      await noteStore.loadDeleted();
+    }
   },
 };

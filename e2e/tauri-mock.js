@@ -455,7 +455,7 @@
     },
 
     // --- заметки ---
-    get_notes: () => db.notes.map((n) => ({ ...n })),
+    get_notes: () => db.notes.filter((n) => !n.deleted_at).map((n) => ({ ...n })),
     create_note: ({ note }) => {
       const full = {
         id: uuid(),
@@ -482,7 +482,23 @@
       persist();
       return { ...n };
     },
+    // Мягкое удаление (v0.9.76): строка остаётся, ревизии сохраняются —
+    // насовсем убирает только purge_deleted_note.
     delete_note: ({ id }) => {
+      const n = db.notes.find((x) => x.id === id);
+      if (n) n.deleted_at = new Date().toISOString();
+      persist();
+    },
+    get_deleted_notes: () =>
+      db.notes.filter((n) => n.deleted_at)
+        .sort((a, b) => new Date(b.deleted_at) - new Date(a.deleted_at))
+        .map((n) => ({ ...n })),
+    restore_note: ({ id }) => {
+      const n = db.notes.find((x) => x.id === id);
+      if (n) n.deleted_at = null;
+      persist();
+    },
+    purge_deleted_note: ({ id }) => {
       db.notes = db.notes.filter((n) => n.id !== id);
       if (db.noteRevisions) db.noteRevisions = db.noteRevisions.filter((r) => r.note_id !== id);
       persist();
@@ -513,6 +529,7 @@
       const q = (query ?? "").trim().toLowerCase();
       if (!q) return [];
       return db.notes
+        .filter((n) => !n.deleted_at)
         .filter((n) => n.title.toLowerCase().includes(q) || n.content.toLowerCase().includes(q))
         .map((n) => ({ ...n }));
     },
@@ -520,6 +537,7 @@
       const q = (query ?? "").trim().toLowerCase();
       if (!q) return [];
       return db.notes
+        .filter((n) => !n.deleted_at)
         .filter((n) => n.title.toLowerCase().includes(q) || n.content.toLowerCase().includes(q))
         .map((n) => ({
           item: { ...n },
