@@ -4589,3 +4589,175 @@ test("голос: хоткей в быстром слоте вставляет �
 
   await expect(field).toHaveValue("было: голосом");
 });
+
+// --- v0.9.77: клавиатурная навигация по спискам ---
+
+// Сид с тремя задачами в предсказуемом порядке: createTask() кладёт их через UI,
+// но так порядок зависит от sort_order, а тесты курсора обязаны знать, какая
+// строка первая.
+function navTasksDb(extra: object = {}) {
+  const base = (i: number, title: string) => ({
+    id: `t${i}`, title, description: null, priority: "Medium", category: "Работа",
+    status: "Todo", deadline: null, tags: [], completed_at: null, recurrence: "None",
+    hidden: false, deleted_at: null, project_id: null, scheduled_at: null,
+    scheduled_mins: null, sort_order: i, subtasks: [],
+    created_at: "2026-01-01T10:00:00Z", updated_at: "2026-01-01T10:00:00Z",
+  });
+  return {
+    tasks: [base(1, "первая"), base(2, "вторая"), base(3, "третья")],
+    notes: [], projects: [], ...extra,
+  };
+}
+
+test("клавиатура: j/k двигают курсор по списку задач", async ({ page }) => {
+  await seedDb(page, navTasksDb());
+  await withMock(page);
+  await page.goto("/");
+
+  const rows = page.locator(".task-row");
+  await expect(rows).toHaveCount(3);
+  // До первого нажатия курсора нет — экран не должен «подсвечиваться» сам собой.
+  await expect(page.locator(".task-row.kb-focused")).toHaveCount(0);
+
+  await page.keyboard.press("j");
+  await expect(rows.nth(0)).toHaveClass(/kb-focused/);
+  await page.keyboard.press("j");
+  await expect(rows.nth(1)).toHaveClass(/kb-focused/);
+  // Курсор ровно один: старая строка обязана его отдать.
+  await expect(page.locator(".task-row.kb-focused")).toHaveCount(1);
+
+  await page.keyboard.press("k");
+  await expect(rows.nth(0)).toHaveClass(/kb-focused/);
+
+  // Стрелки работают наравне с буквами.
+  await page.keyboard.press("ArrowDown");
+  await expect(rows.nth(1)).toHaveClass(/kb-focused/);
+
+  // На краях курсор упирается, а не заворачивается.
+  await page.keyboard.press("k");
+  await page.keyboard.press("k");
+  await expect(rows.nth(0)).toHaveClass(/kb-focused/);
+
+  // Escape снимает курсор.
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".task-row.kb-focused")).toHaveCount(0);
+});
+
+// ГЛАВНАЯ регрессия версии: пока каретка в поле, буквы обязаны печататься.
+// Без проверки document.activeElement композер стал бы неработоспособен —
+// каждая "j" двигала бы курсор вместо ввода текста.
+test("клавиатура: в поле ввода j печатается, а не двигает курсор", async ({ page }) => {
+  await seedDb(page, navTasksDb());
+  await withMock(page);
+  await page.goto("/");
+
+  const composer = page.locator(".composer-input");
+  await composer.click();
+  await page.keyboard.type("jkj");
+
+  await expect(composer).toHaveValue("jkj");
+  await expect(page.locator(".task-row.kb-focused")).toHaveCount(0);
+});
+
+test("клавиатура: Enter открывает карточку задачи под курсором", async ({ page }) => {
+  await seedDb(page, navTasksDb());
+  await withMock(page);
+  await page.goto("/");
+
+  await page.keyboard.press("j");
+  await page.keyboard.press("j");
+  await page.keyboard.press("Enter");
+
+  const modal = page.locator(".modal");
+  await expect(modal).toBeVisible();
+  await expect(modal.getByLabel("Название")).toHaveValue("вторая");
+});
+
+test("клавиатура: пробел выполняет задачу под курсором", async ({ page }) => {
+  await seedDb(page, navTasksDb());
+  await withMock(page);
+  await page.goto("/");
+
+  await page.keyboard.press("j");
+  await page.keyboard.press(" ");
+
+  // Выполненная уходит из активного списка в Историю.
+  await expect(page.locator(".task-row", { hasText: "первая" })).toHaveCount(0);
+  await expect(page.locator(".task-row")).toHaveCount(2);
+  // Курсор остаётся на позиции — там теперь следующая задача, продолжать удобно.
+  await expect(page.locator(".task-row").nth(0)).toHaveClass(/kb-focused/);
+});
+
+// Запрет на выполнение заблокированной живёт в бэкенде (v0.9.56) и в UI
+// (disabled на галочке). Клавиатура не должна стать третьим путём в обход обоих.
+test("клавиатура: пробел не выполняет заблокированную задачу", async ({ page }) => {
+  await seedDb(page, navTasksDb({
+    taskDeps: [{ task_id: "t2", blocker_id: "t1" }],
+  }));
+  await withMock(page);
+  await page.goto("/");
+
+  const blocked = page.locator(".task-row", { hasText: "вторая" });
+  await expect(blocked).toHaveClass(/blocked/);
+
+  await page.keyboard.press("j");
+  await page.keyboard.press("j");
+  await expect(blocked).toHaveClass(/kb-focused/);
+  await page.keyboard.press(" ");
+
+  // Задача на месте и по-прежнему заблокирована.
+  await expect(page.locator(".task-row", { hasText: "вторая" })).toHaveCount(1);
+  await expect(page.locator(".task-row")).toHaveCount(3);
+
+  // Ключевая проверка. Одного «задача не выполнилась» мало: мок зеркалит запрет
+  // бэкенда (v0.9.56), поэтому она не выполнилась бы и без фронтового запрета —
+  // но пользователь получил бы ошибку в .alert. Клавиатура обязана вести себя
+  // как disabled-галочка: молча ничего не делать.
+  await expect(page.locator(".alert")).toHaveCount(0);
+});
+
+test("клавиатура: Delete отправляет задачу под курсором в Корзину", async ({ page }) => {
+  await seedDb(page, navTasksDb());
+  await withMock(page);
+  await page.goto("/");
+
+  await page.keyboard.press("j");
+  await page.keyboard.press("Delete");
+
+  await expect(page.locator(".task-row", { hasText: "первая" })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Корзина", exact: true }).click();
+  await expect(page.locator(".task-row", { hasText: "первая" })).toBeVisible();
+});
+
+test("клавиатура: в заметках j/k двигают курсор, Enter открывает", async ({ page }) => {
+  await seedDb(page, {
+    tasks: [], projects: [],
+    notes: [
+      { id: "n1", title: "альфа", content: "текст альфы", tags: [], pinned: false,
+        linked_task_id: null, project_id: null, reminder_at: null, deleted_at: null,
+        created_at: "2026-01-01T10:00:00Z", updated_at: "2026-01-02T10:00:00Z" },
+      { id: "n2", title: "бета", content: "текст беты", tags: [], pinned: false,
+        linked_task_id: null, project_id: null, reminder_at: null, deleted_at: null,
+        created_at: "2026-01-01T10:00:00Z", updated_at: "2026-01-01T10:00:00Z" },
+    ],
+  });
+  await withMock(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Заметки", exact: true }).first().click();
+
+  const rows = page.locator(".note-row");
+  await expect(rows).toHaveCount(2);
+
+  await page.keyboard.press("j");
+  await expect(rows.nth(0)).toHaveClass(/kb-focused/);
+  await page.keyboard.press("j");
+  await expect(rows.nth(1)).toHaveClass(/kb-focused/);
+
+  // Движение курсора НЕ открывает заметку: иначе каждое j/k запускало бы
+  // загрузку и цикл отложенного сохранения.
+  await expect(page.locator(".title-input")).toHaveCount(0);
+
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".title-input")).toHaveValue("бета");
+});

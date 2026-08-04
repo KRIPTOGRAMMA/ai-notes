@@ -17,6 +17,7 @@
   import Icon from "../lib/components/Icon.svelte";
   import type { Task, Subtask, Category, CreateTaskPayload, UpdateTaskPayload, Project, GoalSnapshot, ActiveSession, SmartListFilter } from "../lib/types";
   import { hhmm } from "../lib/datetime";
+  import { isTypingTarget, actionForKey, nextIndex, reconcileIndex } from "../lib/listnav";
 
   type AiResult = { task_id: string; type: string; result?: string; error?: string };
 
@@ -591,6 +592,15 @@
   let bulkProjectId = $state("");
   let bulkCategory = $state("");
 
+  // The rows in the order they appear on screen. Grouping by project changes that
+  // order relative to filteredActive, so a cursor walking the array rather than this
+  // would appear to jump around the screen.
+  const visibleTasks = $derived.by<Task[]>(() => {
+    if (searchQuery.trim()) return searchResults;
+    if (grouped) return grouped.flatMap(g => g.tasks);
+    return filteredActive;
+  });
+
   function visibleTaskIds(): string[] {
     if (grouped) return grouped.flatMap(g => g.tasks.map(t => t.id));
     return filteredActive.map(t => t.id);
@@ -627,6 +637,72 @@
   function clearSelection() {
     selectedIds = new Set();
     lastSelectedId = null;
+  }
+
+  // --- Keyboard navigation over the list (v0.9.77) ---
+  //
+  // Deliberately separate from selectedIds: the cursor is where the keyboard is
+  // pointing, the selection is what a bulk action would affect. Merging them would
+  // make every j/k silently rewrite the selection.
+  let focusedIndex = $state(-1);
+  let focusedId: string | null = $state(null);
+
+  // Completing a task removes it from the list and every save re-sorts it, so the
+  // cursor is anchored to the row's id and re-derived whenever the list changes.
+  $effect(() => {
+    const ids = visibleTasks.map(t => t.id);
+    const next = reconcileIndex(focusedId, ids, focusedIndex);
+    if (next !== focusedIndex) focusedIndex = next;
+    focusedId = next >= 0 ? ids[next] : null;
+  });
+
+  function moveFocus(delta: number) {
+    const next = nextIndex(focusedIndex, delta, visibleTasks.length);
+    focusedIndex = next;
+    focusedId = next >= 0 ? visibleTasks[next].id : null;
+    if (next >= 0) {
+      const el = document.querySelector<HTMLElement>(`[data-task-index="${next}"]`);
+      el?.scrollIntoView({ block: "nearest" });
+    }
+  }
+
+  function onListKeydown(e: KeyboardEvent) {
+    // Only the active list has a cursor. In History and the Trash the actions would
+    // mean something else (Delete there is "purge forever"), and the board is
+    // two-dimensional — j/k cannot express a move across columns.
+    if (viewMode !== "list" || listSubView !== "active") return;
+    // A modal on top owns the keyboard; otherwise Escape would clear the cursor
+    // behind a card the user is actually closing.
+    if (editingTask || historyDetailTask) return;
+    if (isTypingTarget(document.activeElement)) return;
+
+    const action = actionForKey(e);
+    if (!action) return;
+
+    if (action === "down" || action === "up") {
+      e.preventDefault();
+      moveFocus(action === "down" ? 1 : -1);
+      return;
+    }
+    if (action === "escape") {
+      focusedIndex = -1;
+      focusedId = null;
+      return;
+    }
+
+    const task = focusedIndex >= 0 ? visibleTasks[focusedIndex] : null;
+    if (!task) return;
+    e.preventDefault();
+    if (action === "open") {
+      editingTask = task;
+    } else if (action === "complete") {
+      // The blocked-task prohibition lives in the backend (v0.9.56) and the row's
+      // checkmark is disabled — the keyboard must not become the one path that
+      // bypasses both and produces an error instead of doing nothing.
+      if (task.blocked_by.length === 0) completeRow(task);
+    } else if (action === "delete") {
+      taskStore.remove(task.id);
+    }
   }
 
   async function bulkComplete() {
@@ -820,16 +896,24 @@
   }
 </script>
 
+<svelte:window onkeydown={onListKeydown} />
+
 {#snippet taskRow(task: Task)}
   {@const busy = aiLoadingId === task.id}
   {@const blocked = task.blocked_by.length > 0}
   {@const blockerNames = task.blocked_by.map(b => b.title).join(", ")}
+  <!-- The keyboard cursor is matched by id rather than by a positional index passed
+       in: the snippet is rendered from three different branches (search, grouped,
+       flat), and only the flat one has an index that matches the screen order. -->
+  {@const kbIndex = visibleTasks.findIndex(v => v.id === task.id)}
   <li
     class="task-row"
     style="--prio: var(--prio-{task.priority.toLowerCase()});"
     class:dragging={dragTaskId === task.id}
     class:drop-target={dropTargetId === task.id}
     class:selected={selectedIds.has(task.id)}
+    class:kb-focused={kbIndex >= 0 && kbIndex === focusedIndex}
+    data-task-index={kbIndex}
     class:blocked
     draggable={!searchQuery.trim() && !task.hidden}
     ondragstart={(e) => rowDragStart(e, task)}
@@ -1624,6 +1708,13 @@
   .task-row.selected {
     background: color-mix(in srgb, var(--accent) 10%, transparent);
     box-shadow: inset 3px 0 0 var(--accent);
+  }
+
+  /* An outline rather than a fill or a left bar: multi-select already uses both, and
+     a row can be selected and under the cursor at the same time. */
+  .task-row.kb-focused {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
   }
 
   .bulk-bar {

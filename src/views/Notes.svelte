@@ -14,6 +14,7 @@
   import VoiceButton from "../lib/components/VoiceButton.svelte";
   import type { Note, NoteRevision } from "../lib/types";
   import { localDateKey, toLocalInput, localeTag } from "../lib/datetime";
+  import { isTypingTarget, actionForKey, nextIndex, reconcileIndex } from "../lib/listnav";
   type EditorExports = { focus: () => void; formatBold: () => void; formatItalic: () => void; formatCode: () => void; formatHeading: () => void; formatChecklist: () => void; formatWikiLink: () => void; formatQuote: () => void; formatOrderedList: () => void; formatLink: () => void; insertTable: () => void; replaceRange: (from: number, to: number, text: string) => void; insertAtCursor: (text: string) => void };
   let editorRef: EditorExports | undefined = $state();
 
@@ -317,12 +318,88 @@
   function toggleZen() {
     zenMode = !zenMode;
   }
+  // One window listener for the whole screen, not two: zen mode and list navigation
+  // both watch Escape, and two independent handlers would have raced over it.
   function onZenKeydown(e: KeyboardEvent) {
     if (e.ctrlKey && e.shiftKey && e.code === "KeyZ" && selected) {
       e.preventDefault();
       toggleZen();
-    } else if (e.key === "Escape" && zenMode) {
+      return;
+    }
+    if (e.key === "Escape" && zenMode) {
       zenMode = false;
+      return;
+    }
+    onListKeydown(e);
+  }
+
+  // --- Keyboard navigation over the list (v0.9.77) ---
+  //
+  // The cursor is a separate thing from `selectedId`: moving it must not open a
+  // note, or every j/k would fire a load and a debounced save cycle. Enter opens.
+  let focusedIndex = $state(-1);
+
+  // Following the row through re-sorts: pinning or renaming a note reorders the
+  // list, and a bare index would silently point at a different note afterwards.
+  let focusedId: string | null = $state(null);
+  $effect(() => {
+    const ids = filteredNotes.map(n => n.id);
+    const next = reconcileIndex(focusedId, ids, focusedIndex);
+    if (next !== focusedIndex) focusedIndex = next;
+    focusedId = next >= 0 ? ids[next] : null;
+  });
+
+  function moveFocus(delta: number) {
+    const next = nextIndex(focusedIndex, delta, filteredNotes.length);
+    focusedIndex = next;
+    focusedId = next >= 0 ? filteredNotes[next].id : null;
+    if (next >= 0) {
+      // The row must be brought into view; "nearest" scrolls the minimum amount, so
+      // stepping down a long list does not jerk the row to the middle each time.
+      const el = document.querySelector<HTMLElement>(`[data-note-index="${next}"]`);
+      el?.scrollIntoView({ block: "nearest" });
+    }
+  }
+
+  // Delete goes through selectNote first, on purpose: deleteSelected() also cancels
+  // the pending autosave and closes the revisions panel, and those must apply to the
+  // note actually being deleted. Deleting straight from the row would leave a
+  // debounced save in flight for a note that is on its way to the Trash.
+  async function deleteFocused(note: Note) {
+    await selectNote(note);
+    await deleteSelected();
+  }
+
+  function onListKeydown(e: KeyboardEvent) {
+    // The Trash has no cursor: its rows have no "open", and Delete there would mean
+    // purging forever — too destructive to sit under a bare keystroke.
+    if (listSubView !== "notes" || zenMode) return;
+    if (isTypingTarget(document.activeElement)) return;
+
+    const action = actionForKey(e);
+    if (!action) return;
+
+    if (action === "down" || action === "up") {
+      e.preventDefault();
+      moveFocus(action === "down" ? 1 : -1);
+      return;
+    }
+    if (action === "escape") {
+      focusedIndex = -1;
+      focusedId = null;
+      return;
+    }
+
+    const note = focusedIndex >= 0 ? filteredNotes[focusedIndex] : null;
+    if (!note) return;
+    // Space opens too: a note has nothing to "complete", and leaving it unhandled
+    // would scroll the page instead.
+    if (action === "open" || action === "complete") {
+      e.preventDefault();
+      selectNote(note);
+    } else if (action === "delete") {
+      e.preventDefault();
+      deleteFocused(note);
     }
   }
   $effect(() => {
@@ -792,8 +869,14 @@ ${bodyHtml}
       <div class="empty">{t("Нет заметок по фильтру")}</div>
     {:else}
       <ul class="note-list">
-        {#each filteredNotes as note (note.id)}
-          <li class="note-row" class:pinned={note.pinned} class:selected={selectedNoteIds.has(note.id)}>
+        {#each filteredNotes as note, i (note.id)}
+          <li
+            class="note-row"
+            class:pinned={note.pinned}
+            class:selected={selectedNoteIds.has(note.id)}
+            class:kb-focused={focusedIndex === i}
+            data-note-index={i}
+          >
             <button class="note-item" class:active={selectedId === note.id} onclick={(e) => onNoteRowClick(e, note)}>
               <div class="note-title">{note.title}</div>
               <div class="note-date">{formatDate(note.updated_at)}</div>
@@ -1223,6 +1306,14 @@ ${bodyHtml}
 
   .note-row.selected {
     box-shadow: inset 3px 0 0 var(--accent);
+  }
+
+  /* The keyboard cursor is an outline, not a fill: multi-select already owns the
+     left bar and the open note owns the background, so a third state needs its own
+     visual channel or the three become indistinguishable when they overlap. */
+  .note-row.kb-focused {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
   }
 
   .bulk-notes-bar {
