@@ -8,6 +8,7 @@
   import TaskOpener from "../lib/components/TaskOpener.svelte";
   import { t, i18n } from "../lib/i18n.svelte";
   import { localDateKey, pad2, localeTag } from "../lib/datetime";
+  import { loadUiState, saveUiState } from "../lib/uistate";
 
   // A task opens right on the dashboard, without leaving for the Tasks screen
   let openTaskId = $state<string | null>(null);
@@ -68,6 +69,7 @@
 
   async function loadAppUsage(days: 1 | 7) {
     appPeriod = days;
+    saveUiState({ dashboardAppPeriod: days });
     try {
       appUsage = await api.getAppUsage(days);
       appCategories = await api.getAppCategoryTime(days);
@@ -247,7 +249,10 @@
         categories = await api.getCategoryDistribution();
         ratio = await api.getActiveIdleRatio();
         settings = await api.getSettings();
-        await loadAppUsage(1);
+        // The chosen period survives a restart (v0.9.79): loadAppUsage both fetches
+        // and sets appPeriod, so the saved value is applied here rather than
+        // assigned separately and then overwritten by a hardcoded 1.
+        await loadAppUsage(loadUiState().dashboardAppPeriod === 7 ? 7 : 1);
         await projectStore.load(); // fresh goal progress for the period
         await loadProjectTime();
         await categoryStore.load(); // task category names and colours for the donut

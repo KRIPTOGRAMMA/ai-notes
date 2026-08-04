@@ -376,7 +376,7 @@ test("ошибка быстрого слота видна в баннере", as
   });
   await withMock(page);
   await page.goto("/");
-  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.locator(".nav").getByRole("button", { name: "Заметки" }).click();
 
   await page.evaluate(() => {
     (window as any).__mockFailNext = { cmd: "set_pinned_item", msg: "Слот занят другим окном" };
@@ -768,7 +768,7 @@ test("заметки: чек-лист рендерится инлайн (live pr
   await withMock(page);
   await page.goto("/");
 
-  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.locator(".nav").getByRole("button", { name: "Заметки" }).click();
   await page.getByRole("button", { name: "+ Новая заметка" }).click();
 
   await fillNoteEditor(page, "план:\n- [ ] первый пункт\n- [ ] второй пункт");
@@ -784,7 +784,7 @@ test("заметки: чек-лист рендерится инлайн (live pr
   // заметку с нуля (reload → перечитать заметки из "БД") — если бы правился
   // только чекбокс в DOM, а не editContent, состояние бы потерялось.
   await page.reload();
-  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.locator(".nav").getByRole("button", { name: "Заметки" }).click();
   await page.locator(".note-item").first().click();
   await expect(page.locator(".cm-task-checkbox").first()).toBeChecked();
 });
@@ -792,7 +792,7 @@ test("заметки: чек-лист рендерится инлайн (live pr
 test("редактор: **жирный** внутри ```кода``` не рендерится жирным, снаружи — рендерится", async ({ page }) => {
   await withMock(page);
   await page.goto("/");
-  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.locator(".nav").getByRole("button", { name: "Заметки" }).click();
   await page.getByRole("button", { name: "+ Новая заметка" }).click();
   const editor = noteEditor(page);
 
@@ -812,7 +812,7 @@ test("редактор: **жирный** внутри ```кода``` не рен
 test("редактор: цитаты и нумерованные списки декорируются по Lezer-дереву", async ({ page }) => {
   await withMock(page);
   await page.goto("/");
-  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.locator(".nav").getByRole("button", { name: "Заметки" }).click();
   await page.getByRole("button", { name: "+ Новая заметка" }).click();
   const editor = noteEditor(page);
 
@@ -834,7 +834,7 @@ test("редактор: цитаты и нумерованные списки д
 test("редактор: цитата внутри цитаты не ломает разметку", async ({ page }) => {
   await withMock(page);
   await page.goto("/");
-  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.locator(".nav").getByRole("button", { name: "Заметки" }).click();
   await page.getByRole("button", { name: "+ Новая заметка" }).click();
   const editor = noteEditor(page);
 
@@ -961,7 +961,7 @@ test("онбординг: совет про Hyprland/Sway показываетс
 test("панель: кнопки цитаты, нумерованного списка и ссылки", async ({ page }) => {
   await withMock(page);
   await page.goto("/");
-  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.locator(".nav").getByRole("button", { name: "Заметки" }).click();
   await page.getByRole("button", { name: "+ Новая заметка" }).click();
   const editor = noteEditor(page);
 
@@ -999,7 +999,7 @@ test("панель: кнопки цитаты, нумерованного спи
 test("редактор: markdown-ссылка рендерится, опасная схема блокируется", async ({ page }) => {
   await withMock(page);
   await page.goto("/");
-  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.locator(".nav").getByRole("button", { name: "Заметки" }).click();
   await page.getByRole("button", { name: "+ Новая заметка" }).click();
   const editor = noteEditor(page);
 
@@ -1022,7 +1022,7 @@ test("вики-заметки: автодополнение, [[ссылка]] о
   await withMock(page);
   await page.goto("/");
 
-  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.locator(".nav").getByRole("button", { name: "Заметки" }).click();
   const title = page.getByPlaceholder("Название", { exact: true });
   const editor = noteEditor(page);
 
@@ -1071,7 +1071,7 @@ test("вики-заметки: переименование обновляет �
   await withMock(page);
   await page.goto("/");
 
-  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.locator(".nav").getByRole("button", { name: "Заметки" }).click();
   const title = page.getByPlaceholder("Название", { exact: true });
   const editor = noteEditor(page);
 
@@ -1105,7 +1105,7 @@ test("ИИ-автолинковка: кнопка скрыта без ИИ, с �
   await withMock(page);
   await page.goto("/");
 
-  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.locator(".nav").getByRole("button", { name: "Заметки" }).click();
   const title = page.getByPlaceholder("Название", { exact: true });
   const editor = noteEditor(page);
 
@@ -1130,7 +1130,7 @@ test("ИИ-автолинковка: кнопка скрыта без ИИ, с �
     localStorage.setItem("__mock_db", JSON.stringify(db));
   });
   await page.reload();
-  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.locator(".nav").getByRole("button", { name: "Заметки" }).click();
   await page.locator(".note-item", { hasText: "Главная" }).click();
 
   const suggestBtn = page.getByTitle("ИИ предложит заметки для связи");
@@ -1150,7 +1150,7 @@ test("ИИ-автолинковка: кнопка скрыта без ИИ, с �
 test("редактор заметок: переключение между заметками не портит undo-историю", async ({ page }) => {
   await withMock(page);
   await page.goto("/");
-  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.locator(".nav").getByRole("button", { name: "Заметки" }).click();
   const title = page.getByPlaceholder("Название", { exact: true });
   const editor = noteEditor(page);
 
@@ -1758,7 +1758,7 @@ test("версии заметок: панель показывает истор�
   await withMock(page);
   await page.goto("/");
 
-  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.locator(".nav").getByRole("button", { name: "Заметки" }).click();
   await page.locator(".note-item", { hasText: "заметка с историей" }).click();
   await expect(noteEditor(page)).toContainText("новый текст");
 
@@ -1790,7 +1790,7 @@ test("картинки в заметках: ![](имя) рендерится img
   await withMock(page);
   await page.goto("/");
 
-  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.locator(".nav").getByRole("button", { name: "Заметки" }).click();
   await page.locator(".note-item", { hasText: "заметка с картинкой" }).click();
 
   const img = page.locator(".cm-note-image");
@@ -1813,7 +1813,7 @@ test("картинки в заметках: ссылка скрыта по ум�
   await withMock(page);
   await page.goto("/");
 
-  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.locator(".nav").getByRole("button", { name: "Заметки" }).click();
   await page.locator(".note-item", { hasText: "заметка с картинкой" }).click();
 
   const editor = noteEditor(page);
@@ -1883,7 +1883,7 @@ test("корзина заметок: удалённая восстанавлив
   });
   await withMock(page);
   await page.goto("/");
-  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.locator(".nav").getByRole("button", { name: "Заметки" }).click();
 
   await page.locator(".note-item", { hasText: "Черновик" }).click();
   await page.getByTitle("Удалить заметку").click();
@@ -1919,7 +1919,7 @@ test("корзина заметок: удалённая не находится 
   });
   await withMock(page);
   await page.goto("/");
-  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.locator(".nav").getByRole("button", { name: "Заметки" }).click();
   await page.locator(".note-item", { hasText: "уникальноеслово" }).click();
   await page.getByTitle("Удалить заметку").click();
 
@@ -2132,7 +2132,7 @@ test("закрепление заметок: пин поднимает заме�
     localStorage.setItem("__mock_db", JSON.stringify(db));
   });
   await page.reload();
-  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.locator(".nav").getByRole("button", { name: "Заметки" }).click();
 
   const rows = page.locator(".note-row");
   await expect(rows).toHaveCount(3);
@@ -2146,7 +2146,7 @@ test("закрепление заметок: пин поднимает заме�
 
   // Переживает перезагрузку
   await page.reload();
-  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.locator(".nav").getByRole("button", { name: "Заметки" }).click();
   await expect(page.locator(".note-row").nth(0)).toContainText("Первая заметка");
   await expect(page.locator(".pin-btn.pinned")).toHaveCount(1);
 
@@ -2169,7 +2169,7 @@ test("zen-режим редактора: кнопка и хоткей раскр
   await withMock(page);
   await page.goto("/");
 
-  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.locator(".nav").getByRole("button", { name: "Заметки" }).click();
   await page.locator(".note-item", { hasText: "заметка для дзена" }).click();
 
   await expect(page.locator(".list-pane")).toBeVisible();
@@ -2201,7 +2201,7 @@ test("панель форматирования: кнопки оборачива
   await withMock(page);
   await page.goto("/");
 
-  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.locator(".nav").getByRole("button", { name: "Заметки" }).click();
   await page.getByRole("button", { name: "+ Новая заметка" }).click();
 
   const editor = noteEditor(page);
@@ -2254,7 +2254,7 @@ test("панель форматирования: кнопки оборачива
 test("Ctrl+Shift+K доходит до своего keymap, а не до defaultKeymap", async ({ page }) => {
   await withMock(page);
   await page.goto("/");
-  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.locator(".nav").getByRole("button", { name: "Заметки" }).click();
   await page.getByRole("button", { name: "+ Новая заметка" }).click();
   await fillNoteEditor(page, "цель");
 
@@ -2284,7 +2284,7 @@ test("таблицы в заметках: рендерится <table>, ячей
   await withMock(page);
   await page.goto("/");
 
-  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.locator(".nav").getByRole("button", { name: "Заметки" }).click();
   await page.locator(".note-item", { hasText: "заметка с таблицей" }).click();
 
   await expect(page.locator(".cm-table")).toBeVisible();
@@ -2345,7 +2345,7 @@ test("ИИ по выделению в редакторе: меню действ�
   await withMock(page);
   await page.goto("/");
 
-  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.locator(".nav").getByRole("button", { name: "Заметки" }).click();
   await page.getByRole("button", { name: "+ Новая заметка" }).click();
 
   const editor = noteEditor(page);
@@ -2384,7 +2384,7 @@ test("ИИ: резюме заметки — кнопка открывает ок
   await withMock(page);
   await page.goto("/");
 
-  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.locator(".nav").getByRole("button", { name: "Заметки" }).click();
   await page.locator(".note-item", { hasText: "Длинная заметка" }).click();
 
   const summarizeBtn = page.getByTitle("ИИ: резюме заметки");
@@ -2412,7 +2412,7 @@ test("ИИ: извлечение задач из заметки — список
   await withMock(page);
   await page.goto("/");
 
-  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.locator(".nav").getByRole("button", { name: "Заметки" }).click();
   await page.locator(".note-item", { hasText: "Заметка с делами" }).click();
 
   const extractBtn = page.getByTitle("ИИ: извлечь задачи из заметки");
@@ -2466,7 +2466,7 @@ test("экспорт заметки в HTML: кнопка сохраняет с�
   await withMock(page);
   await page.goto("/");
 
-  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.locator(".nav").getByRole("button", { name: "Заметки" }).click();
   await page.locator(".note-item", { hasText: "Заметка для экспорта" }).click();
   await page.getByTitle("Экспорт в HTML").click();
 
@@ -2507,7 +2507,7 @@ test("экспорт/импорт заметок в .md: roundtrip через п
   await page.getByRole("button", { name: "Импорт заметок из папки" }).click();
   await expect(page.getByText("Импортировано заметок: 1")).toBeVisible();
 
-  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.locator(".nav").getByRole("button", { name: "Заметки" }).click();
   await expect(page.locator(".note-item", { hasText: "моя заметка" })).toHaveCount(2);
 });
 
@@ -3031,7 +3031,7 @@ test("мультивыбор заметок: Ctrl/Shift+клик выделяе�
     localStorage.setItem("__mock_db", JSON.stringify(db));
   });
   await page.reload();
-  await page.getByRole("button", { name: "Заметки", exact: true }).click();
+  await page.locator(".nav").getByRole("button", { name: "Заметки", exact: true }).click();
 
   // Ctrl+клик по первой, Shift+клик по третьей — диапазон выделяет все три
   await page.locator(".note-item", { hasText: "Заметка А" }).click({ modifiers: ["Control"] });
@@ -3140,7 +3140,7 @@ test("напоминание у заметки: поле сохраняется 
     localStorage.setItem("__mock_db", JSON.stringify(db));
   });
   await page.reload();
-  await page.getByRole("button", { name: "Заметки", exact: true }).click();
+  await page.locator(".nav").getByRole("button", { name: "Заметки", exact: true }).click();
   await page.locator(".note-item", { hasText: "Заметка с напоминанием" }).click();
 
   await page.locator('input[type="datetime-local"]').fill("2026-08-01T10:00");
@@ -3148,7 +3148,7 @@ test("напоминание у заметки: поле сохраняется 
   await page.waitForTimeout(200);
 
   await page.reload();
-  await page.getByRole("button", { name: "Заметки", exact: true }).click();
+  await page.locator(".nav").getByRole("button", { name: "Заметки", exact: true }).click();
   await page.locator(".note-item", { hasText: "Заметка с напоминанием" }).click();
   await expect(page.locator('input[type="datetime-local"]')).toHaveValue("2026-08-01T10:00");
 
@@ -3388,7 +3388,7 @@ test("быстрый слот: молния в заметках не путае�
   });
   await withMock(page);
   await page.goto("/");
-  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.locator(".nav").getByRole("button", { name: "Заметки" }).click();
 
   const row = page.locator(".note-row").first();
   await row.getByTitle("В быстрый слот (Ctrl+Shift+J)").click();
@@ -3780,7 +3780,7 @@ test("кнопки окна: свои вместо системного заго
   // Шапка не съедает клики по контенту под собой: полоса тянется во всю
   // ширину, и без pointer-events:none левая часть верхней строки стала бы
   // мёртвой зоной. Проверяем именно кликом, а не чтением стиля.
-  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.locator(".nav").getByRole("button", { name: "Заметки" }).click();
   await expect(page.locator(".notes")).toBeVisible();
   await page.getByRole("button", { name: "Задачи", exact: true }).click();
 
@@ -4439,7 +4439,7 @@ test("голос: без модели кнопки микрофона нет", a
   await withMock(page);
   await page.goto("/");
 
-  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.locator(".nav").getByRole("button", { name: "Заметки" }).click();
   await page.getByRole("button", { name: "+ Новая заметка" }).click();
 
   await expect(page.locator(".format-toolbar")).toBeVisible();
@@ -4455,7 +4455,7 @@ test("голос: надиктованный текст попадает в за
   await withMock(page);
   await page.goto("/");
 
-  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.locator(".nav").getByRole("button", { name: "Заметки" }).click();
   await page.getByRole("button", { name: "+ Новая заметка" }).click();
 
   const mic = page.locator(".format-toolbar .voice-btn");
@@ -4483,7 +4483,7 @@ test("голос: текст вставляется в позицию карет
   await withMock(page);
   await page.goto("/");
 
-  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.locator(".nav").getByRole("button", { name: "Заметки" }).click();
   await page.getByRole("button", { name: "+ Новая заметка" }).click();
   await fillNoteEditor(page, "начало конец");
 
@@ -4535,7 +4535,7 @@ test("голос: хоткей Ctrl+Shift+D диктует в редактор �
   await withMock(page);
   await page.goto("/");
 
-  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.locator(".nav").getByRole("button", { name: "Заметки" }).click();
   await page.getByRole("button", { name: "+ Новая заметка" }).click();
   await fillNoteEditor(page, "начало");
 
@@ -4560,7 +4560,7 @@ test("голос: без модели хоткей не начинает зап�
   await withMock(page);
   await page.goto("/");
 
-  await page.getByRole("button", { name: "Заметки" }).click();
+  await page.locator(".nav").getByRole("button", { name: "Заметки" }).click();
   await page.getByRole("button", { name: "+ Новая заметка" }).click();
   await fillNoteEditor(page, "текст");
 
@@ -4744,7 +4744,7 @@ test("клавиатура: в заметках j/k двигают курсор,
   });
   await withMock(page);
   await page.goto("/");
-  await page.getByRole("button", { name: "Заметки", exact: true }).first().click();
+  await page.locator(".nav").getByRole("button", { name: "Заметки", exact: true }).click();
 
   const rows = page.locator(".note-row");
   await expect(rows).toHaveCount(2);
@@ -4839,4 +4839,95 @@ test("счётчик «разблокирует N» не зависит от ф�
   await page.locator(".project-filter").selectOption({ label: "Проект" });
   await expect(page.locator(".task-row")).toHaveCount(1);
   await expect(page.locator(".task-unblocks")).toHaveText("разблокирует 2");
+});
+
+// --- v0.9.79: память состояния экранов ---
+
+test("состояние экранов: активный раздел и режим Доска переживают перезапуск", async ({ page }) => {
+  await seedDb(page, navTasksDb());
+  await withMock(page);
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "Доска", exact: true }).click();
+  await expect(page.locator(".board")).toBeVisible();
+
+  await page.reload();
+  // Раздел тот же и режим тот же — без ручного восстановления контекста.
+  await expect(page.getByRole("heading", { name: "Задачи" })).toBeVisible();
+  await expect(page.locator(".board")).toBeVisible();
+});
+
+test("состояние экранов: раздел Заметки открывается сразу после перезапуска", async ({ page }) => {
+  await seedDb(page, {
+    tasks: [], projects: [],
+    notes: [
+      { id: "n1", title: "запомненная", content: "текст", tags: [], pinned: false,
+        linked_task_id: null, project_id: null, reminder_at: null, deleted_at: null,
+        created_at: "2026-01-01T10:00:00Z", updated_at: "2026-01-02T10:00:00Z" },
+    ],
+  });
+  await withMock(page);
+  await page.goto("/");
+
+  await page.locator(".nav").getByRole("button", { name: "Заметки", exact: true }).click();
+  await page.locator(".note-row .note-item").first().click();
+  await expect(page.locator(".title-input")).toHaveValue("запомненная");
+
+  await page.reload();
+  // И раздел, и сама заметка — открыты там же, где закрыли.
+  await expect(page.locator(".title-input")).toHaveValue("запомненная");
+});
+
+// Главная граница фичи: сохранённое состояние может протухнуть между запусками.
+// Молча откатываемся к умолчанию, а не показываем пустой экран под фильтром-призраком.
+//
+// Смарт-список НЕ удаляется через UI намеренно: `removeSmartList` сам сбрасывает
+// активный фильтр, и тест проверял бы этот сброс, а не восстановление. Здесь
+// воспроизведён честный случай «состояние пережило запуск, а список — нет»:
+// ui_state ссылается на id, которого в базе уже нет.
+test("состояние экранов: удалённый смарт-список после перезапуска не ломает экран", async ({ page }) => {
+  await seedDb(page, navTasksDb({ smartLists: [] }));
+  await page.addInitScript(() =>
+    localStorage.setItem("ui_state", JSON.stringify({ view: "tasks", smartListId: "sl-удалённый" })));
+  await withMock(page);
+  await page.goto("/");
+
+  // Экран рабочий, фильтр молча сброшен на «Все», задачи на месте.
+  await expect(page.locator(".task-row")).toHaveCount(3);
+  await expect(page.locator(".smart-list-chip", { hasText: "Все" })).toHaveClass(/active-toggle/);
+  await expect(page.locator(".smart-list-chip.active-toggle")).toHaveCount(1);
+});
+
+test("состояние экранов: битое сохранённое состояние не мешает запуску", async ({ page }) => {
+  await seedDb(page, navTasksDb());
+  await page.addInitScript(() => localStorage.setItem("ui_state", "{не json"));
+  await withMock(page);
+  await page.goto("/");
+
+  // Приложение стартует на умолчании, а не падает.
+  await expect(page.getByRole("heading", { name: "Задачи" })).toBeVisible();
+  await expect(page.locator(".task-row")).toHaveCount(3);
+});
+
+test("состояние экранов: Корзина НЕ запоминается — запуск всегда в активных", async ({ page }) => {
+  await seedDb(page, navTasksDb());
+  await withMock(page);
+  await page.goto("/");
+
+  // Корзина должна быть непустой, иначе список вообще не отрисуется и проверка
+  // «не открылись в Корзине» стала бы бессодержательной.
+  await page.locator(".task-row")
+    .filter({ has: page.locator(".task-title", { hasText: "третья" }) })
+    .getByTitle("Удалить").click();
+  await page.getByRole("button", { name: "Корзина", exact: true }).click();
+  await expect(page.locator(".task-list.trash")).toBeVisible();
+
+  await page.reload();
+  // Открыть приложение сразу в Корзине — дезориентирует, поэтому подвид намеренно
+  // не сохраняется.
+  await expect(page.locator(".task-list.trash")).toHaveCount(0);
+  // Задач снова три: init-скрипт сида выполняется на КАЖДОЙ навигации, включая
+  // reload(), и возвращает базу к исходной. Здесь это не мешает — проверяется
+  // подвид, а не содержимое базы.
+  await expect(page.locator(".task-row")).toHaveCount(3);
 });

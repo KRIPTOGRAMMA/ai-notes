@@ -16,6 +16,7 @@
     KEYBIND_ACTIONS, type Keybinds,
     parseKeybinds, comboFor, comboFromEvent, formatCombo, findConflicts,
   } from "../lib/keybinds";
+  import { loadUiState, saveUiState, restoreOneOf } from "../lib/uistate";
 
   const PROVIDERS: { value: AppSettings["ai_provider"]; label: string }[] = $derived([
     { value: "none", label: t("Без ИИ (функции отключены)") },
@@ -135,7 +136,14 @@
   // (also appended last by index for the same reason); Voice input(11) -> AI (same
   // again: appended by index, grouped with the AI provider).
   const SECTION_TAB: TabId[] = ["general", "ai", "general", "tasks", "tasks", "notifications", "data", "data", "hotkeys", "tasks", "help", "ai"];
-  let activeTab = $state<TabId>("general");
+  let activeTab = $state<TabId>(restoreOneOf(loadUiState().settingsTab, TAB_IDS, "general"));
+  // Saved only while the search box is empty: a search jumps to the first matching
+  // tab by itself (recomputeSearch below), and that is a transient move, not a
+  // choice worth reopening the app on.
+  $effect(() => {
+    if (searchQuery.trim()) return;
+    saveUiState({ settingsTab: activeTab });
+  });
 
   // --- Settings search: a plain substring match over the whole text of a section,
   // with no indexing or fuzziness. An empty query shows everything everywhere; a

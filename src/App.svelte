@@ -8,6 +8,7 @@
   import { listen } from "@tauri-apps/api/event";
   import type { AppSettings } from "./lib/types";
   import { applyCachedTheme, applyTheme } from "./lib/theme";
+  import { loadUiState, saveUiState, restoreOneOf } from "./lib/uistate";
   import { i18n, t, tErr } from "./lib/i18n.svelte";
   import { parseKeybinds, comboFor, comboMatches, formatCombo, type Keybinds } from "./lib/keybinds";
   import Onboarding from "./views/Onboarding.svelte";
@@ -27,7 +28,12 @@
   import "./app.css";
 
   type View = "today" | "tasks" | "notes" | "graph" | "dashboard" | "calendar" | "settings";
-  let activeView: View = $state("tasks");
+  const VIEWS = ["today", "tasks", "notes", "graph", "dashboard", "calendar", "settings"] as const;
+  // Continue where you left off (v0.9.79). Restored synchronously, like the cached
+  // theme: waiting for anything here would show the default screen first and swap
+  // it under the user's hands.
+  let activeView: View = $state(restoreOneOf(loadUiState().view, VIEWS, "tasks"));
+  $effect(() => { saveUiState({ view: activeView }); });
   let showSearch = $state(false);
   let showNotifications = $state(false);
   let unreadNotifications = $state(0);

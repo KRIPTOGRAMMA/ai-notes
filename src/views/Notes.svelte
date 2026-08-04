@@ -15,6 +15,7 @@
   import type { Note, NoteRevision } from "../lib/types";
   import { localDateKey, toLocalInput, localeTag } from "../lib/datetime";
   import { isTypingTarget, actionForKey, nextIndex, reconcileIndex } from "../lib/listnav";
+  import { loadUiState, saveUiState } from "../lib/uistate";
   type EditorExports = { focus: () => void; formatBold: () => void; formatItalic: () => void; formatCode: () => void; formatHeading: () => void; formatChecklist: () => void; formatWikiLink: () => void; formatQuote: () => void; formatOrderedList: () => void; formatLink: () => void; insertTable: () => void; replaceRange: (from: number, to: number, text: string) => void; insertAtCursor: (text: string) => void };
   let editorRef: EditorExports | undefined = $state();
 
@@ -180,7 +181,11 @@
     saving = false;
   }
 
+  // Remembered on selection rather than through an $effect on selectedId: deleting
+  // a note sets selectedId to null, and an effect would then erase the memory
+  // instead of leaving the previous note to be reopened next time.
   async function selectNote(note: Note) {
+    saveUiState({ noteId: note.id });
     await flushPendingSave();
     suppressNextContentSave = true;
     selectedId = note.id;
@@ -758,7 +763,16 @@ ${bodyHtml}
   }
 
   onMount(() => {
-    noteStore.load();
+    // Reopen the last note (v0.9.79), but only once the list has arrived and only
+    // if nothing is selected yet: opening the section from global search or from
+    // "today's note" sets selectedId first, and those requests must win over a
+    // remembered one. A note deleted since last time simply does not open.
+    noteStore.load().then(() => {
+      if (selectedId) return;
+      const saved = loadUiState().noteId;
+      const note = saved ? noteStore.notes.find(n => n.id === saved) : undefined;
+      if (note) selectNote(note);
+    });
     taskStore.load();
     pinnedStore.load();
     // Capability detection: with AI turned off the "Suggest links" button is hidden

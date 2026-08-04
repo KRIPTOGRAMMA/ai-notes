@@ -19,6 +19,7 @@
   import { hhmm } from "../lib/datetime";
   import { isTypingTarget, actionForKey, nextIndex, reconcileIndex } from "../lib/listnav";
   import { unblockCounts } from "../lib/blockers";
+  import { loadUiState, saveUiState, restoreOneOf, restoreValid } from "../lib/uistate";
 
   type AiResult = { task_id: string; type: string; result?: string; error?: string };
 
@@ -36,7 +37,10 @@
   // List/Board is a switch in the page head. This used to be a separate
   // Kanban.svelte page and was merged here so the project filter, smart lists and
   // multi-select are shared by both view modes.
-  let viewMode = $state<"list" | "board">("list");
+  // List/Board survives a restart (v0.9.79); the History/Trash sub-view above does
+  // not, on purpose — opening straight into the Trash is disorienting.
+  let viewMode = $state<"list" | "board">(restoreOneOf(loadUiState().taskViewMode, ["list", "board"] as const, "list"));
+  $effect(() => { saveUiState({ taskViewMode: viewMode }); });
 
   // Projects: the list filter ("all" | "none" | id) and the management modal
   let projectFilter = $state<string>("all");
@@ -79,10 +83,12 @@
   }
 
   onMount(() => {
-    projectStore.load();
+    // The saved filters are restored after these two have loaded, not on a guess
+    // about the stores being non-empty: a user with no projects and no custom smart
+    // lists would otherwise never reach the restore at all.
+    Promise.all([projectStore.load(), smartListStore.load()]).then(restoreSavedFilters);
     categoryStore.load();
     statusStore.load();
-    smartListStore.load();
     pinnedStore.load();
     // Capability detection: with AI turned off the "What now?" button is simply hidden
     api.getSettings().then(s => {
@@ -127,6 +133,33 @@
   ]);
 
   let activeSmartListId: string | null = $state(null);
+
+  // The smart list and the project filter are restored only once their sources have
+  // loaded: a list or project deleted between two launches must not survive as a
+  // filter that matches nothing — the user cannot tell that from "no tasks here".
+  // A single run (restoredFilters) rather than an $effect, or deleting the active
+  // smart list during a session would immediately reset the filter under the user.
+  // Called from onMount once the projects and smart lists have arrived: validating
+  // a saved id against empty stores would discard it as "deleted".
+  let restoredFilters = $state(false);
+  function restoreSavedFilters() {
+    const saved = loadUiState();
+    const smartIds = [...BUILTIN_SMART_LISTS.map(l => l.id), ...smartListStore.lists.map(l => l.id)];
+    activeSmartListId = restoreValid(saved.smartListId, (id) => smartIds.includes(id), null);
+    projectFilter = restoreValid(
+      saved.projectFilter,
+      (id) => id === "all" || id === "none" || projectStore.projects.some(p => p.id === id),
+      "all",
+    );
+    restoredFilters = true;
+  }
+
+  // Saving starts only after the restore, otherwise the initial defaults would
+  // overwrite the very values still waiting to be read back.
+  $effect(() => {
+    if (!restoredFilters) return;
+    saveUiState({ smartListId: activeSmartListId, projectFilter });
+  });
 
   // "Unblocks N" — the reverse of blocked_by (v0.9.78). Counted over activeTasks
   // rather than over the visible list on purpose: filtering by project or by a
