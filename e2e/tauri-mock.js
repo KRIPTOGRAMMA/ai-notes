@@ -960,11 +960,39 @@
     "plugin:event|unlisten": ({ event, eventId }) => {
       eventHandlers.get(event)?.delete(eventId);
     },
+    // Фронтенд тоже шлёт события, а не только слушает: QuickCapture объявляет
+    // "task-created"/"note-created"/"task-updated" главному окну. Шим добавлен в
+    // v0.9.80 — до него emit проваливался в undefined, событие не доходило ни до
+    // одного слушателя, и в e2e эта связь не проверялась вовсе. Доставку делает
+    // тот же __mockEmit, что и события «от бэкенда».
+    "plugin:event|emit": ({ event, payload }) => {
+      window.__mockEmit(event, payload);
+    },
     "plugin:autostart|enable": () => {},
     "plugin:autostart|disable": () => {},
     "plugin:autostart|is_enabled": () => false,
     "plugin:dialog|save": () => db.mockDialogPath ?? null,
     "plugin:dialog|open": () => db.mockDialogPath ?? null,
+    // Своя титульная строка (v0.9.40): WindowControls вызывает isMaximized() при
+    // монтировании и на каждый resize. Шим добавлен в v0.9.80 — до него вызов
+    // проваливался в undefined, .catch() его глотал, и состояние кнопки
+    // «развернуть» не проверялось ни одним тестом. Нашёл это новый страж
+    // __unknownInvokes, а не человек.
+    // Копирование в буфер (резюме ИИ, Notes.svelte:528). Шим добавлен в v0.9.80:
+    // до него тест «клик копирует и закрывает» проверял только половину про
+    // закрытие — сам вызов копирования проваливался в undefined. Записанное
+    // складываем в db, чтобы тест мог проверить именно текст.
+    "plugin:clipboard-manager|write_text": ({ text }) => {
+      db.clipboardWritten = text;
+      persist();
+    },
+    "plugin:window|is_maximized": () => db.windowMaximized ?? false,
+    "plugin:window|toggle_maximize": () => {
+      db.windowMaximized = !(db.windowMaximized ?? false);
+      persist();
+    },
+    "plugin:window|minimize": () => {},
+    "plugin:window|hide": () => {},
   };
 
   window.__TAURI_INTERNALS__ = {

@@ -8,6 +8,7 @@ mod ai;
 mod voice;
 mod status;
 mod i18n;
+mod mock_guard;
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
