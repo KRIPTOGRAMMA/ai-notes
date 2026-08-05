@@ -219,6 +219,9 @@ export interface AppSettings {
   app_limits: string;         // JSON [{category, daily_mins}] — 0 or absence means no limit
   auto_backup_dir: string;    // empty means automatic backup is off
   auto_backup_keep: number;   // how many copies to keep (minimum 1)
+  // Read-only: written by the backup loop, ignored by save_settings. See the
+  // field comment in src-tauri/src/commands/settings.rs.
+  last_auto_backup: string;   // RFC3339 of the last successful automatic backup
   morning_digest_time: string; // "HH:MM", empty means off
   show_subtasks_expanded: boolean; // subtasks visible in the list without a click
   keybinds: string; // JSON {action_id: combo}; a missing key means the action's default

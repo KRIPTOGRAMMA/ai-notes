@@ -609,6 +609,10 @@ pub fn run() {
             let db_url = format!("sqlite:{}?mode=rwc", db_path.join("data.db").display());
             let pool: sqlx::SqlitePool = init_db(&db_url).await.expect("Failed to init DB");
 
+            // Before anything else touches settings: switches automatic backups on
+            // for a DB that has never been configured (v0.9.85).
+            let _ = commands::backup::ensure_default_backup_dir(&pool, &db_path).await;
+
             app.manage(pool.clone());
             app.manage(Mutex::new(SidecarState::new()) as SharedSidecar);
             app.manage(commands::voice::VoiceState::new());

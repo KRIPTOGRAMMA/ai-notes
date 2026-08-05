@@ -41,6 +41,7 @@
     auto_backup_dir: "",
     auto_backup_keep: 7,
     last_auto_backup: "",
+    last_auto_backup: "",
     morning_digest_time: "",
     show_subtasks_expanded: true,
     keybinds: "",

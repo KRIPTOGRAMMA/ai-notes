@@ -77,6 +77,11 @@ pub struct AppSettings {
     pub auto_backup_dir: String,     // empty means automatic backup is off
     #[serde(default = "default_seven")]
     pub auto_backup_keep: u64,       // how many copies to keep
+    // Backend-owned, read-only for the frontend: written by the backup loop, never
+    // by save_settings. Sending it back from the form would let a settings page
+    // that was opened before a backup ran reset the timestamp on save.
+    #[serde(default)]
+    pub last_auto_backup: String,    // RFC3339 of the last successful automatic backup
     #[serde(default)]
     pub morning_digest_time: String, // "HH:MM", empty means off
     #[serde(default = "default_true")]
@@ -146,6 +151,7 @@ impl Default for AppSettings {
             app_limits: String::new(),
             auto_backup_dir: String::new(),
             auto_backup_keep: 7,
+            last_auto_backup: String::new(),
             morning_digest_time: String::new(),
             show_subtasks_expanded: true,
             keybinds: String::new(),
@@ -259,6 +265,8 @@ pub async fn load_settings_raw(pool: &SqlitePool) -> AppResult<AppSettings> {
     if let Some(v) = get_setting(pool, "app_category_rules").await { s.app_category_rules = v; }
     if let Some(v) = get_setting(pool, "app_limits").await { s.app_limits = v; }
     if let Some(v) = get_setting(pool, "auto_backup_dir").await { s.auto_backup_dir = v; }
+    // Read-only on the way out; see the field comment on AppSettings.
+    if let Some(v) = get_setting(pool, "last_auto_backup").await { s.last_auto_backup = v; }
     if let Some(v) = get_setting(pool, "auto_backup_keep").await {
         if let Ok(n) = v.parse() { s.auto_backup_keep = n; }
     }
@@ -454,5 +462,49 @@ mod db_tests {
         set_setting(&pool, "keybinds", r#"{"palette":"Ctrl+KeyJ"}"#).await.unwrap();
         let s = load_settings_raw(&pool).await.unwrap();
         assert_eq!(s.keybinds, r#"{"palette":"Ctrl+KeyJ"}"#);
+    }
+
+    // last_auto_backup is written by the backup loop and must reach the frontend,
+    // which is exactly what was broken until v0.9.85: the key was written, but the
+    // field existed in neither AppSettings nor load_settings_raw, so it never
+    // crossed the boundary and Settings.svelte rendered a variable nobody assigned.
+    #[tokio::test]
+    async fn last_auto_backup_reaches_the_frontend() {
+        let pool = test_pool().await;
+        assert_eq!(load_settings_raw(&pool).await.unwrap().last_auto_backup, "");
+
+        set_setting(&pool, "last_auto_backup", "2026-08-05T10:00:00+00:00").await.unwrap();
+        assert_eq!(
+            load_settings_raw(&pool).await.unwrap().last_auto_backup,
+            "2026-08-05T10:00:00+00:00",
+            "last_auto_backup не доходит до фронтенда"
+        );
+    }
+
+    // save_settings takes State/AppHandle and cannot be called from a test, so the
+    // guarantee is asserted on the source instead: the command must never write
+    // last_auto_backup. If it did, a Settings page opened before a backup ran
+    // would push the stale (empty) value back on save and erase the timestamp —
+    // the field is backend-owned precisely to avoid that.
+    #[test]
+    fn save_settings_never_writes_the_backend_owned_timestamp() {
+        let src = include_str!("settings.rs");
+        let start = src
+            .find("pub async fn save_settings(")
+            .expect("save_settings not found");
+        let end = src[start..]
+            .find("\n}\n")
+            .expect("save_settings is not closed") + start;
+        let body = &src[start..end];
+
+        assert!(
+            !body.contains("\"last_auto_backup\""),
+            "save_settings пишет last_auto_backup — поле принадлежит бэкенду"
+        );
+        // Guard against the check silently passing on a body the parser lost.
+        assert!(
+            body.contains("\"auto_backup_dir\""),
+            "разбор save_settings сломан: в теле нет даже auto_backup_dir"
+        );
     }
 }

@@ -8,6 +8,35 @@ use tauri::Manager;
 use crate::error::AppResult;
 use crate::commands::settings::{get_setting, set_setting};
 
+// Turns automatic backups on the first time the app runs, pointing them at a
+// folder inside the app's own data dir.
+//
+// Until v0.9.85 auto_backup_dir defaulted to empty, auto_backup_due returned
+// false for an empty dir, and nothing in the UI said so — the result was an app
+// that had never once backed itself up while looking like it might have. Off by
+// default is a defensible choice only when the user is told; it wasn't.
+//
+// The marker key is what separates "never configured" from "deliberately turned
+// off". Without it, clearing the folder in Settings would be undone on the next
+// launch and the setting would be impossible to switch off.
+pub async fn ensure_default_backup_dir(pool: &sqlx::SqlitePool, data_dir: &Path) -> AppResult<()> {
+    if get_setting(pool, "auto_backup_initialized").await.is_some() {
+        return Ok(());
+    }
+    set_setting(pool, "auto_backup_initialized", "1").await?;
+
+    // Respect a folder the user somehow already has (e.g. a DB from an older
+    // build that predates the marker).
+    if get_setting(pool, "auto_backup_dir").await.is_some_and(|d| !d.trim().is_empty()) {
+        return Ok(());
+    }
+
+    let dir = data_dir.join("backups");
+    fs::create_dir_all(&dir)?;
+    set_setting(pool, "auto_backup_dir", &dir.to_string_lossy()).await?;
+    Ok(())
+}
+
 // The DB runs in WAL mode: recent writes live in data.db-wal, not in data.db.
 // Copying the file alone is not enough — the snapshot would be incomplete.
 // VACUUM INTO writes a consistent copy of the whole DB (WAL included) to a
@@ -330,6 +359,45 @@ mod tests {
 
         // The unrelated file is untouched
         assert!(backup_dir.join("note.txt").exists());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // v0.9.85: automatic backups are on out of the box. Until then auto_backup_dir
+    // defaulted to empty and auto_backup_due refused to run — the live database of
+    // the app's only daily user had never been backed up once.
+    #[tokio::test]
+    async fn default_backup_dir_is_set_on_a_fresh_db() {
+        let dir = tmp_dir("default-backup");
+        let pool = test_pool(&dir).await;
+
+        assert_eq!(get_setting(&pool, "auto_backup_dir").await, None);
+        ensure_default_backup_dir(&pool, &dir).await.unwrap();
+
+        let set = get_setting(&pool, "auto_backup_dir").await.unwrap();
+        assert_eq!(set, dir.join("backups").to_string_lossy());
+        assert!(dir.join("backups").is_dir(), "каталог бэкапов не создан");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // The other half, and the reason for the marker key: clearing the folder in
+    // Settings is a deliberate "turn it off". Re-seeding it on the next launch
+    // would make the setting impossible to switch off.
+    #[tokio::test]
+    async fn a_deliberately_cleared_folder_is_not_restored() {
+        let dir = tmp_dir("cleared-backup");
+        let pool = test_pool(&dir).await;
+
+        ensure_default_backup_dir(&pool, &dir).await.unwrap();
+        set_setting(&pool, "auto_backup_dir", "").await.unwrap();
+
+        ensure_default_backup_dir(&pool, &dir).await.unwrap();
+        assert_eq!(
+            get_setting(&pool, "auto_backup_dir").await.unwrap(),
+            "",
+            "очищенная пользователем папка вернулась при следующем запуске"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

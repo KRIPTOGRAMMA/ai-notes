@@ -638,6 +638,11 @@ export const EN: Record<string, string> = {
   "Показывать подзадачи в списке задач развёрнутыми": "Show subtasks expanded in the task list",
   "Порог простоя (сек, мин. 60)": "Idle threshold (sec, at least 60)",
   "Последний бэкап: {d}": "Last backup: {d}",
+  "Авто-бэкап выключен: папка не выбрана.": "Automatic backup is off: no folder selected.",
+  "Папка выбрана, первая копия появится в течение суток.": "Folder selected; the first copy will appear within a day.",
+  "Последняя копия старше двух суток: {d}": "The last copy is more than two days old: {d}",
+  "Экспорт .md — для переноса в Obsidian, а не резервная копия: теги, связи, закрепление и даты не сохраняются. Полная копия — «Экспорт (ZIP)».":
+    "Markdown export is for moving into Obsidian, not a backup: tags, links, pinning and dates are not preserved. For a full copy use \"Export (ZIP)\".",
   "+ Правило": "+ Rule",
   "Предыдущая неделя": "Previous week",
   "Предыдущий месяц": "Previous month",

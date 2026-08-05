@@ -10,6 +10,8 @@
   import ModelDownloader from "../lib/components/ModelDownloader.svelte";
   import Icon from "../lib/components/Icon.svelte";
   import { HELP_TOPICS } from "../lib/help";
+  import { backupHealth } from "../lib/backupHealth";
+  import { localeTag } from "../lib/datetime";
   import { LANGS, SEEDED_CATEGORY_IDS, type Lang } from "../lib/i18n";
   import { i18n, t, tErr } from "../lib/i18n.svelte";
   import {
@@ -87,6 +89,7 @@
     app_limits: "",
     auto_backup_dir: "",
     auto_backup_keep: 7,
+    last_auto_backup: "",
     morning_digest_time: "",
     show_subtasks_expanded: true,
     keybinds: "",
@@ -471,7 +474,27 @@
   let backupMsg: string | null = $state(null);
   let backupNowBusy = $state(false);
   let backupNowMsg = $state("");
-  let lastBackup: string | null = $state(null);
+  // last_auto_backup is written by the backend and never sent back (see the field
+  // comment in commands/settings.rs), so it is read straight off the loaded
+  // settings rather than kept in its own state. Until v0.9.85 a `lastBackup`
+  // variable was declared here, rendered below, and assigned nowhere — the line
+  // had never once appeared.
+  // Date and time both matter here: with a 24h cycle, a bare date cannot tell
+  // "this morning" from "just before midnight yesterday". Months and weekdays go
+  // through Intl rather than the dictionary, as everywhere else in the app.
+  function fmtBackupDate(iso: string): string {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    return d.toLocaleString(localeTag(i18n.lang), { dateStyle: "medium", timeStyle: "short" });
+  }
+
+  let backupLevel = $derived(
+    backupHealth(
+      settings.auto_backup_dir ?? "",
+      settings.last_auto_backup ?? "",
+      new Date(),
+    ),
+  );
 
   async function pickBackupDir() {
     error = null;
@@ -945,8 +968,16 @@
         <span class="label">{t("Хранить копий")}</span>
         <input type="number" min="1" bind:value={settings.auto_backup_keep} />
       </label>
-      {#if lastBackup}
-        <p class="hint">{t("Последний бэкап: {d}", { d: lastBackup })}</p>
+      {#if backupLevel === "off"}
+        <p class="hint hint-warn">{t("Авто-бэкап выключен: папка не выбрана.")}</p>
+      {:else if backupLevel === "pending"}
+        <p class="hint">{t("Папка выбрана, первая копия появится в течение суток.")}</p>
+      {:else if backupLevel === "stale"}
+        <p class="hint hint-warn">
+          {t("Последняя копия старше двух суток: {d}", { d: fmtBackupDate(settings.last_auto_backup) })}
+        </p>
+      {:else}
+        <p class="hint">{t("Последний бэкап: {d}", { d: fmtBackupDate(settings.last_auto_backup) })}</p>
       {/if}
       <div class="preset-row">
         <button class="btn-sm" onclick={doBackupNow} disabled={backupNowBusy || !settings.auto_backup_dir.trim()}>
@@ -976,6 +1007,7 @@
         <span class="muted" style="font-size:12px;">{notesMdMsg}</span>
       {/if}
     </div>
+    <p class="hint">{t("Экспорт .md — для переноса в Obsidian, а не резервная копия: теги, связи, закрепление и даты не сохраняются. Полная копия — «Экспорт (ZIP)».")}</p>
     <label class="field" style="margin-top:12px;max-width:280px;">
       <span class="label">{t("Авто-очистка истории (мес., 0 — выкл)")}</span>
       <input type="number" min="0" bind:value={settings.history_cleanup_months} />
@@ -1259,6 +1291,12 @@
     font-size: 12px;
     color: var(--text-secondary);
     margin: 8px 0 0 0;
+  }
+
+  /* A hint that reports a problem rather than explaining a field: backups off,
+     or the last copy being older than two cycles. */
+  .hint-warn {
+    color: var(--danger, #d9534f);
   }
 
   /* Help */

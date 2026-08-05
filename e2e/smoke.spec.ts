@@ -2813,6 +2813,51 @@ test("авто-бэкап: секция в настройках, кнопка «
   await expect(page.getByText("Бэкап сохранён")).toBeVisible();
 });
 
+// v0.9.85: состояние бэкапа наконец видно. До этой версии в Settings.svelte была
+// переменная lastBackup, которая рисовалась в разметке и НИГДЕ не присваивалась,
+// а last_auto_backup не доходил до фронтенда вообще — пользователь не мог
+// отличить «бэкапы идут» от «папка не выбрана».
+test("настройки: состояние авто-бэкапа видно и различает выключен/свежий/устаревший", async ({ page }) => {
+  const hoursAgo = (h: number) => new Date(Date.now() - h * 3600_000).toISOString();
+
+  await withMock(page);
+  await page.goto("/");
+
+  // Хранилище правится ПОСЛЕ первой загрузки и подхватывается перезагрузкой —
+  // тот же приём, что у соседнего теста про «Сделать сейчас». Через seedDb здесь
+  // нельзя: его init-скрипт должен выполниться раньше мока, а мок читает
+  // __mock_db один раз при инициализации, и в обратном порядке приложение вообще
+  // не поднимается.
+  const showState = async (dir: string, last: string) => {
+    await page.evaluate(([d, l]) => {
+      const db = JSON.parse(localStorage.getItem("__mock_db")!);
+      db.settings.auto_backup_dir = d;
+      db.settings.last_auto_backup = l;
+      localStorage.setItem("__mock_db", JSON.stringify(db));
+    }, [dir, last]);
+    await page.reload();
+    await page.getByRole("button", { name: "Настройки" }).click();
+    await page.locator(".settings-tab", { hasText: "Данные" }).click();
+  };
+
+  // Ровно то состояние, в котором была живая БД пользователя.
+  await showState("", "");
+  await expect(page.getByText("Авто-бэкап выключен: папка не выбрана.")).toBeVisible();
+
+  // Папка есть, копий ещё не было — это ожидание, а не ошибка.
+  await showState("/tmp/mock-backups", "");
+  await expect(page.getByText("Папка выбрана, первая копия появится в течение суток.")).toBeVisible();
+
+  // Свежая копия: дата показана, предупреждения нет.
+  await showState("/tmp/mock-backups", hoursAgo(2));
+  await expect(page.locator(".hint", { hasText: "Последний бэкап:" })).toBeVisible();
+  await expect(page.locator(".hint-warn")).toHaveCount(0);
+
+  // Двое суток без копии — предупреждение.
+  await showState("/tmp/mock-backups", hoursAgo(72));
+  await expect(page.locator(".hint-warn", { hasText: "старше двух суток" })).toBeVisible();
+});
+
 test("рутины: создание, блок в неделе, выключение", async ({ page }) => {
   await withMock(page);
   await page.goto("/");
