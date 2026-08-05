@@ -109,4 +109,61 @@ mod tests {
         drop(pool);
         cleanup(&path);
     }
+
+    // Three migrations (0017, 0031 x2) rely on ON DELETE CASCADE, and that
+    // cascade only runs when SQLite's foreign key enforcement is on. Nothing in
+    // this file turns it on: it is on because sqlx sets `PRAGMA foreign_keys` in
+    // its default connect options, while raw SQLite defaults it to OFF.
+    //
+    // So an inherited library default is load-bearing for data integrity. A sqlx
+    // upgrade that changed it would not break the build and would not fail any
+    // other test — it would silently start leaving orphaned rows behind on every
+    // delete. This asserts the assumption directly, then proves the consequence
+    // that actually matters.
+    //
+    // The version that added this test was originally written to fix "orphaned
+    // dependencies on purge", on the strength of a sqlite3-CLI experiment showing
+    // the pragma off. The CLI has its own default; it was never measuring this
+    // connection. Hence: assert the pragma where the app opens its pool.
+    #[tokio::test]
+    async fn foreign_keys_are_enforced_so_cascades_actually_fire() {
+        let (url, path) = temp_db_url();
+        let pool = init_db(&url).await.unwrap();
+
+        let fk: i64 = sqlx::query_scalar("PRAGMA foreign_keys")
+            .fetch_one(&pool).await.unwrap();
+        assert_eq!(
+            fk, 1,
+            "PRAGMA foreign_keys выключен — ON DELETE CASCADE в 0017 и 0031 \
+             перестанет срабатывать, и удаление начнёт молча оставлять сироты"
+        );
+
+        let blocked = uuid::Uuid::new_v4().to_string();
+        let blocker = uuid::Uuid::new_v4().to_string();
+        for id in [&blocked, &blocker] {
+            sqlx::query("INSERT INTO tasks (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)")
+                .bind(id)
+                .bind("живая")
+                .bind("2026-08-05T10:00:00+00:00")
+                .bind("2026-08-05T10:00:00+00:00")
+                .execute(&pool).await.unwrap();
+        }
+        sqlx::query(
+            "INSERT INTO task_dependencies (task_id, blocker_id, created_at) VALUES (?, ?, ?)"
+        )
+        .bind(&blocked).bind(&blocker).bind("2026-08-05T10:00:00+00:00")
+        .execute(&pool).await.unwrap();
+
+        // A bare DELETE, without the manual cleanup purge_deleted_task_impl does
+        // — this measures the schema, not the command.
+        sqlx::query("DELETE FROM tasks WHERE id = ?")
+            .bind(&blocker).execute(&pool).await.unwrap();
+
+        let left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM task_dependencies")
+            .fetch_one(&pool).await.unwrap();
+        assert_eq!(left, 0, "каскад из 0031 не сработал: связь пережила удаление блокера");
+
+        drop(pool);
+        cleanup(&path);
+    }
 }

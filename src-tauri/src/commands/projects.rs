@@ -297,7 +297,12 @@ pub async fn delete_project(pool: State<'_, SqlitePool>, id: String) -> AppResul
 }
 
 pub async fn delete_project_impl(pool: &SqlitePool, id: String) -> AppResult<()> {
-    // Tasks and notes are not deleted, only unlinked (FKs are not enforced)
+    // Tasks and notes are not deleted, only unlinked. This is manual because
+    // tasks.project_id and notes.project_id have no foreign key at all (added as
+    // bare columns in 0011), not because FKs go unenforced — they are enforced,
+    // see db/sqlite.rs::foreign_keys_are_enforced_so_cascades_actually_fire.
+    // Unlinking rather than cascading is the intent regardless: deleting a
+    // project must not take its tasks with it.
     sqlx::query("UPDATE tasks SET project_id = NULL WHERE project_id = ?")
         .bind(&id).execute(pool).await?;
     sqlx::query("UPDATE notes SET project_id = NULL WHERE project_id = ?")

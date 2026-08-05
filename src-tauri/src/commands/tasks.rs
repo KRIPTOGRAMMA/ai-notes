@@ -163,21 +163,46 @@ pub async fn purge_deleted_task(pool: State<'_, SqlitePool>, id: String) -> AppR
 
 // Real removal of a row from the Trash — the same cleanup of subtasks and note
 // links that delete_task_impl used to do back when deletion was hard.
+//
+// The task_dependencies delete is redundant today and kept deliberately.
+// Migration 0031 declares ON DELETE CASCADE and that cascade really does fire —
+// but only because sqlx enables `PRAGMA foreign_keys` by default in its own
+// connect options; db/sqlite.rs never asks for it, and raw SQLite defaults it to
+// OFF. Deleting the rows here means a change in that library default cannot
+// quietly start orphaning dependencies. db/sqlite.rs::foreign_keys_are_enforced
+// guards the assumption itself.
+//
+// Both columns are cleared: a purged task can be the blocked side of one link
+// and the blocker of another.
+//
+// Wrapped in a transaction so the row and everything hanging off it disappear
+// together — a failure between the statements would otherwise leave a task's
+// subtasks behind (those have no FK at all, so nothing else would clean them).
 pub async fn purge_deleted_task_impl(pool: &SqlitePool, id: String) -> AppResult<()> {
+  let mut tx = pool.begin().await?;
+
   sqlx::query("DELETE FROM subtasks WHERE task_id = ?")
     .bind(&id)
-    .execute(pool)
+    .execute(&mut *tx)
+    .await?;
+
+  sqlx::query("DELETE FROM task_dependencies WHERE task_id = ? OR blocker_id = ?")
+    .bind(&id)
+    .bind(&id)
+    .execute(&mut *tx)
     .await?;
 
   sqlx::query("UPDATE notes SET linked_task_id = NULL WHERE linked_task_id = ?")
     .bind(&id)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
 
   sqlx::query("DELETE FROM tasks WHERE id = ?")
-    .bind(id)
-    .execute(pool)
+    .bind(&id)
+    .execute(&mut *tx)
     .await?;
+
+  tx.commit().await?;
 
   Ok(())
 }
@@ -862,6 +887,51 @@ mod tests {
         let notes = get_notes_impl(&pool).await.unwrap();
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].linked_task_id, None);
+    }
+
+    // Regression, v0.9.81: purging a task used to leave its dependency rows
+    // behind forever. Migration 0031 declares ON DELETE CASCADE, but SQLite
+    // leaves foreign key enforcement OFF unless asked and nothing in the app
+    // asks, so the schema never cleaned up and neither did the code.
+    //
+    // The purged task is deliberately on both sides of a link — blocked by one
+    // task, blocking another — because the delete has to clear task_id and
+    // blocker_id, and a one-sided fix would still pass a one-sided test.
+    #[tokio::test]
+    async fn purge_removes_dependencies_on_both_sides() {
+        use crate::commands::dependencies::add_task_dependency_impl;
+        let pool = test_pool().await;
+        let blocker = create_task_impl(&pool, new_task("блокер")).await.unwrap();
+        let middle = create_task_impl(&pool, new_task("в корзину")).await.unwrap();
+        let blocked = create_task_impl(&pool, new_task("ждёт середину")).await.unwrap();
+
+        // blocker -> middle -> blocked
+        add_task_dependency_impl(&pool, &middle.id, &blocker.id).await.unwrap();
+        add_task_dependency_impl(&pool, &blocked.id, &middle.id).await.unwrap();
+
+        delete_task_impl(&pool, middle.id.clone()).await.unwrap();
+        purge_deleted_task_impl(&pool, middle.id.clone()).await.unwrap();
+
+        let orphans: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM task_dependencies WHERE task_id = ? OR blocker_id = ?",
+        )
+        .bind(&middle.id)
+        .bind(&middle.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(orphans, 0, "dependency rows survived the purge of their task");
+
+        // The untouched pair must stay: the cleanup is scoped to the purged id,
+        // not a blunt sweep of the table.
+        let other = create_task_impl(&pool, new_task("посторонняя")).await.unwrap();
+        add_task_dependency_impl(&pool, &other.id, &blocker.id).await.unwrap();
+        purge_deleted_task_impl(&pool, blocked.id.clone()).await.unwrap();
+        let survivors: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM task_dependencies")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(survivors, 1, "the purge deleted links belonging to other tasks");
     }
 
     #[tokio::test]
