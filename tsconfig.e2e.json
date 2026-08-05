@@ -1,0 +1,15 @@
+{
+  // Type checking for the e2e layer, which the main tsconfig.json does not cover.
+  //
+  // tsconfig.json has "include": ["src/**/*"], so e2e/smoke.spec.ts — 164 tests
+  // and the whole safety net of this project — was never type-checked. It was
+  // already clean when this file was added; nothing enforced that it stayed so.
+  // Until then a type error there surfaced only as a Playwright failure minutes
+  // later, or not at all behind one of the `as any` casts in the spec.
+  //
+  // A separate file rather than widening the main include: `npm run check` runs
+  // svelte-check, which would then apply Svelte-specific rules to a Playwright
+  // spec. Plain `tsc` is the right tool for this half.
+  "extends": "./tsconfig.json",
+  "include": ["e2e/**/*.ts"]
+}
