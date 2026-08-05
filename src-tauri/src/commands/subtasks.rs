@@ -3,9 +3,10 @@ use sqlx::SqlitePool;
 use uuid::Uuid;
 use chrono::Utc;
 use crate::core::task::{Subtask, Task};
+use crate::error::{AppError, AppResult};
 
 // Fills subtasks into already-loaded tasks with a single query.
-pub async fn attach_subtasks(pool: &SqlitePool, tasks: &mut [Task]) -> Result<(), String> {
+pub async fn attach_subtasks(pool: &SqlitePool, tasks: &mut [Task]) -> AppResult<()> {
     if tasks.is_empty() {
         return Ok(());
     }
@@ -13,8 +14,7 @@ pub async fn attach_subtasks(pool: &SqlitePool, tasks: &mut [Task]) -> Result<()
         "SELECT id, task_id, title, done, position FROM subtasks ORDER BY position, created_at"
     )
     .fetch_all(pool)
-    .await
-    .map_err(|e| e.to_string())?;
+    .await?;
 
     for task in tasks.iter_mut() {
         task.subtasks = all.iter().filter(|s| s.task_id == task.id).cloned().collect();
@@ -23,11 +23,11 @@ pub async fn attach_subtasks(pool: &SqlitePool, tasks: &mut [Task]) -> Result<()
 }
 
 #[tauri::command]
-pub async fn get_subtasks(pool: State<'_, SqlitePool>, task_id: String) -> Result<Vec<Subtask>, String> {
+pub async fn get_subtasks(pool: State<'_, SqlitePool>, task_id: String) -> AppResult<Vec<Subtask>> {
     get_subtasks_impl(pool.inner(), &task_id).await
 }
 
-pub async fn get_subtasks_impl(pool: &SqlitePool, task_id: &str) -> Result<Vec<Subtask>, String> {
+pub async fn get_subtasks_impl(pool: &SqlitePool, task_id: &str) -> AppResult<Vec<Subtask>> {
     sqlx::query_as::<_, Subtask>(
         "SELECT id, task_id, title, done, position FROM subtasks
          WHERE task_id = ? ORDER BY position, created_at"
@@ -35,26 +35,25 @@ pub async fn get_subtasks_impl(pool: &SqlitePool, task_id: &str) -> Result<Vec<S
     .bind(task_id)
     .fetch_all(pool)
     .await
-    .map_err(|e| e.to_string())
+    .map_err(AppError::from)
 }
 
 #[tauri::command]
-pub async fn add_subtask(pool: State<'_, SqlitePool>, task_id: String, title: String) -> Result<Subtask, String> {
+pub async fn add_subtask(pool: State<'_, SqlitePool>, task_id: String, title: String) -> AppResult<Subtask> {
     add_subtask_impl(pool.inner(), &task_id, &title).await
 }
 
-pub async fn add_subtask_impl(pool: &SqlitePool, task_id: &str, title: &str) -> Result<Subtask, String> {
+pub async fn add_subtask_impl(pool: &SqlitePool, task_id: &str, title: &str) -> AppResult<Subtask> {
     let title = title.trim();
     if title.is_empty() {
-        return Err("Пустая подзадача".into());
+        return Err(AppError::Other("Пустая подзадача".into()));
     }
     let id = Uuid::new_v4().to_string();
     // position = the end of the list
     let next_pos: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(position) + 1, 0) FROM subtasks WHERE task_id = ?")
         .bind(task_id)
         .fetch_one(pool)
-        .await
-        .map_err(|e| e.to_string())?;
+        .await?;
 
     sqlx::query(
         "INSERT INTO subtasks (id, task_id, title, done, position, created_at)
@@ -66,58 +65,54 @@ pub async fn add_subtask_impl(pool: &SqlitePool, task_id: &str, title: &str) -> 
     .bind(next_pos)
     .bind(Utc::now().to_rfc3339())
     .execute(pool)
-    .await
-    .map_err(|e| e.to_string())?;
+    .await?;
 
     Ok(Subtask { id, task_id: task_id.to_string(), title: title.to_string(), done: false, position: next_pos })
 }
 
 #[tauri::command]
-pub async fn toggle_subtask(pool: State<'_, SqlitePool>, id: String) -> Result<(), String> {
+pub async fn toggle_subtask(pool: State<'_, SqlitePool>, id: String) -> AppResult<()> {
     toggle_subtask_impl(pool.inner(), &id).await
 }
 
-pub async fn toggle_subtask_impl(pool: &SqlitePool, id: &str) -> Result<(), String> {
+pub async fn toggle_subtask_impl(pool: &SqlitePool, id: &str) -> AppResult<()> {
     sqlx::query("UPDATE subtasks SET done = 1 - done WHERE id = ?")
         .bind(id)
         .execute(pool)
-        .await
-        .map_err(|e| e.to_string())?;
+        .await?;
     Ok(())
 }
 
 // Inline title editing in the modal's checklist: an empty title is an error
 // rather than a silent deletion — deleting is an explicit operation.
 #[tauri::command]
-pub async fn rename_subtask(pool: State<'_, SqlitePool>, id: String, title: String) -> Result<(), String> {
+pub async fn rename_subtask(pool: State<'_, SqlitePool>, id: String, title: String) -> AppResult<()> {
     rename_subtask_impl(pool.inner(), &id, &title).await
 }
 
-pub async fn rename_subtask_impl(pool: &SqlitePool, id: &str, title: &str) -> Result<(), String> {
+pub async fn rename_subtask_impl(pool: &SqlitePool, id: &str, title: &str) -> AppResult<()> {
     let title = title.trim();
     if title.is_empty() {
-        return Err("Пустая подзадача".into());
+        return Err(AppError::Other("Пустая подзадача".into()));
     }
     sqlx::query("UPDATE subtasks SET title = ? WHERE id = ?")
         .bind(title)
         .bind(id)
         .execute(pool)
-        .await
-        .map_err(|e| e.to_string())?;
+        .await?;
     Ok(())
 }
 
 #[tauri::command]
-pub async fn delete_subtask(pool: State<'_, SqlitePool>, id: String) -> Result<(), String> {
+pub async fn delete_subtask(pool: State<'_, SqlitePool>, id: String) -> AppResult<()> {
     delete_subtask_impl(pool.inner(), &id).await
 }
 
-pub async fn delete_subtask_impl(pool: &SqlitePool, id: &str) -> Result<(), String> {
+pub async fn delete_subtask_impl(pool: &SqlitePool, id: &str) -> AppResult<()> {
     sqlx::query("DELETE FROM subtasks WHERE id = ?")
         .bind(id)
         .execute(pool)
-        .await
-        .map_err(|e| e.to_string())?;
+        .await?;
     Ok(())
 }
 
@@ -177,5 +172,48 @@ mod tests {
         let b = add_subtask_impl(&pool, "t", "2").await.unwrap();
         assert_eq!(a.position, 0);
         assert_eq!(b.position, 1);
+    }
+
+    // The point of the AppError migration (v0.9.83), asserted rather than assumed.
+    //
+    // These commands used to return Result<_, String> built by
+    // `.map_err(|e| e.to_string())`, so a database failure reached the frontend
+    // as bare sqlx text with no prefix. errorText.ts translates by matching a
+    // closed set of prefixes and returns anything else untouched, so those
+    // messages silently skipped localization — add_subtask is the most frequent
+    // command that was affected.
+    //
+    // Dropping the table is the cheapest real sqlx failure; the assertion is
+    // about the prefix, not about that particular SQL error.
+    #[tokio::test]
+    async fn db_failure_carries_the_translatable_prefix() {
+        let pool = test_pool().await;
+        sqlx::query("DROP TABLE subtasks").execute(&pool).await.unwrap();
+
+        let err = add_subtask_impl(&pool, "task-1", "заголовок").await.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.starts_with("Ошибка базы данных: "),
+            "ошибка БД пришла без префикса, errorText.ts её не переведёт: {msg}"
+        );
+
+        // The same for a read, which returns the error as a tail expression
+        // (map_err(AppError::from)) rather than through `?` — a different path
+        // through the same conversion.
+        let err = get_subtasks_impl(&pool, "task-1").await.unwrap_err();
+        assert!(
+            err.to_string().starts_with("Ошибка базы данных: "),
+            "чтение подзадач вернуло ошибку без префикса: {err}"
+        );
+    }
+
+    // Domain messages must stay verbatim: errorText.ts splits on a known prefix,
+    // and "Пустая подзадача" is not one — gluing a technical prefix onto it would
+    // both mistranslate it and change what the user reads.
+    #[tokio::test]
+    async fn domain_error_stays_verbatim() {
+        let pool = test_pool().await;
+        let err = add_subtask_impl(&pool, "task-1", "   ").await.unwrap_err();
+        assert_eq!(err.to_string(), "Пустая подзадача");
     }
 }

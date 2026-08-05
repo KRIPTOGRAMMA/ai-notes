@@ -11,6 +11,7 @@
 use tauri::State;
 use sqlx::SqlitePool;
 use crate::core::task::{Blocker, Task};
+use crate::error::{AppError, AppResult};
 
 /// A blocker is a task that is neither closed nor in the Trash. One condition
 /// shared by both places that ask the question: the task list and the check on
@@ -19,7 +20,7 @@ const OPEN_BLOCKER: &str = "b.completed_at IS NULL AND b.hidden = 0 AND b.delete
 
 /// Fills in `blocked_by` for a batch of tasks with a single query (the same
 /// trick as attach_subtasks): otherwise a list of N tasks would cost N queries.
-pub async fn attach_blockers(pool: &SqlitePool, tasks: &mut [Task]) -> Result<(), String> {
+pub async fn attach_blockers(pool: &SqlitePool, tasks: &mut [Task]) -> AppResult<()> {
   if tasks.is_empty() {
     return Ok(());
   }
@@ -31,8 +32,7 @@ pub async fn attach_blockers(pool: &SqlitePool, tasks: &mut [Task]) -> Result<()
      ORDER BY b.title"
   ))
   .fetch_all(pool)
-  .await
-  .map_err(|e| e.to_string())?;
+  .await?;
 
   for task in tasks.iter_mut() {
     task.blocked_by = rows
@@ -46,7 +46,7 @@ pub async fn attach_blockers(pool: &SqlitePool, tasks: &mut [Task]) -> Result<()
 
 /// The open blockers of a single task. Used by complete_task to forbid
 /// completion, and by the frontend after individual changes.
-pub async fn blockers_of(pool: &SqlitePool, task_id: &str) -> Result<Vec<Blocker>, String> {
+pub async fn blockers_of(pool: &SqlitePool, task_id: &str) -> AppResult<Vec<Blocker>> {
   sqlx::query_as::<_, Blocker>(&format!(
     "SELECT b.id, b.title
      FROM task_dependencies d
@@ -57,14 +57,14 @@ pub async fn blockers_of(pool: &SqlitePool, task_id: &str) -> Result<Vec<Blocker
   .bind(task_id)
   .fetch_all(pool)
   .await
-  .map_err(|e| e.to_string())
+  .map_err(AppError::from)
 }
 
 #[tauri::command]
 pub async fn get_task_blockers(
   pool: State<'_, SqlitePool>,
   task_id: String,
-) -> Result<Vec<Blocker>, String> {
+) -> AppResult<Vec<Blocker>> {
   blockers_of(pool.inner(), &task_id).await
 }
 
@@ -73,7 +73,7 @@ pub async fn add_task_dependency(
   pool: State<'_, SqlitePool>,
   task_id: String,
   blocker_id: String,
-) -> Result<(), String> {
+) -> AppResult<()> {
   add_task_dependency_impl(pool.inner(), &task_id, &blocker_id).await
 }
 
@@ -81,15 +81,15 @@ pub async fn add_task_dependency_impl(
   pool: &SqlitePool,
   task_id: &str,
   blocker_id: &str,
-) -> Result<(), String> {
+) -> AppResult<()> {
   if task_id == blocker_id {
-    return Err("Задача не может блокировать саму себя".into());
+    return Err(AppError::Other("Задача не может блокировать саму себя".into()));
   }
   // A cycle (A waits for B, B waits for A) would block both tasks forever:
   // neither can be completed, so neither can unblock the other. Checked before
   // writing.
   if depends_on(pool, blocker_id, task_id).await? {
-    return Err("Циклическая зависимость: эта задача уже блокирует выбранную".into());
+    return Err(AppError::Other("Циклическая зависимость: эта задача уже блокирует выбранную".into()));
   }
   sqlx::query(
     "INSERT OR IGNORE INTO task_dependencies (task_id, blocker_id, created_at) VALUES (?, ?, ?)"
@@ -98,8 +98,7 @@ pub async fn add_task_dependency_impl(
   .bind(blocker_id)
   .bind(chrono::Utc::now().to_rfc3339())
   .execute(pool)
-  .await
-  .map_err(|e| e.to_string())?;
+  .await?;
   Ok(())
 }
 
@@ -108,7 +107,7 @@ pub async fn add_task_dependency_impl(
 /// cycle too (A->B->C->A). Deleted blockers are deliberately NOT filtered out
 /// here: a link to a task in the Trash is alive and returns on restore, so a
 /// cycle through it is the same cycle, merely deferred.
-async fn depends_on(pool: &SqlitePool, from: &str, to: &str) -> Result<bool, String> {
+async fn depends_on(pool: &SqlitePool, from: &str, to: &str) -> AppResult<bool> {
   let mut seen = std::collections::HashSet::new();
   let mut queue = vec![from.to_string()];
   while let Some(current) = queue.pop() {
@@ -120,8 +119,7 @@ async fn depends_on(pool: &SqlitePool, from: &str, to: &str) -> Result<bool, Str
     )
     .bind(&current)
     .fetch_all(pool)
-    .await
-    .map_err(|e| e.to_string())?;
+    .await?;
 
     for b in blockers {
       if b == to {
@@ -138,7 +136,7 @@ pub async fn remove_task_dependency(
   pool: State<'_, SqlitePool>,
   task_id: String,
   blocker_id: String,
-) -> Result<(), String> {
+) -> AppResult<()> {
   remove_task_dependency_impl(pool.inner(), &task_id, &blocker_id).await
 }
 
@@ -146,13 +144,12 @@ pub async fn remove_task_dependency_impl(
   pool: &SqlitePool,
   task_id: &str,
   blocker_id: &str,
-) -> Result<(), String> {
+) -> AppResult<()> {
   sqlx::query("DELETE FROM task_dependencies WHERE task_id = ? AND blocker_id = ?")
     .bind(task_id)
     .bind(blocker_id)
     .execute(pool)
-    .await
-    .map_err(|e| e.to_string())?;
+    .await?;
   Ok(())
 }
 
@@ -165,7 +162,7 @@ pub async fn remove_task_dependency_impl(
 /// mean touching every place a task can be closed from (the tray, the quick
 /// slot, the palette). A feed entry gives the same result where the user will
 /// actually see it, and a click opens the task.
-pub async fn notify_unblocked(pool: &SqlitePool, blocker_id: &str) -> Result<(), String> {
+pub async fn notify_unblocked(pool: &SqlitePool, blocker_id: &str) -> AppResult<()> {
   let lang = crate::i18n::current_lang(pool).await;
   for task in unblocked_by(pool, blocker_id).await? {
     let title = crate::i18n::tr("Задача разблокирована", lang);
@@ -191,7 +188,7 @@ pub async fn notify_unblocked(pool: &SqlitePool, blocker_id: &str) -> Result<(),
 
 /// Tasks that closing this one unblocks, i.e. those for which it was the last
 /// open blocker. Needed for the "ready to start" notification.
-pub async fn unblocked_by(pool: &SqlitePool, blocker_id: &str) -> Result<Vec<Blocker>, String> {
+pub async fn unblocked_by(pool: &SqlitePool, blocker_id: &str) -> AppResult<Vec<Blocker>> {
   sqlx::query_as::<_, Blocker>(&format!(
     "SELECT t.id, t.title
      FROM task_dependencies d
@@ -208,7 +205,7 @@ pub async fn unblocked_by(pool: &SqlitePool, blocker_id: &str) -> Result<Vec<Blo
   .bind(blocker_id)
   .fetch_all(pool)
   .await
-  .map_err(|e| e.to_string())
+  .map_err(AppError::from)
 }
 
 #[cfg(test)]
@@ -368,5 +365,42 @@ mod tests {
     remove_task_dependency_impl(&pool, &b, &a).await.unwrap();
     assert!(blockers_of(&pool, &b).await.unwrap().is_empty());
     complete_task_impl(&pool, b).await.unwrap();
+  }
+
+  // Counterpart of subtasks::db_failure_carries_the_translatable_prefix
+  // (v0.9.83). Before the AppError migration these commands returned
+  // Result<_, String>, so a database failure arrived as bare sqlx text and
+  // errorText.ts, which matches a closed set of prefixes, left it untranslated.
+  #[tokio::test]
+  async fn db_failure_carries_the_translatable_prefix() {
+    let pool = test_pool().await;
+    sqlx::query("DROP TABLE task_dependencies").execute(&pool).await.unwrap();
+
+    let err = blockers_of(&pool, "любой-id").await.unwrap_err();
+    assert!(
+      err.to_string().starts_with("Ошибка базы данных: "),
+      "ошибка БД пришла без префикса: {err}"
+    );
+  }
+
+  // The two domain errors of this module must reach the user exactly as written:
+  // errorText.ts only strips a known technical prefix, and these are not one.
+  // The cycle message contains ": " itself, which is precisely the case
+  // error.rs::domain_messages_carry_no_prefix protects.
+  #[tokio::test]
+  async fn domain_errors_stay_verbatim() {
+    let pool = test_pool().await;
+    let a = task(&pool, "а").await;
+    let b = task(&pool, "б").await;
+
+    let err = add_task_dependency_impl(&pool, &a, &a).await.unwrap_err();
+    assert_eq!(err.to_string(), "Задача не может блокировать саму себя");
+
+    add_task_dependency_impl(&pool, &a, &b).await.unwrap();
+    let err = add_task_dependency_impl(&pool, &b, &a).await.unwrap_err();
+    assert_eq!(
+      err.to_string(),
+      "Циклическая зависимость: эта задача уже блокирует выбранную"
+    );
   }
 }

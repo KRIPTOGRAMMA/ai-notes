@@ -934,6 +934,86 @@ mod tests {
         assert_eq!(survivors, 1, "the purge deleted links belonging to other tasks");
     }
 
+    // The task-side counterpart of notes.rs::a_trashed_note_surfaces_from_no_read_path.
+    //
+    // Tasks got their Trash earlier than notes, so their readers were written
+    // with deleted_at in mind — but there are far more of them: 22 filtered
+    // queries across 7 files, including the waybar status line, the AI planner
+    // and the dependency graph, none of which are exercised by the UI tests. A
+    // new reader over `tasks` that forgets the filter is silent everywhere else.
+    //
+    // Covers the paths a user would notice: the active list, the status line
+    // (three queries at once), planner context, and blockers. Search has its own
+    // test (soft_deleted_task_excluded_from_search) and is not repeated here.
+    #[tokio::test]
+    async fn a_trashed_task_surfaces_from_no_read_path() {
+        use crate::commands::dependencies::{add_task_dependency_impl, blockers_of};
+        use crate::commands::planner::plan_day_context;
+
+        let pool = test_pool().await;
+        let now = Utc::now();
+
+        let alive = create_task_impl(&pool, new_task("живая задача")).await.unwrap();
+        let trashed = create_task_impl(&pool, new_task("выброшенная задача")).await.unwrap();
+
+        // In progress, scheduled and due — so it would show up in every branch of
+        // the status line if the filter were missing.
+        sqlx::query(
+            "UPDATE tasks SET status = 'InProgress', scheduled_at = ?, deadline = ? WHERE id = ?"
+        )
+        .bind(now.to_rfc3339())
+        .bind((now - chrono::Duration::hours(1)).to_rfc3339())
+        .bind(&trashed.id)
+        .execute(&pool).await.unwrap();
+
+        // The trashed task blocks a live one: a blocker in the Trash must not
+        // hold anything back (v0.9.56).
+        add_task_dependency_impl(&pool, &alive.id, &trashed.id).await.unwrap();
+
+        delete_task_impl(&pool, trashed.id.clone()).await.unwrap();
+
+        let active = get_tasks_impl(&pool).await.unwrap();
+        assert_eq!(active.len(), 1, "активный список отдал задачу из Корзины");
+        assert_eq!(active[0].id, alive.id);
+
+        // The status line is read by waybar, outside the window — no UI test sees
+        // it. One call covers its scheduled / in-progress / due queries.
+        let status = crate::status::status_payload(&pool, now).await.unwrap();
+        let rendered = format!("{status:?}");
+        assert!(
+            !rendered.contains("выброшенная"),
+            "строка состояния показала задачу из Корзины: {rendered}"
+        );
+
+        // The planner feeds this text to the model: a trashed task here would be
+        // planned into the user's day.
+        // plan_day_context errors when the free window has closed (late in the
+        // day), which is about the clock, not the filter — only assert when it
+        // produced a context.
+        if let Ok(ctx) = plan_day_context(&pool, now).await {
+            assert!(
+                !ctx.prompt.contains("выброшенная"),
+                "планировщик подал задачу из Корзины в промпт модели: {}",
+                ctx.prompt
+            );
+            assert!(
+                !ctx.candidates.values().any(|t| t.contains("выброшенная")),
+                "задача из Корзины попала в кандидаты планировщика"
+            );
+        }
+
+        let blockers = blockers_of(&pool, &alive.id).await.unwrap();
+        assert!(
+            blockers.is_empty(),
+            "задача из Корзины продолжает блокировать живую: {blockers:?}"
+        );
+
+        // The Trash itself is the one place it must appear.
+        let trash = get_deleted_tasks_impl(&pool).await.unwrap();
+        assert_eq!(trash.len(), 1);
+        assert_eq!(trash[0].id, trashed.id);
+    }
+
     #[tokio::test]
     async fn soft_deleted_task_excluded_from_search() {
         let pool = test_pool().await;

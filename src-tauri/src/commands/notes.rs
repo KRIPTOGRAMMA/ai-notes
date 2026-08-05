@@ -1311,4 +1311,102 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    // A sweep over every read path a trashed note could leak through.
+    //
+    // This is the test v0.9.76 was missing. That bug was not a mistyped filter:
+    // notes.deleted_at did not exist until migration 0032, so every note query
+    // written before it simply had no filter to get wrong, and the quick slot
+    // (pinned.rs) kept serving a note out of the Trash. A shared SQL constant
+    // would not have caught it either — a query written before the column would
+    // not have used the constant.
+    //
+    // What catches that class is asking the question from outside the queries:
+    // put one note in the Trash, run every reader, and require it to appear in
+    // none of them. A new reader added without the filter fails here; so does a
+    // new column with the same story as 0032, as soon as its reader is listed.
+    //
+    // Deliberately not table-driven: each call has a different signature and
+    // return type, and spelling them out is what makes a missing entry visible.
+    #[tokio::test]
+    async fn a_trashed_note_surfaces_from_no_read_path() {
+        use crate::commands::pinned::{get_pinned_impl, set_pinned_impl};
+
+        let pool = test_pool().await;
+        let alive = create_note_impl(&pool, CreateNote {
+            title: "живая".into(),
+            content: "общее слово барсук".into(),
+            tags: vec![],
+            linked_task_id: None,
+            project_id: None,
+        }).await.unwrap();
+        let trashed = create_note_impl(&pool, CreateNote {
+            title: "выброшенная".into(),
+            content: "общее слово барсук и ссылка [[живая]]".into(),
+            tags: vec![],
+            linked_task_id: None,
+            project_id: None,
+        }).await.unwrap();
+
+        // Pinned before deletion: the slot keeps an id in settings, so it must
+        // notice the note left rather than serve a stale row.
+        set_pinned_impl(&pool, Some("note".into()), Some(trashed.id.clone()))
+            .await.unwrap();
+
+        delete_note_impl(&pool, trashed.id.clone()).await.unwrap();
+
+        let list = get_notes_impl(&pool).await.unwrap();
+        assert_eq!(list.len(), 1, "список заметок отдал удалённую");
+        assert_eq!(list[0].id, alive.id);
+
+        // Both searches go through FTS, where a soft delete is an UPDATE: the row
+        // stays in the index and only the query can exclude it.
+        let found = search_notes_impl(&pool, "барсук".into()).await.unwrap();
+        assert_eq!(found.len(), 1, "search_notes нашёл удалённую");
+        assert_eq!(found[0].id, alive.id);
+
+        let snippets = search_notes_snippet_impl(&pool, "барсук".into()).await.unwrap();
+        assert_eq!(snippets.len(), 1, "search_notes_snippet нашёл удалённую");
+
+        // The autosave race from v0.9.76: there is no standalone getter, so this
+        // goes through update_note_impl. Two queries there filter on deleted_at
+        // and only one is load-bearing — the `alive` probe before the writes
+        // (notes.rs:148). Removing the filter from the read at the tail leaves
+        // this green, because that read only shapes the return value; the writes
+        // have already been refused. Hence the content assertion below: the
+        // is_err() alone would pass on a version that writes first and reports
+        // the failure afterwards, which is the bug v0.9.76 actually had.
+        let late_save = update_note_impl(&pool, trashed.id.clone(), UpdateNote {
+            title: None,
+            content: Some("затёрто опоздавшим автосохранением".into()),
+            tags: None,
+            linked_task_id: None,
+            project_id: None,
+            pinned: None,
+            reminder_at: None,
+        }).await;
+        assert!(late_save.is_err(), "опоздавшее автосохранение записало в Корзину");
+        let still: String = sqlx::query_scalar("SELECT content FROM notes WHERE id = ?")
+            .bind(&trashed.id).fetch_one(&pool).await.unwrap();
+        assert!(
+            still.contains("барсук"),
+            "текст заметки в Корзине затёрт: {still}"
+        );
+
+        assert!(
+            get_pinned_impl(&pool).await.unwrap().is_none(),
+            "быстрый слот отдал заметку из Корзины — ровно баг v0.9.76"
+        );
+
+        // Renaming rewrites [[links]] across notes; the trashed one holds such a
+        // link and must not be counted or touched.
+        let renamed = rename_note_links_impl(&pool, "живая".into(), "переименованная".into())
+            .await.unwrap();
+        assert_eq!(renamed, 0, "переименование ссылок задело заметку из Корзины");
+
+        // The Trash itself is the one place it must appear.
+        let trash = get_deleted_notes_impl(&pool).await.unwrap();
+        assert_eq!(trash.len(), 1);
+        assert_eq!(trash[0].id, trashed.id);
+    }
 }
