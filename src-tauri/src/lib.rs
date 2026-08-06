@@ -405,6 +405,7 @@ pub fn run() {
                         commands::settings::save_settings,
                         commands::backup::export,
                         commands::backup::import,
+                        commands::backup::preview_import,
                         commands::backup::do_auto_backup,
                         commands::model::list_model_options,
                         commands::model::model_status,
@@ -605,9 +606,16 @@ pub fn run() {
                 .expect("Failed to get app data dir");
             std::fs::create_dir_all(&db_path)
                 .expect("Failed to create app data dir");
-            commands::backup::apply_pending_import(&db_path);
+            let imported = commands::backup::apply_pending_import(&db_path);
             let db_url = format!("sqlite:{}?mode=rwc", db_path.join("data.db").display());
             let pool: sqlx::SqlitePool = init_db(&db_url).await.expect("Failed to init DB");
+
+            // The imported database brings the backup clock of the copy with it,
+            // which would trigger an immediate "overdue" backup and burn a
+            // rotation slot. Must run before the backup loop starts below.
+            if imported {
+                commands::backup::note_import_as_fresh_backup(&pool).await;
+            }
 
             // Before anything else touches settings: switches automatic backups on
             // for a DB that has never been configured (v0.9.85).

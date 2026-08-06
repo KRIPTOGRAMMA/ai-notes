@@ -2780,6 +2780,93 @@ test("настройки: поиск скрывает несовпавшие с�
   await expect(page.locator(".settings section:visible .section-title")).toHaveText("Голосовой ввод");
 });
 
+// v0.9.92. Раньше confirm показывался ДО выбора файла («Импорт заменит все
+// текущие данные»), то есть подтверждали вслепую, а в диалоге выбора видно лишь
+// метку времени в имени. На живой установке это дважды за час привело к одному и
+// тому же: выбран старый снимок, созданная после него заметка молча откатилась.
+test("импорт: перед подтверждением показано содержимое копии и что будет потеряно", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+
+  await page.evaluate(() => {
+    const db = JSON.parse(localStorage.getItem("__mock_db")!);
+    db.mockDialogPath = "/tmp/backup.zip";
+    // Копия, которая старше текущей базы: ровно ситуация пользователя.
+    db.importPreview = {
+      tasks: 39, notes: 8, current_tasks: 39, current_notes: 9,
+      newest: "2026-08-06T13:43:00+00:00",
+      losing_tasks: 0, losing_notes: 1,
+    };
+    db.confirmAnswer = false; // тест только читает текст, импорт запускать не надо
+    localStorage.setItem("__mock_db", JSON.stringify(db));
+  });
+  await page.reload();
+
+  await page.getByRole("button", { name: "Настройки" }).click();
+  await page.locator(".settings-tab", { hasText: "Данные" }).click();
+
+  // Предупреждение о закрытии видно ещё до нажатия: сообщения ПОСЛЕ импорта быть
+  // не может — app.restart() не возвращается.
+  await expect(page.getByText("При импорте приложение закроется")).toBeVisible();
+
+  // Подтверждение идёт через диалог ПЛАГИНА, а не через window.confirm:
+  // браузерный confirm поверх только что закрытого файлового диалога роняет
+  // процесс на Linux/WebKitGTK (найдено на живой установке). Поэтому текст
+  // читается из мока, а не через page.on("dialog").
+  await page.getByRole("button", { name: "Импорт (ZIP)" }).click();
+  const asked = await pollConfirmText(page);
+
+  // Обе стороны и разница: «39 задач» само по себе ни о чём не говорит.
+  expect(asked).toContain("Задачи: 39 → 39");
+  expect(asked).toContain("Заметки: 9 → 8");
+  expect(asked).toContain("−1"); // заметок в копии на одну меньше
+  // Главное: чем именно рискует пользователь.
+  expect(asked).toContain("ВНИМАНИЕ");
+  expect(asked).toContain("заметок: 1");
+});
+
+async function pollConfirmText(page: import("@playwright/test").Page): Promise<string> {
+  await expect
+    .poll(async () =>
+      await page.evaluate(() => JSON.parse(localStorage.getItem("__mock_db")!).lastConfirm ?? ""),
+    )
+    .not.toBe("");
+  return await page.evaluate(
+    () => JSON.parse(localStorage.getItem("__mock_db")!).lastConfirm as string,
+  );
+}
+
+// Обратная половина: когда терять нечего, лишнего предупреждения быть не должно —
+// иначе оно станет фоновым шумом и его перестанут читать.
+test("импорт: без записей новее копии предупреждения о потере нет", async ({ page }) => {
+  await withMock(page);
+  await page.goto("/");
+
+  await page.evaluate(() => {
+    const db = JSON.parse(localStorage.getItem("__mock_db")!);
+    db.mockDialogPath = "/tmp/backup.zip";
+    db.importPreview = {
+      tasks: 5, notes: 2, current_tasks: 5, current_notes: 2,
+      newest: "2026-08-06T13:43:00+00:00",
+      losing_tasks: 0, losing_notes: 0,
+    };
+    db.confirmAnswer = false;
+    localStorage.setItem("__mock_db", JSON.stringify(db));
+  });
+  await page.reload();
+
+  await page.getByRole("button", { name: "Настройки" }).click();
+  await page.locator(".settings-tab", { hasText: "Данные" }).click();
+
+  await page.getByRole("button", { name: "Импорт (ZIP)" }).click();
+  const asked = await pollConfirmText(page);
+
+  expect(asked).toContain("Задачи: 5 → 5");
+  // Равные числа — разницы в скобках быть не должно.
+  expect(asked).not.toContain("(+");
+  expect(asked).not.toContain("ВНИМАНИЕ");
+});
+
 test("авто-бэкап: секция в настройках, кнопка «Сделать сейчас» вызывает команду", async ({ page }) => {
   await withMock(page);
   await page.goto("/");

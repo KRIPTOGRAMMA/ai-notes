@@ -1,7 +1,12 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-  import { save as saveDialog, open as openDialog } from "@tauri-apps/plugin-dialog";
+  // confirm comes from the plugin, not from the webview. The browser's confirm()
+  // is a blocking native dialog, and on Linux/WebKitGTK opening one right after
+  // the file chooser kills the process — reported from a real install: the app
+  // closed the moment a file was picked. The plugin's version goes through the
+  // same async dialog queue as open(), so the two can follow one another.
+  import { save as saveDialog, open as openDialog, confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
   import { api } from "../lib/api/tauri";
   import { categoryStore } from "../lib/stores/categories.svelte";
   import { statusStore } from "../lib/stores/statuses.svelte";
@@ -559,18 +564,64 @@
     }
   }
 
+  // The archive is inspected first and only then confirmed (v0.9.92). Until this
+  // version the confirmation came BEFORE the file was even chosen — the user
+  // agreed to "replace all current data" without knowing which copy, and the file
+  // dialog shows nothing but a timestamp in the name. Testing on a real install
+  // produced the same mistake twice within an hour: an older snapshot picked, a
+  // note created after it silently rolled back.
   async function importData() {
     backupMsg = null;
     error = null;
-    if (!confirm(t("Импорт заменит все текущие данные. Продолжить?"))) return;
     try {
       const path = await openDialog({
         multiple: false,
         filters: [{ name: "ZIP", extensions: ["zip"] }],
       });
       if (!path) return;
+
+      const p = await api.previewImport(path as string);
+      const at = p.newest ? fmtBackupDate(p.newest) : t("неизвестно");
+      const losing = p.losing_tasks + p.losing_notes;
+
+      // Both sides, so a count has something to be compared against: "39 tasks"
+      // alone says nothing about whether this copy is ahead or behind.
+      const delta = (from: number, to: number) =>
+        to === from ? "" : ` (${to > from ? "+" : "−"}${Math.abs(to - from)})`;
+
+      let question = t("Копия от {d}", { d: at }) + "\n"
+        + t("Задачи: {a} → {b}{d}", {
+            a: String(p.current_tasks), b: String(p.tasks),
+            d: delta(p.current_tasks, p.tasks),
+          }) + "\n"
+        + t("Заметки: {a} → {b}{d}", {
+            a: String(p.current_notes), b: String(p.notes),
+            d: delta(p.current_notes, p.notes),
+          });
+
+      // The line that actually stops the mistake. Everything above is context;
+      // this is the consequence.
+      if (losing > 0) {
+        question += "\n\n" + t("ВНИМАНИЕ: в текущей базе новее этой копии — задач: {t}, заметок: {n}. Они будут потеряны безвозвратно.", { t: String(p.losing_tasks), n: String(p.losing_notes) });
+      }
+      question += "\n\n" + t("Импорт заменит все текущие данные, приложение закроется. Продолжить?");
+
+      // GTK always draws a heading above the text, with or without `title` — an
+      // omitted one just becomes the app name, so it showed "ai-notes" twice.
+      // Giving it a real title is the only way to make that line useful.
+      // Button labels are explicit too: the plugin defaults to English
+      // "Ok"/"Cancel" regardless of the interface language.
+      const go = await confirmDialog(question, {
+        title: t("Импорт данных"),
+        kind: "warning",
+        okLabel: t("Импортировать"),
+        cancelLabel: t("Отмена"),
+      });
+      if (!go) return;
+      // api.importData never returns: the backend calls app.restart(), which is
+      // typed `-> !`. Nothing may be placed after it — see the note below the
+      // Import button, which is why the user is warned in the dialog instead.
       await api.importData(path as string);
-      backupMsg = t("Импорт завершён ✓ Приложение перезапускается...");
     } catch (e) {
       error = String(e);
     }
@@ -1013,6 +1064,9 @@
         <span class="muted" style="font-size:12px;">{backupMsg}</span>
       {/if}
     </div>
+    <!-- The import ends the process (app.restart), so no "done" message can ever
+         be shown after it — saying so up front is the only honest option. -->
+    <p class="hint">{t("При импорте приложение закроется — откройте его заново, данные будут заменены.")}</p>
     <div class="preset-row" style="margin-top:8px;">
       <button class="btn-sm" onclick={exportNotesMd}>{t("Экспорт заметок (.md)")}</button>
       <button class="btn-sm" onclick={importNotesMd}>{t("Импорт заметок из папки")}</button>

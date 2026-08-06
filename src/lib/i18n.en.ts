@@ -576,7 +576,18 @@ export const EN: Record<string, string> = {
   "или": "or",
   "Импорт (ZIP)": "Import (ZIP)",
   "Импорт завершён ✓ Приложение перезапускается...": "Import complete ✓ Restarting the app...",
-  "Импорт заменит все текущие данные. Продолжить?": "Import will replace all current data. Continue?",
+  "Импорт заменит все текущие данные, приложение закроется. Продолжить?":
+    "Import will replace all current data and close the app. Continue?",
+  "Копия от {d}": "Copy from {d}",
+  "Задачи: {a} → {b}{d}": "Tasks: {a} → {b}{d}",
+  "Заметки: {a} → {b}{d}": "Notes: {a} → {b}{d}",
+  "Импорт данных": "Import data",
+  "ВНИМАНИЕ: в текущей базе новее этой копии — задач: {t}, заметок: {n}. Они будут потеряны безвозвратно.":
+    "WARNING: the current database has {t} tasks and {n} notes newer than this copy. They will be lost for good.",
+  "При импорте приложение закроется — откройте его заново, данные будут заменены.":
+    "Importing closes the app — open it again afterwards; the data will have been replaced.",
+  "неизвестно": "unknown",
+  "Импортировать": "Import",
   "Импорт заметок из папки": "Import notes from a folder",
   "Импортировано заметок: {n}. Совпадения по названию создаются как отдельные заметки.": "Notes imported: {n}. Title matches are created as separate notes.",
   "Интервал логирования (сек, 10–600)": "Logging interval (sec, 10–600)",

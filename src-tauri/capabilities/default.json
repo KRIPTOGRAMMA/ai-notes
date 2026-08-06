@@ -23,6 +23,7 @@
     "core:window:allow-close",
     "dialog:allow-save",
     "dialog:allow-open",
+    "dialog:allow-confirm",
     "autostart:allow-enable",
     "autostart:allow-disable",
     "autostart:allow-is-enabled",

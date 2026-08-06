@@ -111,6 +111,117 @@ pub async fn import_impl(data_dir: &Path, path: &str) -> AppResult<()> {
     Ok(())
 }
 
+// What an archive holds, shown before the import is committed to (v0.9.92).
+//
+// Why: until now the only thing distinguishing two archives in the file dialog
+// was the timestamp in the name, and the import is irreversible. In a single
+// hour of testing the same mistake was made twice — an older snapshot picked,
+// a note created after it silently rolled back. The name says when the copy was
+// made; it does not say what is inside or what the current database would lose.
+#[derive(Debug, serde::Serialize)]
+pub struct ImportPreview {
+    pub tasks: i64,
+    pub notes: i64,
+    // The same counts for the database being replaced, so the dialog can show
+    // the difference rather than a number with nothing to compare it against.
+    pub current_tasks: i64,
+    pub current_notes: i64,
+    // How current the copy is: the latest updated_at across tasks and notes,
+    // not created_at. Editing an old note does not create a row, so created_at
+    // dates the oldest thing the copy proves rather than the newest — on the
+    // real database the two differ by two days, and "Copy from 1 Aug" for a
+    // 6 Aug snapshot is exactly the confusion this whole version exists to end.
+    // Empty when the archive holds neither tasks nor notes.
+    pub newest: String,
+    // How many rows in the LIVE database are newer than `newest` — exactly what
+    // the import would discard. Zero means nothing is at stake.
+    pub losing_tasks: i64,
+    pub losing_notes: i64,
+}
+
+#[tauri::command]
+pub async fn preview_import(
+    pool: tauri::State<'_, sqlx::SqlitePool>,
+    path: String,
+) -> AppResult<ImportPreview> {
+    // Read into memory and never touch data.db.import: merely looking at an
+    // archive must not stage half an import.
+    let mut archive = ZipArchive::new(File::open(&path)?)?;
+    let mut buf = Vec::new();
+    archive.by_name("data.db")?.read_to_end(&mut buf)?;
+
+    let tmp = std::env::temp_dir().join(format!("ai-notes-preview-{}.db", uuid::Uuid::new_v4()));
+    std::fs::write(&tmp, &buf)?;
+    let result = preview_from_file(pool.inner(), &tmp).await;
+    let _ = std::fs::remove_file(&tmp);
+    result
+}
+
+async fn preview_from_file(live: &sqlx::SqlitePool, file: &Path) -> AppResult<ImportPreview> {
+    validate_import_db(file).await?;
+
+    let url = format!("sqlite:{}?mode=ro", file.display());
+    let snap = sqlx::SqlitePool::connect(&url)
+        .await
+        .map_err(|_| AppError::Other("Файл не является базой данных AI Notes.".into()))?;
+
+    let result = (async {
+        let tasks: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tasks").fetch_one(&snap).await?;
+        let notes: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM notes").fetch_one(&snap).await?;
+        // created_at is compared as text: everything is written through
+        // to_rfc3339 with a fixed layout, so lexicographic order matches
+        // chronological order.
+        // Shown to the user: how current the copy is.
+        let newest: String = sqlx::query_scalar(
+            "SELECT COALESCE(MAX(c), '') FROM (
+                 SELECT MAX(updated_at) AS c FROM tasks
+                 UNION ALL SELECT MAX(updated_at) FROM notes)",
+        )
+        .fetch_one(&snap)
+        .await
+        .unwrap_or_default();
+
+        // The threshold for counting losses is a different question and stays on
+        // created_at: "newer than the copy" must mean rows the copy never had.
+        // Comparing updated_at instead would count an edit to an old note that
+        // the archive does contain, and the warning would cry wolf.
+        let created_cutoff: String = sqlx::query_scalar(
+            "SELECT COALESCE(MAX(c), '') FROM (
+                 SELECT MAX(created_at) AS c FROM tasks
+                 UNION ALL SELECT MAX(created_at) FROM notes)",
+        )
+        .fetch_one(&snap)
+        .await
+        .unwrap_or_default();
+
+        // The half that actually prevents the mistake: what the live database
+        // holds beyond this snapshot.
+        let (losing_tasks, losing_notes) = if created_cutoff.is_empty() {
+            (0, 0)
+        } else {
+            (
+                sqlx::query_scalar("SELECT COUNT(*) FROM tasks WHERE created_at > ?")
+                    .bind(&created_cutoff).fetch_one(live).await.unwrap_or(0),
+                sqlx::query_scalar("SELECT COUNT(*) FROM notes WHERE created_at > ?")
+                    .bind(&created_cutoff).fetch_one(live).await.unwrap_or(0),
+            )
+        };
+
+        let current_tasks: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tasks")
+            .fetch_one(live).await.unwrap_or(0);
+        let current_notes: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM notes")
+            .fetch_one(live).await.unwrap_or(0);
+
+        Ok(ImportPreview {
+            tasks, notes, current_tasks, current_notes, newest, losing_tasks, losing_notes,
+        })
+    })
+    .await;
+
+    snap.close().await;
+    result
+}
+
 // Two questions, both cheap: is this a working SQLite file at all, and is it a
 // database of *this* app. The second one is the realistic mistake — picking a
 // backup belonging to some other program.
@@ -259,7 +370,24 @@ pub async fn do_auto_backup(
         .map_err(|e| e.to_string())
 }
 
-pub fn apply_pending_import(data_dir: &std::path::Path) {
+// After an import the freshly installed database carries the last_auto_backup of
+// the copy — usually old, sometimes absent. auto_backup_due then sees a backup
+// that is more than 24h overdue and takes one within the minute (v0.9.92).
+//
+// That extra copy is not merely noise: it consumes a rotation slot, so with
+// keep = 7 a few imports in a row can push out the very archive the user is
+// trying to get back to. Observed on the real installation — the 19:08 archive
+// holding a recovered note was rotated away while we were testing.
+//
+// The clock is therefore reset to "just now": the state on disk was replaced
+// wholesale, and it came from a backup to begin with.
+pub async fn note_import_as_fresh_backup(pool: &sqlx::SqlitePool) {
+    let _ = set_setting(pool, "last_auto_backup", &chrono::Local::now().to_rfc3339()).await;
+}
+
+// Returns whether a staged import was actually applied, so the caller knows to
+// reset the backup clock.
+pub fn apply_pending_import(data_dir: &std::path::Path) -> bool {
     let staging = data_dir.join("data.db.import");
     if staging.exists() {
         let live = data_dir.join("data.db");
@@ -273,7 +401,7 @@ pub fn apply_pending_import(data_dir: &std::path::Path) {
         if live.exists() {
             let _ = std::fs::remove_file(data_dir.join("data.db.pre-import"));
             if std::fs::rename(&live, data_dir.join("data.db.pre-import")).is_err() {
-                return;
+                return false;
             }
         }
 
@@ -282,7 +410,9 @@ pub fn apply_pending_import(data_dir: &std::path::Path) {
         // imported one and silently roll the import back.
         let _ = std::fs::remove_file(data_dir.join("data.db-wal"));
         let _ = std::fs::remove_file(data_dir.join("data.db-shm"));
+        return true;
     }
+    false
 }
 
 #[cfg(test)]
@@ -304,6 +434,17 @@ mod tests {
         let pool = sqlx::SqlitePool::connect(&url).await.unwrap();
         sqlx::migrate!("./src/db/migrations").run(&pool).await.unwrap();
         pool
+    }
+
+    async fn insert_task_at(pool: &sqlx::SqlitePool, title: &str, created_at: &str) {
+        sqlx::query(
+            "INSERT INTO tasks (id, title, status, priority, category, recurrence, tags, hidden, created_at, updated_at)
+             VALUES (?, ?, 'Todo', 'Medium', 'Work', 'None', '[]', 0, ?, ?)")
+            .bind(uuid::Uuid::new_v4().to_string())
+            .bind(title)
+            .bind(created_at)
+            .bind(created_at)
+            .execute(pool).await.unwrap();
     }
 
     async fn insert_task(pool: &sqlx::SqlitePool, title: &str) {
@@ -336,7 +477,8 @@ mod tests {
         std::fs::write(dir.join("data.db"), b"old-db").unwrap();
         std::fs::write(dir.join("data.db-wal"), b"stale-wal").unwrap();
         std::fs::write(dir.join("data.db-shm"), b"stale-shm").unwrap();
-        apply_pending_import(&dir);
+        // The returned flag decides whether the backup clock is reset (v0.9.92).
+        assert!(apply_pending_import(&dir), "импорт применён, но функция сказала «нет»");
         assert!(!dir.join("data.db.import").exists());
         assert!(!dir.join("data.db-wal").exists());
         assert!(!dir.join("data.db-shm").exists());
@@ -382,6 +524,171 @@ mod tests {
         zip.start_file("data.db", SimpleFileOptions::default()).unwrap();
         zip.write_all(bytes).unwrap();
         zip.finish().unwrap();
+    }
+
+    // v0.9.92. The number that prevents the mistake is losing_*: how much of the
+    // live database is newer than the snapshot and would be discarded.
+    //
+    // This is the exact situation observed on the real installation: a note was
+    // created, then an OLDER archive was imported and the note silently
+    // disappeared — twice within an hour, because the file dialog shows nothing
+    // but a timestamp in the name.
+    #[tokio::test]
+    async fn preview_counts_what_the_import_would_discard() {
+        let dir = tmp_dir("preview");
+        let pool = test_pool(&dir).await;
+        insert_task(&pool, "старая задача").await;
+
+        // A snapshot of that state.
+        let zip_path = dir.join("snap.zip");
+        export_impl(&pool, &dir, zip_path.to_str().unwrap()).await.unwrap();
+
+        let snapshot = dir.join("snap.db");
+        {
+            let mut a = ZipArchive::new(File::open(&zip_path).unwrap()).unwrap();
+            let mut buf = Vec::new();
+            a.by_name("data.db").unwrap().read_to_end(&mut buf).unwrap();
+            std::fs::write(&snapshot, &buf).unwrap();
+        }
+
+        // Nothing newer yet: importing this loses nothing.
+        let p = preview_from_file(&pool, &snapshot).await.unwrap();
+        assert_eq!(p.tasks, 1);
+        assert_eq!(p.losing_tasks, 0, "терять нечего, а предпросмотр утверждает обратное");
+        assert!(!p.newest.is_empty(), "дата снимка не определена");
+        // v0.9.92: both sides, or "39 tasks" has nothing to be compared against.
+        assert_eq!(p.current_tasks, 1, "не отдано текущее число задач — сравнивать не с чем");
+        assert_eq!(p.current_notes, 0);
+
+        // Work done after the snapshot — precisely what the user would lose.
+        sqlx::query(
+            "INSERT INTO notes (id, title, content, tags, created_at, updated_at)
+             VALUES ('n1', 'заметка после снимка', '', '[]', '2099-01-01T00:00:00+00:00', '2099-01-01T00:00:00+00:00')")
+            .execute(&pool).await.unwrap();
+        insert_task_at(&pool, "задача после снимка", "2099-01-01T00:00:00+00:00").await;
+
+        let p = preview_from_file(&pool, &snapshot).await.unwrap();
+        assert_eq!(p.tasks, 1, "содержимое архива не должно меняться от правок живой базы");
+        assert_eq!(p.losing_notes, 1, "не посчитана заметка, которую импорт уничтожит");
+        assert_eq!(p.losing_tasks, 1, "не посчитана задача, которую импорт уничтожит");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // `newest` (shown) and the loss threshold (counted) answer different
+    // questions and must not be the same value.
+    //
+    // Found on the real installation: the dialog said "Copy from 1 Aug" for a
+    // 6 Aug snapshot, because created_at dates the newest row the copy *created*,
+    // while the notes in it had been edited two days later. So the caption moved
+    // to updated_at — and the threshold deliberately did not: counting "newer
+    // than the copy" by updated_at would flag an edit to a note the archive
+    // already contains, and a warning that cries wolf stops being read.
+    #[tokio::test]
+    async fn editing_an_old_note_is_not_counted_as_a_loss() {
+        let dir = tmp_dir("preview-edit");
+        let pool = test_pool(&dir).await;
+        sqlx::query(
+            "INSERT INTO notes (id, title, content, tags, created_at, updated_at)
+             VALUES ('n1', 'старая', '', '[]', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')")
+            .execute(&pool).await.unwrap();
+
+        let zip_path = dir.join("snap.zip");
+        export_impl(&pool, &dir, zip_path.to_str().unwrap()).await.unwrap();
+        let snapshot = dir.join("snap.db");
+        {
+            let mut a = ZipArchive::new(File::open(&zip_path).unwrap()).unwrap();
+            let mut buf = Vec::new();
+            a.by_name("data.db").unwrap().read_to_end(&mut buf).unwrap();
+            std::fs::write(&snapshot, &buf).unwrap();
+        }
+
+        // The note is edited after the snapshot: nothing new was created, so
+        // nothing would be lost that the archive does not already hold.
+        sqlx::query("UPDATE notes SET content = 'правка', updated_at = '2099-01-01T00:00:00+00:00' WHERE id = 'n1'")
+            .execute(&pool).await.unwrap();
+
+        let p = preview_from_file(&pool, &snapshot).await.unwrap();
+        assert_eq!(
+            p.losing_notes, 0,
+            "правка существующей заметки засчитана как потеря — предупреждение станет ложным"
+        );
+        // And the caption dates the copy by its last edit, not by its last
+        // creation: both rows here were written at the same instant.
+        assert_eq!(p.newest, "2026-01-01T00:00:00+00:00");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // v0.9.92. Reported from the real installation: every import was followed by
+    // an extra backup a minute later. The imported database carries the
+    // last_auto_backup of the copy, so auto_backup_due sees a run that is more
+    // than 24h overdue. That copy is not just noise — it eats a rotation slot,
+    // and with keep = 7 a few imports can push out the very archive being
+    // restored (which is what happened to the 19:08 one during testing).
+    #[tokio::test]
+    async fn an_imported_db_does_not_trigger_an_immediate_backup() {
+        let dir = tmp_dir("import-clock");
+        let backup_dir = dir.join("backups");
+        std::fs::create_dir_all(&backup_dir).unwrap();
+        let pool = test_pool(&dir).await;
+        set_setting(&pool, "auto_backup_dir", backup_dir.to_str().unwrap()).await.unwrap();
+
+        // Exactly what an imported database looks like: a stale clock.
+        let old = (Utc::now() - chrono::Duration::days(30)).to_rfc3339();
+        set_setting(&pool, "last_auto_backup", &old).await.unwrap();
+        assert!(auto_backup_due(&pool).await, "подготовка теста не сработала");
+
+        note_import_as_fresh_backup(&pool).await;
+        assert!(
+            !auto_backup_due(&pool).await,
+            "сразу после импорта снимается лишняя копия — она вытесняет из ротации тот самый архив, к которому возвращались"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // Looking at an archive must not stage anything: until the user confirms,
+    // data.db.import has no business existing.
+    #[tokio::test]
+    async fn preview_does_not_stage_an_import() {
+        let dir = tmp_dir("preview-nostage");
+        let pool = test_pool(&dir).await;
+        insert_task(&pool, "задача").await;
+        let zip_path = dir.join("snap.zip");
+        export_impl(&pool, &dir, zip_path.to_str().unwrap()).await.unwrap();
+
+        let snapshot = dir.join("snap.db");
+        {
+            let mut a = ZipArchive::new(File::open(&zip_path).unwrap()).unwrap();
+            let mut buf = Vec::new();
+            a.by_name("data.db").unwrap().read_to_end(&mut buf).unwrap();
+            std::fs::write(&snapshot, &buf).unwrap();
+        }
+        preview_from_file(&pool, &snapshot).await.unwrap();
+
+        assert!(
+            !dir.join("data.db.import").exists(),
+            "предпросмотр создал staging — следующий запуск затрёт базу без подтверждения"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // A foreign or corrupt archive must be refused at preview time too, or the
+    // dialog would show zeros and look like an empty but valid backup.
+    #[tokio::test]
+    async fn preview_refuses_a_foreign_database() {
+        let dir = tmp_dir("preview-foreign");
+        let pool = test_pool(&dir).await;
+
+        let foreign = dir.join("foreign.db");
+        let fp = sqlx::SqlitePool::connect(&format!("sqlite:{}?mode=rwc", foreign.display()))
+            .await.unwrap();
+        sqlx::query("CREATE TABLE bookmarks (id INTEGER PRIMARY KEY)").execute(&fp).await.unwrap();
+        fp.close().await;
+
+        assert!(preview_from_file(&pool, &foreign).await.is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     // v0.9.87. The zip is well-formed and has a data.db entry, so every check
@@ -470,7 +777,7 @@ mod tests {
     fn apply_pending_import_is_noop_without_staging() {
         let dir = tmp_dir("noop");
         std::fs::write(dir.join("data.db"), b"current").unwrap();
-        apply_pending_import(&dir);
+        assert!(!apply_pending_import(&dir), "импорта не было, а функция сказала «да»");
         assert_eq!(std::fs::read(dir.join("data.db")).unwrap(), b"current");
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -662,3 +969,4 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+

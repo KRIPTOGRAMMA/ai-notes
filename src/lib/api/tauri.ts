@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Task, Subtask, Blocker, CreateTaskPayload, UpdateTaskPayload, Note, CreateNotePayload, UpdateNotePayload, AppSettings, Project, UpdateProjectPayload, CategoryInfo, StatusInfo, NoteSnippet, TaskSnippet, GoalSnapshot, Routine, RoutineBlock, ActiveSession, NoteRevision, ChecklistTemplate, DayCompletion, ModelOption, ModelKind, SmartList, SmartListFilter, NotificationEntry, QuickMode, BlockIdle, PinnedItem, GlobalAction } from "../types";
+import type { Task, Subtask, Blocker, CreateTaskPayload, UpdateTaskPayload, Note, CreateNotePayload, UpdateNotePayload, AppSettings, Project, UpdateProjectPayload, CategoryInfo, StatusInfo, NoteSnippet, TaskSnippet, GoalSnapshot, Routine, RoutineBlock, ActiveSession, NoteRevision, ChecklistTemplate, DayCompletion, ModelOption, ModelKind, SmartList, SmartListFilter, NotificationEntry, QuickMode, BlockIdle, PinnedItem, GlobalAction, ImportPreview } from "../types";
 
 export const api = {
   getTasks: () => invoke<Task[]>("get_tasks"),
@@ -123,6 +123,7 @@ export const api = {
   getWindowTracking: () => invoke<string | null>("get_window_tracking"),
   exportData: (path: string) => invoke<void>("export", { path }),
   importData: (path: string) => invoke<void>("import", { path }),
+  previewImport: (path: string) => invoke<ImportPreview>("preview_import", { path }),
   doAutoBackup: () => invoke<string>("do_auto_backup"),
   getSubtasks: (taskId: string) => invoke<Subtask[]>("get_subtasks", { taskId }),
   addSubtask: (taskId: string, title: string) => invoke<Subtask>("add_subtask", { taskId, title }),

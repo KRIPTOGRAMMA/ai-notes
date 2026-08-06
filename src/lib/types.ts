@@ -354,3 +354,19 @@ export interface BlockIdle {
   idle_mins: number;
   active_mins: number;
 }
+
+// What a backup archive holds, read before the import is confirmed (v0.9.92).
+// The file dialog shows only a timestamp in the name, and the import is
+// irreversible — losing_* is the number that actually stops a mistake: how much
+// of the CURRENT database is newer than the snapshot and would be discarded.
+export interface ImportPreview {
+  tasks: number;
+  notes: number;
+  // The same counts for the database being replaced — the dialog shows the
+  // difference, not a bare number.
+  current_tasks: number;
+  current_notes: number;
+  newest: string;        // RFC3339 of the newest row in the archive; empty if it has none
+  losing_tasks: number;
+  losing_notes: number;
+}

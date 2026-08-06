@@ -813,6 +813,13 @@
     },
     export: () => {},
     import: () => {},
+    // Значения берутся из db.importPreview, чтобы тест мог задать любой сценарий
+    // (в т.ч. «в базе есть записи новее копии»). По умолчанию терять нечего.
+    preview_import: () => db.importPreview ?? {
+      tasks: 3, notes: 2, current_tasks: 3, current_notes: 2,
+      newest: "2026-07-17T16:00:00+00:00",
+      losing_tasks: 0, losing_notes: 0,
+    },
     do_auto_backup: () => "ai-notes-backup-2026-07-17-1600.zip",
 
     // --- трекинг ---
@@ -974,6 +981,15 @@
     "plugin:autostart|is_enabled": () => false,
     "plugin:dialog|save": () => db.mockDialogPath ?? null,
     "plugin:dialog|open": () => db.mockDialogPath ?? null,
+    // confirm() плагина реализован поверх команды message и возвращает подпись
+    // нажатой кнопки. Текст запоминается — тесты про импорт проверяют именно его,
+    // а браузерный window.confirm тут не срабатывает (v0.9.92).
+    "plugin:dialog|message": ({ message, buttons }) => {
+      db.lastConfirm = message;
+      persist();
+      const ok = buttons?.ok ?? "Ok";
+      return db.confirmAnswer === false ? "Cancel" : ok;
+    },
     // Своя титульная строка (v0.9.40): WindowControls вызывает isMaximized() при
     // монтировании и на каждый resize. Шим добавлен в v0.9.80 — до него вызов
     // проваливался в undefined, .catch() его глотал, и состояние кнопки
