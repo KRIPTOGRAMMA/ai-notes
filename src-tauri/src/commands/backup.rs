@@ -5,7 +5,7 @@ use zip::ZipWriter;
 use zip::ZipArchive;
 use zip::write::SimpleFileOptions;
 use tauri::Manager;
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::commands::settings::{get_setting, set_setting};
 
 // Turns automatic backups on the first time the app runs, pointing them at a
@@ -83,7 +83,7 @@ pub async fn export(
 // writes to the DB every 60 seconds and would clobber the import. We drop a
 // staging file and restart the app — apply_pending_import() picks it up before
 // the pool is opened.
-pub fn import_impl(data_dir: &Path, path: &str) -> AppResult<()> {
+pub async fn import_impl(data_dir: &Path, path: &str) -> AppResult<()> {
     let staging_path = data_dir.join("data.db.import");
 
     let zip_file = File::open(path)?;
@@ -94,13 +94,66 @@ pub fn import_impl(data_dir: &Path, path: &str) -> AppResult<()> {
     entry.read_to_end(&mut buf)?;
 
     std::fs::write(&staging_path, &buf)?;
+
+    // Validation belongs here and not in apply_pending_import: that one runs
+    // before the pool and the window exist (lib.rs), so there is nobody to report
+    // an error to. Here the user is standing in front of a dialog.
+    //
+    // Until v0.9.87 the only check was that the zip contained an entry named
+    // data.db — the bytes were never looked at. A corrupt or foreign file went
+    // straight to staging, apply_pending_import renamed it over the live database
+    // on the next launch, and init_db then failed with .expect(): real data gone,
+    // no window, no message.
+    if let Err(e) = validate_import_db(&staging_path).await {
+        let _ = std::fs::remove_file(&staging_path);
+        return Err(e);
+    }
     Ok(())
+}
+
+// Two questions, both cheap: is this a working SQLite file at all, and is it a
+// database of *this* app. The second one is the realistic mistake — picking a
+// backup belonging to some other program.
+async fn validate_import_db(staging: &Path) -> AppResult<()> {
+    let url = format!("sqlite:{}?mode=ro", staging.display());
+    let pool = sqlx::SqlitePool::connect(&url)
+        .await
+        .map_err(|_| AppError::Other("Файл не является базой данных AI Notes.".into()))?;
+
+    let result = (async {
+        let check: String = sqlx::query_scalar("PRAGMA integrity_check")
+            .fetch_one(&pool)
+            .await
+            .map_err(|_| AppError::Other("Файл не является базой данных AI Notes.".into()))?;
+        if check != "ok" {
+            return Err(AppError::Other("Архив повреждён: база не проходит проверку целостности.".into()));
+        }
+
+        for table in ["tasks", "notes", "settings"] {
+            let found: Option<String> = sqlx::query_scalar(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+            )
+            .bind(table)
+            .fetch_optional(&pool)
+            .await?;
+            if found.is_none() {
+                return Err(AppError::Other(
+                    "Это база данных другого приложения: в ней нет таблиц AI Notes.".into(),
+                ));
+            }
+        }
+        Ok(())
+    })
+    .await;
+
+    pool.close().await;
+    result
 }
 
 #[tauri::command]
 pub async fn import(app: tauri::AppHandle, path: String) -> AppResult<()> {
     let data_dir = app.path().app_data_dir()?;
-    import_impl(&data_dir, &path)?;
+    import_impl(&data_dir, &path).await?;
     app.restart()
 }
 
@@ -209,7 +262,22 @@ pub async fn do_auto_backup(
 pub fn apply_pending_import(data_dir: &std::path::Path) {
     let staging = data_dir.join("data.db.import");
     if staging.exists() {
-        let _ = std::fs::rename(&staging, data_dir.join("data.db"));
+        let live = data_dir.join("data.db");
+
+        // The rename below destroys the current database. Keep it aside first —
+        // a rename, not a copy: same filesystem, atomic, no doubling of space.
+        //
+        // If the safety net itself fails, abort the whole import and leave both
+        // files alone. A failed safety net must not end up worse than no safety
+        // net: the staging file survives and the next launch tries again.
+        if live.exists() {
+            let _ = std::fs::remove_file(data_dir.join("data.db.pre-import"));
+            if std::fs::rename(&live, data_dir.join("data.db.pre-import")).is_err() {
+                return;
+            }
+        }
+
+        let _ = std::fs::rename(&staging, &live);
         // Otherwise WAL leftovers from the old DB would be replayed over the
         // imported one and silently roll the import back.
         let _ = std::fs::remove_file(data_dir.join("data.db-wal"));
@@ -261,7 +329,7 @@ mod tests {
         // the temporary VACUUM INTO snapshot has been cleaned up
         assert!(!dir.join("data.db.export").exists());
 
-        import_impl(&dir, zip_path.to_str().unwrap()).unwrap();
+        import_impl(&dir, zip_path.to_str().unwrap()).await.unwrap();
         assert!(dir.join("data.db.import").exists());
 
         // Simulate the pre-restart state: an old DB with WAL leftovers
@@ -272,6 +340,14 @@ mod tests {
         assert!(!dir.join("data.db.import").exists());
         assert!(!dir.join("data.db-wal").exists());
         assert!(!dir.join("data.db-shm").exists());
+
+        // v0.9.87: the database being replaced is kept aside instead of being
+        // destroyed. Until then a bad import left nothing to go back to.
+        assert_eq!(
+            std::fs::read(dir.join("data.db.pre-import")).unwrap(),
+            b"old-db",
+            "прежняя база не сохранена рядом как data.db.pre-import"
+        );
 
         let imported = sqlx::SqlitePool::connect(&format!("sqlite:{}", dir.join("data.db").display()))
             .await
@@ -292,9 +368,100 @@ mod tests {
         let bad = dir.join("not-a-zip.zip");
         std::fs::write(&bad, b"garbage").unwrap();
 
-        assert!(import_impl(&dir, bad.to_str().unwrap()).is_err());
+        assert!(import_impl(&dir, bad.to_str().unwrap()).await.is_err());
         // no staging file must appear
         assert!(!dir.join("data.db.import").exists());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // Builds a zip containing a single "data.db" entry with the given bytes —
+    // structurally a valid archive, which is all import_impl used to check.
+    fn zip_with_db_bytes(path: &Path, bytes: &[u8]) {
+        let mut zip = ZipWriter::new(File::create(path).unwrap());
+        zip.start_file("data.db", SimpleFileOptions::default()).unwrap();
+        zip.write_all(bytes).unwrap();
+        zip.finish().unwrap();
+    }
+
+    // v0.9.87. The zip is well-formed and has a data.db entry, so every check
+    // that existed before this version passes; the payload is not a database.
+    // Before the fix this reached staging, apply_pending_import renamed it over
+    // the live DB on the next launch and init_db died on .expect() — real data
+    // destroyed, no window, no message.
+    #[tokio::test]
+    async fn import_rejects_a_zip_whose_payload_is_not_a_database() {
+        let dir = tmp_dir("import-garbage");
+        let zip_path = dir.join("backup.zip");
+        zip_with_db_bytes(&zip_path, b"not a database at all");
+
+        assert!(import_impl(&dir, zip_path.to_str().unwrap()).await.is_err());
+        assert!(
+            !dir.join("data.db.import").exists(),
+            "негодный архив оставил staging-файл: перезапуск затрёт живую базу"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // The realistic mistake: a genuine SQLite file that belongs to some other
+    // program. integrity_check says "ok" on it, so only the table check catches
+    // this one — which is why both checks exist.
+    #[tokio::test]
+    async fn import_rejects_a_database_of_another_app() {
+        let dir = tmp_dir("import-foreign");
+
+        let foreign = dir.join("foreign.db");
+        let pool = sqlx::SqlitePool::connect(&format!("sqlite:{}?mode=rwc", foreign.display()))
+            .await
+            .unwrap();
+        sqlx::query("CREATE TABLE bookmarks (id INTEGER PRIMARY KEY)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+
+        let zip_path = dir.join("backup.zip");
+        zip_with_db_bytes(&zip_path, &std::fs::read(&foreign).unwrap());
+
+        assert!(import_impl(&dir, zip_path.to_str().unwrap()).await.is_err());
+        assert!(!dir.join("data.db.import").exists());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // A failed safety net must not be worse than no safety net. If the current DB
+    // cannot be moved aside, the import is abandoned whole: the live database
+    // stays, the staging file survives and the next launch tries again.
+    // Only the *keeping* step must fail here. Making the whole folder read-only
+    // was the first attempt and proved nothing: it also blocks the final rename,
+    // so the live DB survives on its own and the test passes with the guard
+    // removed. Same trap as the v0.9.86 test — verified by trying it.
+    //
+    // A non-empty directory in place of data.db.pre-import fails exactly one
+    // step: remove_file cannot delete a directory and rename cannot replace one,
+    // while every other rename in the function still works.
+    #[test]
+    fn import_is_abandoned_when_the_old_db_cannot_be_kept() {
+        let dir = tmp_dir("import-nosafety");
+        std::fs::write(dir.join("data.db"), b"live-data").unwrap();
+        std::fs::write(dir.join("data.db.import"), b"incoming").unwrap();
+
+        let blocker = dir.join("data.db.pre-import");
+        std::fs::create_dir(&blocker).unwrap();
+        std::fs::write(blocker.join("occupied"), b"x").unwrap();
+
+        apply_pending_import(&dir);
+
+        assert_eq!(
+            std::fs::read(dir.join("data.db")).unwrap(),
+            b"live-data",
+            "живая база затёрта, хотя сохранить её не удалось"
+        );
+        assert!(
+            dir.join("data.db.import").exists(),
+            "staging удалён — импорт потерян вместо повтора при следующем запуске"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
