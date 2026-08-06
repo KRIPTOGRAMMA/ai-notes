@@ -83,6 +83,8 @@ pub struct AppSettings {
     #[serde(default)]
     pub last_auto_backup: String,    // RFC3339 of the last successful automatic backup
     #[serde(default)]
+    pub last_auto_backup_error: String, // "<rfc3339>\t<message>", empty once a run succeeds
+    #[serde(default)]
     pub morning_digest_time: String, // "HH:MM", empty means off
     #[serde(default = "default_true")]
     pub show_subtasks_expanded: bool, // subtasks visible in the list without a click
@@ -152,6 +154,7 @@ impl Default for AppSettings {
             auto_backup_dir: String::new(),
             auto_backup_keep: 7,
             last_auto_backup: String::new(),
+            last_auto_backup_error: String::new(),
             morning_digest_time: String::new(),
             show_subtasks_expanded: true,
             keybinds: String::new(),
@@ -267,6 +270,7 @@ pub async fn load_settings_raw(pool: &SqlitePool) -> AppResult<AppSettings> {
     if let Some(v) = get_setting(pool, "auto_backup_dir").await { s.auto_backup_dir = v; }
     // Read-only on the way out; see the field comment on AppSettings.
     if let Some(v) = get_setting(pool, "last_auto_backup").await { s.last_auto_backup = v; }
+    if let Some(v) = get_setting(pool, "last_auto_backup_error").await { s.last_auto_backup_error = v; }
     if let Some(v) = get_setting(pool, "auto_backup_keep").await {
         if let Ok(n) = v.parse() { s.auto_backup_keep = n; }
     }
@@ -497,9 +501,11 @@ mod db_tests {
             .expect("save_settings is not closed") + start;
         let body = &src[start..end];
 
+        // Prefix match on purpose: it covers last_auto_backup_error (v0.9.86) and
+        // any future backend-owned key sharing the prefix.
         assert!(
-            !body.contains("\"last_auto_backup\""),
-            "save_settings пишет last_auto_backup — поле принадлежит бэкенду"
+            !body.contains("\"last_auto_backup"),
+            "save_settings пишет last_auto_backup* — эти поля принадлежат бэкенду"
         );
         // Guard against the check silently passing on a body the parser lost.
         assert!(

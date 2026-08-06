@@ -90,6 +90,7 @@
     auto_backup_dir: "",
     auto_backup_keep: 7,
     last_auto_backup: "",
+    last_auto_backup_error: "",
     morning_digest_time: "",
     show_subtasks_expanded: true,
     keybinds: "",
@@ -493,7 +494,15 @@
       settings.auto_backup_dir ?? "",
       settings.last_auto_backup ?? "",
       new Date(),
+      settings.last_auto_backup_error ?? "",
     ),
+  );
+
+  // The stored form is "<rfc3339>\t<message>" (backup.rs::run_auto_backup); only
+  // the message is worth showing, the date of the failure adds nothing next to a
+  // warning that is live right now.
+  let backupErrorMsg = $derived(
+    (settings.last_auto_backup_error ?? "").split("\t").slice(1).join("\t"),
   );
 
   async function pickBackupDir() {
@@ -968,7 +977,11 @@
         <span class="label">{t("Хранить копий")}</span>
         <input type="number" min="1" bind:value={settings.auto_backup_keep} />
       </label>
-      {#if backupLevel === "off"}
+      {#if backupLevel === "error"}
+        <p class="hint hint-warn">
+          {t("Последний авто-бэкап не удался: {e}", { e: tErr(backupErrorMsg) })}
+        </p>
+      {:else if backupLevel === "off"}
         <p class="hint hint-warn">{t("Авто-бэкап выключен: папка не выбрана.")}</p>
       {:else if backupLevel === "pending"}
         <p class="hint">{t("Папка выбрана, первая копия появится в течение суток.")}</p>

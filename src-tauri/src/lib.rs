@@ -724,7 +724,9 @@ pub fn run() {
                                 Ok(d) => d,
                                 Err(_) => { tokio::time::sleep(Duration::from_secs(60)).await; continue; }
                             };
-                            let _ = commands::backup::auto_backup_impl(&pool_bk, &data_dir).await;
+                            // run_auto_backup, not auto_backup_impl: the failure has
+                            // to be recorded, since nothing here can report it.
+                            let _ = commands::backup::run_auto_backup(&pool_bk, &data_dir).await;
                         }
                         tokio::time::sleep(Duration::from_secs(60)).await;
                     }

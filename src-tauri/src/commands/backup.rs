@@ -147,8 +147,7 @@ pub async fn auto_backup_impl(
     export_impl(pool, data_dir, path.to_str().unwrap()).await?;
 
     // Rotation: delete the oldest files beyond keep
-    let mut entries: Vec<_> = fs::read_dir(&dir)
-        .unwrap_or_else(|_| panic!("cannot read backup dir {:?}", dir))
+    let mut entries: Vec<_> = fs::read_dir(&dir)?
         .filter_map(|e| e.ok())
         .filter(|e| {
             e.file_name().to_string_lossy().starts_with("ai-notes-backup-")
@@ -167,13 +166,42 @@ pub async fn auto_backup_impl(
     Ok(filename)
 }
 
+// The failure path of the automatic backup, kept apart from auto_backup_impl so
+// that one stays testable on its own.
+//
+// Why this exists (v0.9.86): the rotation step above used to be
+// `read_dir(&dir).unwrap_or_else(|_| panic!(...))`. The loop that calls it runs
+// inside tokio::spawn (lib.rs), and a panic in a spawned task does not bring the
+// app down — it kills only that task. Backups would stop forever while the app
+// went on looking perfectly healthy. That is the same shape of silent failure as
+// the empty auto_backup_dir fixed in v0.9.85, so the error has to be recorded
+// where the user can see it.
+//
+// No catch_unwind here on purpose: it would be armour around the one panic we
+// just removed, and it would hide the next one just as well.
+pub async fn run_auto_backup(pool: &sqlx::SqlitePool, data_dir: &Path) -> AppResult<String> {
+    match auto_backup_impl(pool, data_dir).await {
+        Ok(filename) => {
+            // Cleared on success, otherwise a single bad run would leave a
+            // warning in Settings for good.
+            let _ = set_setting(pool, "last_auto_backup_error", "").await;
+            Ok(filename)
+        }
+        Err(e) => {
+            let record = format!("{}\t{}", chrono::Utc::now().to_rfc3339(), e);
+            let _ = set_setting(pool, "last_auto_backup_error", &record).await;
+            Err(e)
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn do_auto_backup(
     app: tauri::AppHandle,
     pool: tauri::State<'_, sqlx::SqlitePool>,
 ) -> Result<String, String> {
     let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    auto_backup_impl(pool.inner(), &data_dir)
+    run_auto_backup(pool.inner(), &data_dir)
         .await
         .map_err(|e| e.to_string())
 }
@@ -359,6 +387,71 @@ mod tests {
 
         // The unrelated file is untouched
         assert!(backup_dir.join("note.txt").exists());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // v0.9.86. Until then the rotation step did
+    // `read_dir(&dir).unwrap_or_else(|_| panic!(...))`, and the caller is a
+    // tokio::spawn loop: the panic killed that task alone and automatic backups
+    // stopped for good without a word anywhere.
+    //
+    // The failure has to land on read_dir specifically. A file where a directory
+    // is expected — the obvious choice — is useless: export_impl fails first when
+    // it cannot create the zip, so the test passes with the panic still in place
+    // and proves nothing. Verified by trying exactly that.
+    //
+    // Write+execute without read is the one mode where the export succeeds and
+    // the rotation cannot list the folder. Unix-only, hence the cfg.
+    //
+    // The assertion is literally that the call returns instead of panicking: a
+    // panic would take the whole test binary down, which is the production
+    // behaviour being fixed.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn auto_backup_records_the_error_instead_of_panicking() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tmp_dir("backup-error");
+        let pool = test_pool(&dir).await;
+
+        let unreadable = dir.join("unreadable");
+        std::fs::create_dir_all(&unreadable).unwrap();
+        std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0o300)).unwrap();
+        set_setting(&pool, "auto_backup_dir", unreadable.to_str().unwrap()).await.unwrap();
+
+        let result = run_auto_backup(&pool, &dir).await;
+        assert!(result.is_err(), "сбойный бэкап вернул Ok");
+        // Proof the failure is the rotation step and not something earlier: with
+        // the folder made readable again, the exported zip is there. Without this
+        // the test would pass with the panic still in place — exactly the trap
+        // hit on the first attempt at this test.
+        std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let written = std::fs::read_dir(&unreadable).unwrap().count();
+        assert_eq!(
+            written, 1,
+            "экспорт не дошёл до ротации — тест бьёт не в ту строку"
+        );
+
+        let recorded = get_setting(&pool, "last_auto_backup_error").await.unwrap_or_default();
+        assert!(!recorded.is_empty(), "ошибка бэкапа нигде не записана");
+        assert!(
+            recorded.contains('\t'),
+            "ожидался формат <rfc3339>\\t<сообщение>, получено: {recorded}"
+        );
+
+        // The other half: one bad run must not leave a warning in Settings for
+        // good, so a later success clears it.
+        let good_dir = dir.join("backups");
+        std::fs::create_dir_all(&good_dir).unwrap();
+        set_setting(&pool, "auto_backup_dir", good_dir.to_str().unwrap()).await.unwrap();
+
+        run_auto_backup(&pool, &dir).await.unwrap();
+        assert_eq!(
+            get_setting(&pool, "last_auto_backup_error").await.unwrap_or_default(),
+            "",
+            "успешный бэкап не сбросил прошлую ошибку"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

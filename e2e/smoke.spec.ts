@@ -2828,13 +2828,14 @@ test("настройки: состояние авто-бэкапа видно и
   // нельзя: его init-скрипт должен выполниться раньше мока, а мок читает
   // __mock_db один раз при инициализации, и в обратном порядке приложение вообще
   // не поднимается.
-  const showState = async (dir: string, last: string) => {
-    await page.evaluate(([d, l]) => {
+  const showState = async (dir: string, last: string, err = "") => {
+    await page.evaluate(([d, l, e]) => {
       const db = JSON.parse(localStorage.getItem("__mock_db")!);
       db.settings.auto_backup_dir = d;
       db.settings.last_auto_backup = l;
+      db.settings.last_auto_backup_error = e;
       localStorage.setItem("__mock_db", JSON.stringify(db));
-    }, [dir, last]);
+    }, [dir, last, err]);
     await page.reload();
     await page.getByRole("button", { name: "Настройки" }).click();
     await page.locator(".settings-tab", { hasText: "Данные" }).click();
@@ -2856,6 +2857,15 @@ test("настройки: состояние авто-бэкапа видно и
   // Двое суток без копии — предупреждение.
   await showState("/tmp/mock-backups", hoursAgo(72));
   await expect(page.locator(".hint-warn", { hasText: "старше двух суток" })).toBeVisible();
+
+  // v0.9.86: сбой автобэкапа. Копия при этом СВЕЖАЯ — до v0.9.86 такое состояние
+  // выглядело бы полностью благополучным, а цикл был уже мёртв. Ошибка обязана
+  // перебивать дату, иначе проверять её было бы нечем.
+  await showState("/tmp/mock-backups", hoursAgo(2), "2026-08-06T10:00:00+00:00\tОшибка файловой системы: Permission denied");
+  await expect(page.locator(".hint-warn", { hasText: "не удался" })).toBeVisible();
+  // Показано именно сообщение, а не сырая строка с датой и табуляцией.
+  await expect(page.locator(".hint-warn", { hasText: "Permission denied" })).toBeVisible();
+  await expect(page.getByText("2026-08-06T10:00:00")).toHaveCount(0);
 });
 
 test("рутины: создание, блок в неделе, выключение", async ({ page }) => {
