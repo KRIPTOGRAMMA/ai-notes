@@ -382,14 +382,18 @@ pub async fn complete_task_impl(pool: &SqlitePool, id: String) -> AppResult<Task
 
   task.updated_at = now;
 
+  // Both writes are one logical operation, especially for a recurring task:
+  // clear the checklist AND move the deadline. A failure between them used to
+  // leave the worst possible mixture — the checklist wiped while the task still
+  // sits at its old deadline, i.e. the plan for the next run destroyed and the
+  // run itself not advanced. Either everything or nothing (v0.9.89).
+  let mut tx = pool.begin().await?;
+
   sqlx::query("UPDATE subtasks SET done = ? WHERE task_id = ?")
     .bind(subtasks_done)
     .bind(&id)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
-  // into_task() does not load subtasks, so we read them after the update: the
-  // returned task must reflect the new checklist state, not an empty list.
-  task.subtasks = crate::commands::subtasks::get_subtasks_impl(pool, &id).await?;
 
   sqlx::query(
     "UPDATE tasks SET status=?, hidden=?, deadline=?, completed_at=?, updated_at=?, scheduled_at=?,
@@ -410,8 +414,15 @@ pub async fn complete_task_impl(pool: &SqlitePool, id: String) -> AppResult<Task
   .bind(reset_notifications)
   .bind(reset_notifications)
   .bind(&id)
-  .execute(pool)
+  .execute(&mut *tx)
   .await?;
+
+  tx.commit().await?;
+
+  // Read after commit: into_task() does not load subtasks, and the returned task
+  // must reflect the new checklist state rather than an empty list. It is a read
+  // for the return value only, so it has no business inside the transaction.
+  task.subtasks = crate::commands::subtasks::get_subtasks_impl(pool, &id).await?;
 
   // The notification is only sent if the task actually closed. A recurring task
   // keeps completed_at empty — it moved to its next deadline and still blocks,
@@ -769,6 +780,98 @@ mod tests {
             "SELECT notified_block FROM tasks WHERE id = ?")
             .bind(&t.id).fetch_one(&pool).await.unwrap();
         assert!(!block_flag, "notified_block should be reset");
+    }
+
+    // v0.9.89. Completing a recurring task is one logical operation made of two
+    // writes: clear the checklist and move the deadline. Until this version they
+    // ran without a transaction, so a failure between them left the worst
+    // possible mixture — the checklist for the next run wiped while the task
+    // still sat at its old deadline.
+    //
+    // This half only covers the happy path; atomicity itself is asserted by
+    // a_failed_second_write_leaves_the_checklist_alone below.
+    #[tokio::test]
+    async fn completing_a_recurring_task_moves_checklist_and_deadline_together() {
+        let pool = test_pool().await;
+        let mut ct = new_task("ежедневная с чек-листом");
+        ct.recurrence = Some(Recurrence::Daily);
+        let t = create_task_impl(&pool, ct).await.unwrap();
+
+        let sub = crate::commands::subtasks::add_subtask_impl(&pool, &t.id, "шаг").await.unwrap();
+        crate::commands::subtasks::toggle_subtask_impl(&pool, &sub.id).await.unwrap();
+
+        let before_deadline = sqlx::query_scalar::<_, Option<String>>(
+            "SELECT deadline FROM tasks WHERE id = ?")
+            .bind(&t.id).fetch_one(&pool).await.unwrap();
+
+        let done = complete_task_impl(&pool, t.id.clone()).await.unwrap();
+
+        // The checklist was cleared for the next run...
+        let still_done: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM subtasks WHERE task_id = ? AND done = 1")
+            .bind(&t.id).fetch_one(&pool).await.unwrap();
+        assert_eq!(still_done, 0, "чек-лист не сброшен для следующего запуска");
+
+        // ...and the task really did move, rather than losing its marks in place.
+        let after_deadline = sqlx::query_scalar::<_, Option<String>>(
+            "SELECT deadline FROM tasks WHERE id = ?")
+            .bind(&t.id).fetch_one(&pool).await.unwrap();
+        assert_ne!(
+            after_deadline, before_deadline,
+            "отметки чек-листа стёрты, а дедлайн остался прежним — ровно та смесь, \
+             которую предотвращает транзакция"
+        );
+        assert_eq!(done.status, "Todo");
+        assert!(done.deadline.is_some());
+
+        // The returned value is read after commit and must show the new state.
+        assert_eq!(done.subtasks.len(), 1);
+        assert!(!done.subtasks[0].done, "возвращённая задача показывает старый чек-лист");
+    }
+
+    // The actual point of the transaction, with a real injected failure.
+    //
+    // A BEFORE UPDATE trigger that aborts is the injection, and picking it took
+    // three tries — the first two failed the wrong step, which is the recurring
+    // trap of v0.9.86 and v0.9.87:
+    //   - breaking the UPDATE's SQL in a scratchpad copy: complete_task_impl then
+    //     returns Err at the .unwrap() of the happy-path test, before any
+    //     assertion runs, so it is red with or without the transaction;
+    //   - renaming a column the second write needs: `SELECT * FROM tasks` at the
+    //     top of complete_task_impl maps into TaskRow and needs every column, so
+    //     the function dies before the FIRST write and the checklist survives on
+    //     its own, no transaction required.
+    // A trigger on UPDATE OF tasks touches neither the SELECT nor the subtasks
+    // write, so it fails exactly the step being protected.
+    //
+    // Without the transaction the marks would be gone for good while the task
+    // kept its old deadline: the checklist for the next run destroyed and the run
+    // itself not advanced — worse than either write failing alone.
+    #[tokio::test]
+    async fn a_failed_second_write_leaves_the_checklist_alone() {
+        let pool = test_pool().await;
+        let mut ct = new_task("ежедневная");
+        ct.recurrence = Some(Recurrence::Daily);
+        let t = create_task_impl(&pool, ct).await.unwrap();
+
+        let sub = crate::commands::subtasks::add_subtask_impl(&pool, &t.id, "шаг").await.unwrap();
+        crate::commands::subtasks::toggle_subtask_impl(&pool, &sub.id).await.unwrap();
+
+        sqlx::query(
+            "CREATE TRIGGER block_task_update BEFORE UPDATE ON tasks
+             BEGIN SELECT RAISE(ABORT, 'injected failure'); END")
+            .execute(&pool).await.unwrap();
+
+        let result = complete_task_impl(&pool, t.id.clone()).await;
+        assert!(result.is_err(), "подготовка теста не сработала: второй UPDATE не упал");
+
+        let still_done: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM subtasks WHERE task_id = ? AND done = 1")
+            .bind(&t.id).fetch_one(&pool).await.unwrap();
+        assert_eq!(
+            still_done, 1,
+            "чек-лист сброшен, хотя задача не передвинулась — транзакция не откатила первую запись"
+        );
     }
 
     #[tokio::test]
