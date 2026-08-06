@@ -1,12 +1,40 @@
 use sqlx::SqlitePool;
 use sqlx::migrate::MigrateDatabase;
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteSynchronous};
 
 pub async fn init_db(db_path: &str) -> Result<SqlitePool, sqlx::Error> {
     if !sqlx::Sqlite::database_exists(db_path).await.unwrap_or(false) {
         sqlx::Sqlite::create_database(db_path).await?;
     }
 
-    let pool = SqlitePool::connect(db_path).await?;
+    // Both pragmas set explicitly (v0.9.88). Checked against sqlx-sqlite 0.8.6
+    // rather than assumed: in its default pragma map journal_mode and synchronous
+    // are both `None` — sqlx sets neither. (foreign_keys is the exception, forced
+    // to ON, which is what v0.9.81 established the hard way. busy_timeout is
+    // already 5s by default and is deliberately left alone: it is not about
+    // durability, it only turns an immediate SQLITE_BUSY into a delayed one.)
+    //
+    // So the live DB being in WAL today is not an inherited default at all — it
+    // is written in the file from earlier runs. A freshly created database, or
+    // one that arrived through Import, would come up in `delete` mode.
+    //
+    // WAL is load-bearing for three separate things: export_impl (the whole
+    // reason VACUUM INTO is needed — see backup.rs), apply_pending_import (it
+    // removes the stale -wal next to the imported file) and status.rs (the waybar
+    // CLI opens the DB alongside the running app).
+    //
+    // synchronous=FULL is what makes a commit survive a power cut and not merely
+    // a process crash. SQLite's compiled-in default is FULL, so this pins the
+    // value rather than changing it.
+    //
+    // Via connect options, not `PRAGMA` on the pool: synchronous is per
+    // connection, and a pool opens connections on demand — a one-off query would
+    // configure exactly one of them.
+    let options = db_path
+        .parse::<SqliteConnectOptions>()?
+        .journal_mode(SqliteJournalMode::Wal)
+        .synchronous(SqliteSynchronous::Full);
+    let pool = SqlitePool::connect_with(options).await?;
 
     sqlx::migrate!("./src/db/migrations")
         .run(&pool)
@@ -57,6 +85,71 @@ mod tests {
         let pool2 = init_db(&url).await.expect("повторный init_db упал");
         drop(pool2);
         cleanup(&path);
+    }
+
+    // v0.9.88, modelled on foreign_keys_are_enforced_so_cascades_actually_fire.
+    //
+    // The pragmas are not asserted on their own: a DB already in WAL from an
+    // earlier run would satisfy that no matter what init_db does. The load-
+    // bearing half is the second one — a database that arrives in `delete` mode
+    // (an import, or a file made by another tool) must be switched over, and that
+    // is the case sqlx's defaults do NOT cover: in sqlx-sqlite 0.8.6 the default
+    // pragma map leaves journal_mode and synchronous unset entirely.
+    #[tokio::test]
+    async fn wal_and_full_sync_are_pinned_not_inherited() {
+        let (url, path) = temp_db_url();
+        let pool = init_db(&url).await.unwrap();
+
+        let mode: String = sqlx::query_scalar("PRAGMA journal_mode")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            mode.to_lowercase(),
+            "wal",
+            "journal_mode не WAL: от него зависят export_impl (VACUUM INTO), \
+             apply_pending_import (удаление устаревшего -wal) и status.rs"
+        );
+
+        let sync: i64 = sqlx::query_scalar("PRAGMA synchronous")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(sync, 2, "synchronous не FULL — коммит перестанет переживать отключение питания");
+
+        // The consequence, not just the setting: writes really do go through a
+        // -wal file next to the database.
+        sqlx::query("INSERT INTO tasks (id, title, created_at, updated_at) VALUES ('wal-probe', 'x', '2026-01-01', '2026-01-01')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(
+            path.with_extension("db-wal").exists(),
+            "рядом с базой нет -wal: запись идёт не через WAL"
+        );
+
+        drop(pool);
+        cleanup(&path);
+
+        // The half that sqlx cannot give us: a database handed over in `delete`
+        // mode is switched to WAL by init_db.
+        let (url2, path2) = temp_db_url();
+        let legacy = SqlitePool::connect(&url2).await.unwrap();
+        sqlx::query("PRAGMA journal_mode=DELETE").execute(&legacy).await.unwrap();
+        let before: String = sqlx::query_scalar("PRAGMA journal_mode").fetch_one(&legacy).await.unwrap();
+        assert_eq!(before.to_lowercase(), "delete", "подготовка теста не сработала");
+        legacy.close().await;
+
+        let pool2 = init_db(&url2).await.unwrap();
+        let after: String = sqlx::query_scalar("PRAGMA journal_mode").fetch_one(&pool2).await.unwrap();
+        assert_eq!(
+            after.to_lowercase(),
+            "wal",
+            "база, пришедшая в режиме delete (импорт, чужой инструмент), осталась не в WAL"
+        );
+
+        drop(pool2);
+        cleanup(&path2);
     }
 
     #[tokio::test]
