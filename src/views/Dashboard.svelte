@@ -6,7 +6,7 @@
   import { categoryStore } from "../lib/stores/categories.svelte";
   import type { AppSettings, DayCompletion } from "../lib/types";
   import TaskOpener from "../lib/components/TaskOpener.svelte";
-  import { t, i18n } from "../lib/i18n.svelte";
+  import { t, tErr, i18n } from "../lib/i18n.svelte";
   import { localDateKey, pad2, localeTag } from "../lib/datetime";
   import { loadUiState, saveUiState } from "../lib/uistate";
 
@@ -420,7 +420,7 @@
           </button>
           <div class="ai-text">
             {#if insightError}
-              <span style="color:var(--danger);">{insightError}</span>
+              <span style="color:var(--danger);">{tErr(insightError)}</span>
             {:else if insightText}
               {insightText}
             {:else if !insightPending}
@@ -476,7 +476,7 @@
           </div>
           <div class="ai-text">
             {#if summaryError}
-              <span style="color:var(--danger);">{summaryError}</span>
+              <span style="color:var(--danger);">{tErr(summaryError)}</span>
             {:else if summaryText}
               <span class="muted" style="font-size:11px;display:block;margin-bottom:2px;">
                 {summaryKind === "day" ? t("За день") : t("За неделю")}

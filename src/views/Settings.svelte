@@ -842,7 +842,7 @@
           {ruleSuggestBusy ? t("Определяю…") : t("Определить категории через ИИ")}
         </button>
         {#if ruleSuggestError}
-          <span class="alert" style="margin-top:6px;">{ruleSuggestError}</span>
+          <span class="alert" style="margin-top:6px;">{tErr(ruleSuggestError)}</span>
         {/if}
         {#if ruleSuggestEmpty}
           <p class="hint">{t("Все приложения из статистики уже покрыты правилами.")}</p>

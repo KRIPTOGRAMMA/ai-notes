@@ -1343,7 +1343,7 @@
 
   {#if aiError}
     <div class="ai-error">
-      <span>{aiError}</span>
+      <span>{tErr(aiError)}</span>
       <button class="btn-icon" style="color:white;" onclick={() => aiError = null}>✕</button>
     </div>
   {/if}

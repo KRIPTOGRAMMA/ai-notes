@@ -23,6 +23,28 @@ pub fn start_scheduler(app: tauri::AppHandle, pool: SqlitePool, work_mode: Arc<M
     });
 }
 
+// Marks one notification flag, but only while the task still sits at the very
+// deadline the SELECT saw (v0.9.90).
+//
+// The race: check_deadlines reads the tasks, then awaits the sending of a
+// notification, and only then writes the flag. If the user completes a recurring
+// task inside that window, complete_task_impl moves the deadline and resets the
+// flags (commands/tasks.rs) — and the scheduler's late write would then set
+// notified_24h = 1 against the NEW deadline. The task would never be announced
+// again, which is exactly the bug the comment in complete_task_impl describes as
+// already fixed once; the race brings it back.
+//
+// The raw string from the SELECT is bound deliberately, with no re-formatting: a
+// parse-and-render round trip can produce a different spelling of the same
+// instant and the WHERE would never match.
+//
+// The column name is interpolated, never user input — the three call sites below
+// are the only ones, and each passes a literal.
+async fn mark_notified(pool: &SqlitePool, id: &str, deadline_str: &str, column: &str) {
+    let sql = format!("UPDATE tasks SET {column} = 1 WHERE id = ? AND deadline = ?");
+    let _ = sqlx::query(&sql).bind(id).bind(deadline_str).execute(pool).await;
+}
+
 async fn check_deadlines(app: &tauri::AppHandle, pool: &SqlitePool, muted: bool) {
     use crate::commands::settings::get_u64_setting;
     let now = Utc::now();
@@ -66,20 +88,17 @@ async fn check_deadlines(app: &tauri::AppHandle, pool: &SqlitePool, muted: bool)
 
         if !notified_24h && deadline <= early_at && deadline > late_at {
             if !muted { send_deadline_notification(app, pool, &id, &title, early_msg).await; }
-            let _ = sqlx::query("UPDATE tasks SET notified_24h = 1 WHERE id = ?")
-                .bind(&id).execute(pool).await;
+            mark_notified(pool, &id, &deadline_str, "notified_24h").await;
         }
 
         if !notified_1h && deadline <= late_at && deadline > now {
             if !muted { send_deadline_notification(app, pool, &id, &title, late_msg).await; }
-            let _ = sqlx::query("UPDATE tasks SET notified_1h = 1 WHERE id = ?")
-                .bind(&id).execute(pool).await;
+            mark_notified(pool, &id, &deadline_str, "notified_1h").await;
         }
 
         if !notified_deadline && deadline <= now {
             if !muted { send_deadline_notification(app, pool, &id, &title, &crate::i18n::tr("Дедлайн наступил!", lang)).await; }
-            let _ = sqlx::query("UPDATE tasks SET notified_deadline = 1 WHERE id = ?")
-                .bind(&id).execute(pool).await;
+            mark_notified(pool, &id, &deadline_str, "notified_deadline").await;
         }
     }
 }
@@ -707,6 +726,93 @@ mod tests {
             .single()
             .unwrap();
         local_dt.with_timezone(&Utc)
+    }
+
+    // v0.9.90. check_deadlines needs an AppHandle and cannot be called from a
+    // test, so the race is asserted on the extracted mark_notified instead.
+    //
+    // The scenario is real: the scheduler SELECTs a task, awaits the sending of a
+    // notification, and in that window the user completes the recurring task —
+    // complete_task_impl moves the deadline and resets the flags. The late write
+    // must not apply to the deadline it never saw.
+    #[tokio::test]
+    async fn a_late_scheduler_write_does_not_mark_the_new_deadline() {
+        let pool = test_pool().await;
+        let old_deadline = "2026-08-10T09:00:00+00:00";
+        let new_deadline = "2026-08-11T09:00:00+00:00";
+
+        sqlx::query(
+            "INSERT INTO tasks (id, title, status, priority, category, recurrence, tags, hidden,
+             deadline, notified_24h, created_at, updated_at)
+             VALUES ('t1', 'ежедневная', 'Todo', 'Medium', 'Work', 'Daily', '[]', 0, ?, 0,
+             '2026-08-01T00:00:00+00:00', '2026-08-01T00:00:00+00:00')")
+            .bind(old_deadline)
+            .execute(&pool).await.unwrap();
+
+        // The user completes the task while the notification is being sent: the
+        // deadline moves on and the flags are cleared.
+        sqlx::query("UPDATE tasks SET deadline = ?, notified_24h = 0 WHERE id = 't1'")
+            .bind(new_deadline)
+            .execute(&pool).await.unwrap();
+
+        // The scheduler's write finally lands, still carrying the OLD deadline.
+        mark_notified(&pool, "t1", old_deadline, "notified_24h").await;
+
+        let flag: bool = sqlx::query_scalar("SELECT notified_24h FROM tasks WHERE id = 't1'")
+            .fetch_one(&pool).await.unwrap();
+        assert!(
+            !flag,
+            "запоздавшая запись погасила напоминание о НОВОМ дедлайне — \
+             о задаче больше никогда не напомнят"
+        );
+
+        // The other half: with the deadline unchanged the flag must still be set,
+        // or the scheduler would notify about the same deadline every minute.
+        mark_notified(&pool, "t1", new_deadline, "notified_24h").await;
+        let flag: bool = sqlx::query_scalar("SELECT notified_24h FROM tasks WHERE id = 't1'")
+            .fetch_one(&pool).await.unwrap();
+        assert!(flag, "флаг не выставился при неизменившемся дедлайне — уведомление повторится");
+    }
+
+    // The guard above compares strings, so it only works if the spelling written
+    // by complete_task_impl is byte-identical to what the scheduler's SELECT
+    // reads back. Asserted against the real function rather than assumed: this is
+    // the one thing that would make the WHERE silently never match, turning the
+    // fix into "the flag is never set" — the opposite failure.
+    #[tokio::test]
+    async fn the_deadline_written_by_complete_task_matches_what_the_scheduler_reads() {
+        use crate::core::task::CreateTask;
+
+        let pool = test_pool().await;
+        let ct = CreateTask {
+            title: "ежедневная".into(),
+            description: None,
+            status: "Todo".into(),
+            priority: crate::core::task::Priority::Medium,
+            category: "Work".into(),
+            deadline: Some(Utc::now() + chrono::Duration::days(1)),
+            tags: vec![],
+            recurrence: Some(crate::core::task::Recurrence::Daily),
+            project_id: None,
+        };
+        let t = crate::commands::tasks::create_task_impl(&pool, ct).await.unwrap();
+
+        let done = crate::commands::tasks::complete_task_impl(&pool, t.id.clone()).await.unwrap();
+        let stored: String = sqlx::query_scalar("SELECT deadline FROM tasks WHERE id = ?")
+            .bind(&t.id).fetch_one(&pool).await.unwrap();
+
+        assert_eq!(
+            stored,
+            done.deadline.unwrap().to_rfc3339(),
+            "написание дедлайна в БД разошлось с to_rfc3339 — условие AND deadline = ? \
+             никогда не совпадёт и флаг не будет выставляться вообще"
+        );
+
+        // And the guard really does match on that exact string.
+        mark_notified(&pool, &t.id, &stored, "notified_24h").await;
+        let flag: bool = sqlx::query_scalar("SELECT notified_24h FROM tasks WHERE id = ?")
+            .bind(&t.id).fetch_one(&pool).await.unwrap();
+        assert!(flag, "флаг не выставился на реальном дедлайне из complete_task_impl");
     }
 
     #[tokio::test]

@@ -11,7 +11,7 @@
   import type { Task, CreateTaskPayload, RoutineBlock } from "../lib/types";
   // `t` is taken in this file by the task variable in {#each}, so the translation
   // helper is imported as `tr` — renaming the loops for a function's sake is worse.
-  import { t as tr, i18n } from "../lib/i18n.svelte";
+  import { t as tr, tErr, i18n } from "../lib/i18n.svelte";
   import { localDateKey, hhmm, hhmmFromMins, pad2, localeTag } from "../lib/datetime";
 
   // A task opens right here rather than by switching to the Tasks screen: in the
@@ -502,7 +502,7 @@
         {/if}
         {#if planError}
           <div class="plan-error">
-            {planError}
+            {tErr(planError)}
             <button class="btn-icon" onclick={() => planError = null}>✕</button>
           </div>
         {/if}

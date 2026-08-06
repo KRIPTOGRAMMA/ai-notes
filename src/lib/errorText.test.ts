@@ -91,4 +91,36 @@ describe("места отрисовки ошибок обёрнуты", () => {
     }
     expect(offenders).toEqual([]);
   });
+
+  // The check above only sees a property access in the markup. A backend error
+  // parked in a local variable first — `aiError = payload.error` — renders as
+  // plain {aiError} and slips straight past it. That was not hypothetical: in
+  // v0.9.91 five such sites were found unwrapped (Calendar planError, Tasks
+  // aiError, Dashboard insightError and summaryError, Settings ruleSuggestError)
+  // while Notes wrapped the very same AI errors correctly — the same message
+  // translated on one screen and not on another.
+  //
+  // So the variables are found first, by what is assigned INTO them, and only
+  // then looked for in the markup.
+  it("переменная, в которую положен payload.error, тоже отрисована через tErr", () => {
+    const offenders: string[] = [];
+    let found = 0;
+    for (const [path, src] of Object.entries(VIEWS)) {
+      const carriers = new Set<string>();
+      for (const m of src.matchAll(/(?:^|[\s;{(])([A-Za-z_$][\w$]*)\s*=\s*[\w.]*payload\.error\b/g)) {
+        carriers.add(m[1]);
+      }
+      found += carriers.size;
+      for (const name of carriers) {
+        // Rendered bare: {name} or {name ? ... } — anything not inside a call.
+        const bare = new RegExp(`\\{\\s*${name}\\s*\\}`, "g");
+        if (bare.test(src)) offenders.push(`${path}: {${name}}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+    // Lower bound against a check that quietly passes because its own pattern
+    // stopped matching anything — the mock_guard.rs lesson. Five carriers existed
+    // when this was written; the number only has to stay non-trivial.
+    expect(found).toBeGreaterThanOrEqual(5);
+  });
 });
