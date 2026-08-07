@@ -757,10 +757,12 @@
       borderRadius: "4px",
       fontSize: "0.9em",
     },
+    // The second accent: this is a jump between notes, not a control. Indigo
+    // inside body text would read as an ordinary interface link.
     ".cm-wikilink": {
       textDecoration: "none",
-      borderBottom: "1px solid color-mix(in srgb, var(--accent) 45%, transparent)",
-      color: "var(--accent)",
+      borderBottom: "1px solid color-mix(in srgb, var(--accent-secondary) 45%, transparent)",
+      color: "var(--accent-secondary)",
       cursor: "pointer",
     },
     ".cm-wikilink.missing": {

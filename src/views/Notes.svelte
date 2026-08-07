@@ -1371,6 +1371,10 @@ ${bodyHtml}
     text-overflow: ellipsis;
   }
 
+  /* Pinning takes the second accent: it is a state of the note, not the user's
+     current choice, so it must not compete with the indigo of the active row —
+     which wins when a pinned note is also the selected one. */
+  .note-row.pinned .note-title { color: var(--accent-secondary); font-weight: 600; }
   .note-item.active .note-title { color: var(--accent); }
 
   .note-date {

@@ -202,6 +202,7 @@
   />
 {:else}
 <div class="shell">
+  <div class="accent-thread" aria-hidden="true"></div>
   <aside class="sidebar">
     <div class="brand">AI Notes</div>
 
@@ -300,6 +301,23 @@
     height: 100vh;
   }
 
+  /* The only place both accents are shown together across the full width, so it
+     sets the tone without recolouring anything. Fixed rather than a child of the
+     titlebar: that one is transparent and floats over the content with
+     pointer-events:none, so an ::after on it would hang in mid-content. It fades
+     out instead of running colour to the right edge, where the window buttons
+     are — a hard stop under them would read as an underline for the buttons. */
+  .accent-thread {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    z-index: 61;
+    pointer-events: none;
+    background: linear-gradient(90deg, var(--accent), var(--accent-secondary) 55%, transparent);
+  }
+
   .sidebar {
     width: 176px;
     flex-shrink: 0;
@@ -348,6 +366,20 @@
     background: color-mix(in srgb, var(--accent) 12%, transparent);
     color: var(--accent);
     font-weight: 600;
+    position: relative;
+  }
+
+  /* The marker takes the second accent: indigo is already the fill here, and the
+     same paint on the edge would dissolve into it. */
+  .nav-item.active::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 6px;
+    bottom: 6px;
+    width: 2px;
+    border-radius: 2px;
+    background: var(--accent-secondary);
   }
 
   .search-item kbd {

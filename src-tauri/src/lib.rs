@@ -9,6 +9,7 @@ mod voice;
 mod status;
 mod i18n;
 mod mock_guard;
+mod palette_guard;
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;

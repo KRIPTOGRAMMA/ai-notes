@@ -1,15 +1,20 @@
 /* ===== Design tokens ===== */
 :root {
     --bg-primary: #ffffff;
-    --bg-secondary: #f5f5f5;
+    /* The neutrals lean towards violet instead of pure grey. The shift is small
+       — visible only next to #f5f5f5 — but it takes the "default grey" feel off
+       the interface without competing with the five category colours. */
+    --bg-secondary: #f4f2f8;
     --bg-card: #ffffff;
-    --bg-hover: #ededed;
+    --bg-hover: #eae7f2;
     --text-primary: #1a1a1a;
     --text-secondary: #666666;
-    --border: #e0e0e0;
+    --border: #e2dfea;
     --accent: #6366f1;
     --accent-hover: #4f46e5;
-    --accent-secondary: #6366f1;
+    /* The far end of the .btn-primary gradient. Kept distinct from --accent:
+       when the two are equal the gradient degenerates into a flat fill. */
+    --accent-secondary: #a855f7;
     --danger: #ef4444;
     --success: #22c55e;
     --radius: 6px;
@@ -37,15 +42,15 @@
 
 .dark {
     --bg-primary: #0f0f0f;
-    --bg-secondary: #1a1a1a;
-    --bg-card: #1c1c1c;
-    --bg-hover: #262626;
+    --bg-secondary: #191722;
+    --bg-card: #1c1a24;
+    --bg-hover: #242031;
     --text-primary: #f5f5f5;
     --text-secondary: #999999;
-    --border: #2e2e2e;
+    --border: #2f2b3c;
     --accent: #6366f1;
     --accent-hover: #818cf8;
-    --accent-secondary: #6366f1;
+    --accent-secondary: #c084fc;
     --danger: #ef4444;
     --success: #22c55e;
 
