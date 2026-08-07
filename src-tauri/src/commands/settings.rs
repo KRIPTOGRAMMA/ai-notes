@@ -56,6 +56,10 @@ pub struct AppSettings {
     #[serde(default)]
     pub color_bg: String,
     #[serde(default)]
+    pub color_bg_secondary: String, // the sidebar and second-plane surfaces (--bg-secondary)
+    #[serde(default)]
+    pub color_bg_hover: String,     // the hover fill of rows and ghost buttons (--bg-hover)
+    #[serde(default)]
     pub color_text: String,
     #[serde(default)]
     pub color_border: String,
@@ -142,6 +146,8 @@ impl Default for AppSettings {
             color_accent: String::new(),
             color_accent_secondary: String::new(),
             color_bg: String::new(),
+            color_bg_secondary: String::new(),
+            color_bg_hover: String::new(),
             color_text: String::new(),
             color_border: String::new(),
             quiet_until: String::new(),
@@ -260,6 +266,8 @@ pub async fn load_settings_raw(pool: &SqlitePool) -> AppResult<AppSettings> {
     if let Some(v) = get_setting(pool, "color_accent").await { s.color_accent = v; }
     if let Some(v) = get_setting(pool, "color_accent_secondary").await { s.color_accent_secondary = v; }
     if let Some(v) = get_setting(pool, "color_bg").await { s.color_bg = v; }
+    if let Some(v) = get_setting(pool, "color_bg_secondary").await { s.color_bg_secondary = v; }
+    if let Some(v) = get_setting(pool, "color_bg_hover").await { s.color_bg_hover = v; }
     if let Some(v) = get_setting(pool, "color_text").await { s.color_text = v; }
     if let Some(v) = get_setting(pool, "color_border").await { s.color_border = v; }
     if let Some(v) = get_setting(pool, "quiet_until").await { s.quiet_until = v; }
@@ -329,6 +337,8 @@ pub async fn save_settings(
     set_setting(pool.inner(), "color_accent", &settings.color_accent).await?;
     set_setting(pool.inner(), "color_accent_secondary", &settings.color_accent_secondary).await?;
     set_setting(pool.inner(), "color_bg", &settings.color_bg).await?;
+    set_setting(pool.inner(), "color_bg_secondary", &settings.color_bg_secondary).await?;
+    set_setting(pool.inner(), "color_bg_hover", &settings.color_bg_hover).await?;
     set_setting(pool.inner(), "color_text", &settings.color_text).await?;
     set_setting(pool.inner(), "color_border", &settings.color_border).await?;
     // Notification pause: empty means off; otherwise only valid RFC3339
@@ -455,6 +465,20 @@ mod db_tests {
         set_setting(&pool, "color_accent_secondary", "#f43f5e").await.unwrap();
         let s = load_settings_raw(&pool).await.unwrap();
         assert_eq!(s.color_accent_secondary, "#f43f5e");
+    }
+
+    #[tokio::test]
+    async fn neutral_surface_colours_default_empty_and_roundtrip() {
+        let pool = test_pool().await;
+        let s = load_settings_raw(&pool).await.unwrap();
+        assert_eq!(s.color_bg_secondary, "", "неустановленный фон сайдбара — пустая строка, а не цвет");
+        assert_eq!(s.color_bg_hover, "", "неустановленный фон наведения — пустая строка, а не цвет");
+
+        set_setting(&pool, "color_bg_secondary", "#f4f2f8").await.unwrap();
+        set_setting(&pool, "color_bg_hover", "#eae7f2").await.unwrap();
+        let s = load_settings_raw(&pool).await.unwrap();
+        assert_eq!(s.color_bg_secondary, "#f4f2f8");
+        assert_eq!(s.color_bg_hover, "#eae7f2");
     }
 
     #[tokio::test]

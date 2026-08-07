@@ -208,6 +208,8 @@ export interface AppSettings {
   color_accent: string;
   color_accent_secondary: string; // the second accent (the .btn-primary gradient); empty means equal to color_accent
   color_bg: string;
+  color_bg_secondary: string; // the sidebar and second-plane surfaces (--bg-secondary)
+  color_bg_hover: string; // the hover fill of rows and ghost buttons (--bg-hover)
   color_text: string;
   color_border: string;
   quiet_until: string; // RFC3339; empty means off; a distant date means indefinite

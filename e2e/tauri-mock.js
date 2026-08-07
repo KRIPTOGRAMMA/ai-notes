@@ -30,6 +30,8 @@
     color_accent: "",
     color_accent_secondary: "",
     color_bg: "",
+    color_bg_secondary: "",
+    color_bg_hover: "",
     color_text: "",
     color_border: "",
     quiet_until: "",

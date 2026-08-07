@@ -76,6 +76,21 @@ describe("applyTheme", () => {
     expect(document.documentElement.style.getPropertyValue("--accent")).toBe("");
     expect(document.documentElement.style.getPropertyValue("--accent-hover")).toBe("");
   });
+
+  it("фон сайдбара и фон наведения доезжают до своих переменных", () => {
+    applyTheme("light", { color_bg_secondary: "#f4f2f8", color_bg_hover: "#eae7f2" });
+    const root = document.documentElement;
+    expect(root.style.getPropertyValue("--bg-secondary")).toBe("#f4f2f8");
+    expect(root.style.getPropertyValue("--bg-hover")).toBe("#eae7f2");
+  });
+
+  it("пустые фоны сайдбара и наведения возвращают CSS-дефолт", () => {
+    applyTheme("light", { color_bg_secondary: "#f4f2f8", color_bg_hover: "#eae7f2" });
+    applyTheme("light", { color_bg_secondary: "", color_bg_hover: "" });
+    const root = document.documentElement;
+    expect(root.style.getPropertyValue("--bg-secondary")).toBe("");
+    expect(root.style.getPropertyValue("--bg-hover")).toBe("");
+  });
 });
 
 describe("applyCachedTheme", () => {

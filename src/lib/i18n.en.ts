@@ -708,6 +708,8 @@ export const EN: Record<string, string> = {
   "Фокус-режим: авто-пауза уведомлений на время помодоро-работы и активных тайм-блоков": "Focus mode: auto-pause notifications during pomodoro work and active time blocks",
   "фолбэк": "fallback",
   "Фон": "Background",
+  "Фон наведения": "Hover background",
+  "Фон сайдбара": "Sidebar background",
   "Цвет категории": "Category colour",
   "Цвет нового статуса": "New status colour",
   "Цвет новой категории": "New category colour",

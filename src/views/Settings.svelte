@@ -58,6 +58,8 @@
     settings.color_accent = "";
     settings.color_accent_secondary = "";
     settings.color_bg = "";
+    settings.color_bg_secondary = "";
+    settings.color_bg_hover = "";
     settings.color_text = "";
     settings.color_border = "";
     previewTheme();
@@ -83,6 +85,8 @@
     color_accent: "",
     color_accent_secondary: "",
     color_bg: "",
+    color_bg_secondary: "",
+    color_bg_hover: "",
     color_text: "",
     color_border: "",
     quiet_until: "",
@@ -723,7 +727,7 @@
     </div>
 
     <div class="color-grid">
-      {#each [["color_accent",t("Акцент")],["color_accent_secondary",t("Доп. акцент")],["color_bg",t("Фон")],["color_text",t("Текст")],["color_border",t("Границы")]] as [key, label]}
+      {#each [["color_accent",t("Акцент")],["color_accent_secondary",t("Доп. акцент")],["color_bg",t("Фон")],["color_bg_secondary",t("Фон сайдбара")],["color_bg_hover",t("Фон наведения")],["color_text",t("Текст")],["color_border",t("Границы")]] as [key, label]}
         <label class="check">
           <input type="color"
             value={(settings as any)[key] || "#6366f1"}

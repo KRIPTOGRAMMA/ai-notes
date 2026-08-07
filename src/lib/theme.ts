@@ -9,6 +9,8 @@ export interface ThemeColors {
   color_accent: string;
   color_accent_secondary: string;
   color_bg: string;
+  color_bg_secondary: string;
+  color_bg_hover: string;
   color_text: string;
   color_border: string;
 }
@@ -53,6 +55,8 @@ function applyColors(colors: Partial<ThemeColors>) {
   // The second accent: empty means equal to the first (the .btn-primary gradient degenerates into a solid colour).
   set("--accent-secondary", colors.color_accent_secondary?.trim() ? colors.color_accent_secondary : colors.color_accent);
   set("--bg-primary", colors.color_bg);
+  set("--bg-secondary", colors.color_bg_secondary);
+  set("--bg-hover", colors.color_bg_hover);
   set("--text-primary", colors.color_text);
   set("--border", colors.color_border);
 }
