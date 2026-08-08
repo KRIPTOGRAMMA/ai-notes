@@ -200,12 +200,69 @@ pub fn start_activity_loop(
     });
 }
 
+// How long after one "welcome back" the next one stays silent.
+pub const RETURN_COOLDOWN_MINS: i64 = 90;
+
+// How much of a task title a notification body carries.
+pub const TASK_TITLE_MAX: usize = 40;
+
+// Cuts by characters, not bytes: a title is free text and cutting mid-codepoint
+// would panic on the first Cyrillic one.
+pub fn ellipsize(s: &str, max: usize) -> String {
+    let mut out: String = s.chars().take(max).collect();
+    if s.chars().count() > max {
+        out.push('…');
+    }
+    out
+}
+
+// Whether the same reminder is still fresh. Pure logic, split out from the query
+// so the boundary can be tested without a DB.
+pub fn is_within_cooldown(
+    last_sent: Option<chrono::DateTime<Utc>>,
+    now: chrono::DateTime<Utc>,
+    cooldown_mins: i64,
+) -> bool {
+    match last_sent {
+        // A clock that jumped backwards would otherwise mute the reminder for as
+        // long as the jump lasted, so only a forward distance counts.
+        Some(t) => (now - t).num_minutes() < cooldown_mins && now >= t,
+        None => false,
+    }
+}
+
+// The last activity_return entry is read from notification_log — the sending
+// history is already there, so this needs neither a new table nor a setting.
+async fn returned_recently(pool: &SqlitePool) -> bool {
+    let last: Option<String> = sqlx::query_scalar(
+        "SELECT created_at FROM notification_log
+         WHERE kind = 'activity_return'
+         ORDER BY created_at DESC LIMIT 1",
+    )
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten();
+
+    let parsed = last
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok())
+        .map(|t| t.with_timezone(&Utc));
+
+    is_within_cooldown(parsed, Utc::now(), RETURN_COOLDOWN_MINS)
+}
+
 // The notification shown on returning from idleness: the top task is the one
 // with the nearest deadline, then the highest priority. Nothing is sent if the
 // user was away only briefly.
 async fn notify_return(app: &tauri::AppHandle, pool: &SqlitePool, away_mins: i64) {
     let min_mins = crate::commands::settings::get_u64_setting(pool, "idle_notify_min_mins", 10).await;
     if away_mins < min_mins as i64 {
+        return;
+    }
+    // Every trip away from the desk crosses the threshold, so without a cooldown
+    // a normal working day produces one of these every quarter of an hour, each
+    // repeating the same task title. The reminder is only useful the first time.
+    if returned_recently(pool).await {
         return;
     }
 
@@ -224,6 +281,10 @@ async fn notify_return(app: &tauri::AppHandle, pool: &SqlitePool, away_mins: i64
 
     let lang = crate::i18n::current_lang(pool).await;
     let mins = away_mins.to_string();
+    // Task titles are free text and routinely run to a sentence or more. Pasted
+    // whole into a notification body they push the actual message off screen and
+    // read as a leak of something internal rather than as a reminder.
+    let in_progress = in_progress.as_deref().map(|t| ellipsize(t, TASK_TITLE_MAX));
     let body = match in_progress {
         Some(title) => crate::i18n::tr_args(
             "Вы отсутствовали {n} мин. Продолжим задачу «{task}» или сделаем перерыв?",
@@ -231,7 +292,7 @@ async fn notify_return(app: &tauri::AppHandle, pool: &SqlitePool, away_mins: i64
         None => match nearest_task(pool, &["Todo", "InProgress"]).await {
             Some(title) => crate::i18n::tr_args(
                 "Вы отсутствовали {n} мин. Ближайшая задача: {task}",
-                lang, &[("n", mins), ("task", title)]),
+                lang, &[("n", mins), ("task", ellipsize(&title, TASK_TITLE_MAX))]),
             None => crate::i18n::tr_args(
                 "Вы отсутствовали {n} мин. С возвращением!", lang, &[("n", mins)]),
         },
@@ -454,5 +515,50 @@ mod tests {
         let pool = test_pool().await;
         insert_task(&pool, "выполнена", "Done", None).await;
         assert_eq!(nearest_task(&pool, &["InProgress"]).await, None);
+    }
+
+    // Every trip away from the desk past the threshold produced a notification:
+    // four of them in 45 minutes, all repeating the same task title.
+    #[test]
+    fn a_second_welcome_back_stays_silent_within_the_cooldown() {
+        let now = Utc::now();
+        let sent = |mins| Some(now - chrono::Duration::minutes(mins));
+
+        assert!(is_within_cooldown(sent(15), now, RETURN_COOLDOWN_MINS),
+            "через 15 минут после прошлого — молчим");
+        assert!(is_within_cooldown(sent(RETURN_COOLDOWN_MINS - 1), now, RETURN_COOLDOWN_MINS),
+            "за минуту до конца окна — ещё молчим");
+        assert!(!is_within_cooldown(sent(RETURN_COOLDOWN_MINS), now, RETURN_COOLDOWN_MINS),
+            "ровно на границе окно закончилось");
+        assert!(!is_within_cooldown(sent(240), now, RETURN_COOLDOWN_MINS),
+            "через четыре часа — снова уведомляем");
+        assert!(!is_within_cooldown(None, now, RETURN_COOLDOWN_MINS),
+            "первое уведомление за всё время");
+    }
+
+    #[test]
+    fn a_clock_jumped_backwards_does_not_mute_the_reminder() {
+        // A timestamp from the future (a clock change, a hand-edited row) would
+        // otherwise mute the reminder for the whole length of the jump.
+        let now = Utc::now();
+        let future = Some(now + chrono::Duration::hours(5));
+        assert!(!is_within_cooldown(future, now, RETURN_COOLDOWN_MINS));
+    }
+
+    #[test]
+    fn a_long_task_title_is_cut_and_multibyte_safe() {
+        // A real title from the user's DB: pasted whole it pushed the message
+        // itself out of the notification.
+        let title = "SMART-формат задачи: чёткая цель, измеримый результат, срок. \
+                     Только результат, без пояснений";
+        let cut = ellipsize(title, TASK_TITLE_MAX);
+        assert_eq!(cut.chars().count(), TASK_TITLE_MAX + 1, "40 символов плюс многоточие");
+        assert!(cut.ends_with('…'));
+
+        // A short title is left alone, with no ellipsis appended.
+        assert_eq!(ellipsize("Купить билеты", TASK_TITLE_MAX), "Купить билеты");
+        // Exactly at the boundary — still no ellipsis.
+        let exact: String = "я".repeat(TASK_TITLE_MAX);
+        assert_eq!(ellipsize(&exact, TASK_TITLE_MAX), exact);
     }
 }
